@@ -1,0 +1,151 @@
+'use server'
+
+// Baixa e edição de parcelas.
+// §3 regras-financeiras: REGRA ÚNICA, dois pontos de entrada idênticos.
+// ⚠️ NÃO gerar próxima parcela recorrente aqui — responsabilidade do scheduler (Sprint 8).
+
+import { createClient } from '@/lib/supabase/server'
+import { revalidatePath } from 'next/cache'
+import { redirect } from 'next/navigation'
+
+// ── Cobrança manual via WhatsApp ─────────────────────────────────────────────
+// Cria notificacoes_enviadas com tipo='manual', status='fila'.
+// Sem idempotência — reenvio é intencional (0003 exclui 'manual' da constraint).
+export async function cobrarManualAction(formData: FormData) {
+  const parcelaId = formData.get('parcela_id') as string
+  const supabase  = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Não autenticado.')
+
+  const { data: parcela } = await supabase
+    .from('parcelas')
+    .select('id, conta_id, cliente_id, cobranca_id')
+    .eq('id', parcelaId)
+    .single()
+  if (!parcela) throw new Error('Parcela não encontrada.')
+
+  await supabase.from('notificacoes_enviadas').insert({
+    conta_id:    parcela.conta_id,
+    parcela_id:  parcela.id,
+    cobranca_id: parcela.cobranca_id,
+    cliente_id:  parcela.cliente_id,
+    tipo:        'manual',
+    canal:       'whatsapp',
+    status:      'fila',
+    agendado_para: new Date().toISOString(),
+  })
+
+  revalidatePath(`/cobrancas/${parcela.cobranca_id}`)
+}
+
+export type ActionState = { error: string | null; success?: boolean }
+
+async function requireUser() {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Não autenticado.')
+  return { supabase, userId: user.id }
+}
+
+// ── Dar baixa numa parcela ───────────────────────────────────────────────────
+// Efeitos atômicos (§3):
+//   1. parcela.status = paga, data_pagamento = hoje
+//   2. Cria lancamento de entrada
+//   3. Cancela notificações em fila
+//   4. Se não-recorrente: fecha cobrança quando todas as parcelas estão pagas
+export async function baixarParcelaAction(formData: FormData) {
+  const parcelaId  = formData.get('parcela_id') as string
+  const redirectTo = (formData.get('redirect_to') as string) || null
+
+  const { supabase } = await requireUser()
+  const hoje = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }) // YYYY-MM-DD
+
+  // 1. Marcar como paga (RLS garante que só altera parcela da própria conta)
+  const { data: parcela, error: updErr } = await supabase
+    .from('parcelas')
+    .update({ status: 'paga', data_pagamento: hoje })
+    .eq('id', parcelaId)
+    .eq('status', 'aberta')  // idempotência: não baixar parcela já paga
+    .select('id, valor, conta_id, cobranca_id')
+    .single()
+
+  if (updErr || !parcela) {
+    // Já paga ou não encontrada — silencia (idempotência)
+    revalidatePath('/cobrancas')
+    if (redirectTo) redirect(redirectTo)
+    return
+  }
+
+  // 2. Lançamento de entrada (alimenta Dashboard)
+  await supabase.from('lancamentos').insert({
+    conta_id:   parcela.conta_id,
+    tipo:       'entrada',
+    origem:     'parcela',
+    parcela_id: parcela.id,
+    valor:      parcela.valor,
+    data:       hoje,
+  })
+
+  // 3. Cancelar notificações em fila desta parcela (ambos os canais)
+  await supabase
+    .from('notificacoes_enviadas')
+    .update({ status: 'cancelado' })
+    .eq('parcela_id', parcelaId)
+    .eq('status', 'fila')
+
+  // 4. Fechar cobrança não-recorrente quando todas as parcelas estão pagas (A6)
+  const { data: cob } = await supabase
+    .from('cobrancas')
+    .select('recorrente')
+    .eq('id', parcela.cobranca_id)
+    .single()
+
+  if (cob && !(cob as any).recorrente) {
+    const { count } = await supabase
+      .from('parcelas')
+      .select('*', { count: 'exact', head: true })
+      .eq('cobranca_id', parcela.cobranca_id)
+      .neq('status', 'paga')
+
+    if ((count ?? 1) === 0) {
+      await supabase
+        .from('cobrancas')
+        .update({ status: 'concluida' })
+        .eq('id', parcela.cobranca_id)
+    }
+  }
+  // ⚠️ Recorrente: NÃO gerar próxima parcela aqui.
+  //    O scheduler (Sprint 8) varre por data e mantém 1 parcela aberta à frente.
+
+  revalidatePath('/cobrancas')
+  revalidatePath(`/cobrancas/${parcela.cobranca_id}`)
+  if (redirectTo) redirect(redirectTo)
+}
+
+// ── Editar parcela (vencimento, valor, observação) ───────────────────────────
+export async function editarParcelaAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parcelaId     = formData.get('parcela_id') as string
+  const dataVencimento = formData.get('data_vencimento') as string
+  const valorStr      = (formData.get('valor') as string).replace(',', '.')
+  const observacao    = (formData.get('observacao') as string)?.trim() || null
+
+  const valor = parseFloat(valorStr)
+  if (isNaN(valor) || valor <= 0) return { error: 'Valor inválido.' }
+  if (!dataVencimento)             return { error: 'Data de vencimento obrigatória.' }
+
+  const { supabase } = await requireUser()
+
+  const { error } = await supabase
+    .from('parcelas')
+    .update({ data_vencimento: dataVencimento, valor, observacao })
+    .eq('id', parcelaId)
+    .eq('status', 'aberta')  // não editar parcela já paga
+
+  if (error) return { error: error.message }
+
+  revalidatePath('/cobrancas')
+  return { error: null, success: true }
+}

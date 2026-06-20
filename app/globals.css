@@ -1,0 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Tokens do design-system Quita — dark fintech.
+   REGRA: toda cor no JSX/TSX referencia estes tokens via classe Tailwind,
+   nunca hex direto no código. */
+:root {
+  /* Fundo e superfícies (camadas de profundidade) */
+  --bg:            #0B0F17;
+  --surface:       #121826;
+  --surface-2:     #1A2233;
+  --border:        #243047;
+
+  /* Texto */
+  --text:          #E6EAF2;
+  --text-muted:    #9AA6BD;
+  --text-subtle:   #64718C;
+
+  /* Primária — azul confiança (ações, foco, links) */
+  --primary:       #3B82F6;
+  --primary-hover: #2F73E0;
+  --primary-fg:    #FFFFFF;
+
+  /* Status financeiro — EXCLUSIVO para pago/a vencer/vencido */
+  --success:       #10B981;
+  --warning:       #F59E0B;
+  --danger:        #EF4444;
+  --success-bg:    rgba(16, 185, 129, 0.13);
+  --warning-bg:    rgba(245, 158, 11, 0.13);
+  --danger-bg:     rgba(239, 68, 68, 0.13);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  body {
+    background-color: var(--bg);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* Utilitário: valores monetários tabulares e sem quebra de linha */
+.monetary {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
