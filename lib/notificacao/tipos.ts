@@ -1,16 +1,17 @@
-// Metadados dos 8 tipos fixos de notificação (PRD §6.5).
+// Metadados dos tipos de notificação (PRD §6.5).
 // Os DIAS são fixos e não editáveis. Editável: conteúdo por canal, horário,
 // ativo/desativo por canal independentemente.
 
 export const NOTIF_TIPOS = [
-  { tipo: '5d',        label: '5 dias antes',      desc: 'Enviado 5 dias antes do vencimento' },
-  { tipo: '3d',        label: '3 dias antes',      desc: 'Enviado 3 dias antes do vencimento' },
-  { tipo: '2d',        label: '2 dias antes',      desc: 'Enviado 2 dias antes do vencimento' },
-  { tipo: '1d',        label: '1 dia antes',       desc: 'Enviado 1 dia antes do vencimento' },
-  { tipo: 'dia',       label: 'No dia',            desc: 'Enviado no dia do vencimento' },
-  { tipo: 'vencido1d', label: '1 dia após',        desc: 'Enviado se a parcela não foi paga' },
-  { tipo: 'manual',    label: 'Cobrança manual',   desc: 'Disparado pelo botão WhatsApp na parcela' },
-  { tipo: 'boasvindas', label: 'Boas-vindas',      desc: 'Enviado ao cadastrar nova cobrança (opcional)' },
+  { tipo: '5d',                  label: '5 dias antes',          desc: 'Enviado 5 dias antes do vencimento' },
+  { tipo: '3d',                  label: '3 dias antes',          desc: 'Enviado 3 dias antes do vencimento' },
+  { tipo: '2d',                  label: '2 dias antes',          desc: 'Enviado 2 dias antes do vencimento' },
+  { tipo: '1d',                  label: '1 dia antes',           desc: 'Enviado 1 dia antes do vencimento' },
+  { tipo: 'dia',                 label: 'No dia',                desc: 'Enviado no dia do vencimento' },
+  { tipo: 'vencido1d',           label: '1 dia após',            desc: 'Enviado se a parcela não foi paga' },
+  { tipo: 'manual',              label: 'Cobrança manual',       desc: 'Disparado pelo botão WhatsApp na parcela' },
+  { tipo: 'boasvindas',          label: 'Boas-vindas',           desc: 'Enviado ao cadastrar nova cobrança (opcional)' },
+  { tipo: 'pagamento_confirmado', label: 'Pagamento confirmado', desc: 'Enviado ao dar baixa numa parcela' },
 ] as const
 
 export type NotifTipo = (typeof NOTIF_TIPOS)[number]['tipo']
@@ -93,5 +94,12 @@ export const NOTIF_DEFAULTS: {
     template_whatsapp: '#SAUDACAO# #NOME#! Seu cadastro foi realizado! 🎉\n\nVocê receberá lembretes sobre sua mensalidade de *#VALOR#*.\n\n💳 Para pagar via Pix: #PIX#',
     assunto_email:     'Bem-vindo! Cadastro realizado',
     template_email:    '#SAUDACAO# #NOME#!\n\nSeu cadastro foi realizado com sucesso!\n\nVocê receberá lembretes sobre sua mensalidade de #VALOR#.\n\nPix: #PIX#\n\nBem-vindo!',
+  },
+  {
+    tipo:              'pagamento_confirmado',
+    horario:           '10:00',
+    template_whatsapp: '#SAUDACAO# #NOME#! ✅ Recebemos seu pagamento de *#VALOR#* (vencimento em #VENCIMENTO#). Obrigado! 🙏',
+    assunto_email:     'Pagamento recebido — Obrigado!',
+    template_email:    '#SAUDACAO# #NOME#!\n\nSeu pagamento de #VALOR# (vencimento em #VENCIMENTO#) foi registrado com sucesso.\n\nObrigado!',
   },
 ]

@@ -66,7 +66,7 @@ export async function baixarParcelaAction(formData: FormData) {
     .update({ status: 'paga', data_pagamento: hoje })
     .eq('id', parcelaId)
     .eq('status', 'aberta')  // idempotência: não baixar parcela já paga
-    .select('id, valor, conta_id, cobranca_id')
+    .select('id, valor, conta_id, cobranca_id, cliente_id')
     .single()
 
   if (updErr || !parcela) {
@@ -92,6 +92,20 @@ export async function baixarParcelaAction(formData: FormData) {
     .update({ status: 'cancelado' })
     .eq('parcela_id', parcelaId)
     .eq('status', 'fila')
+
+  // Enfileirar confirmação de pagamento via WhatsApp (imediato)
+  if ((parcela as any).cliente_id) {
+    await supabase.from('notificacoes_enviadas').insert({
+      conta_id:     parcela.conta_id,
+      parcela_id:   parcela.id,
+      cobranca_id:  parcela.cobranca_id,
+      cliente_id:   (parcela as any).cliente_id,
+      tipo:         'pagamento_confirmado',
+      canal:        'whatsapp',
+      status:       'fila',
+      agendado_para: new Date().toISOString(),
+    })
+  }
 
   // 4. Fechar cobrança não-recorrente quando todas as parcelas estão pagas (A6)
   const { data: cob } = await supabase

@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { NOTIF_TIPOS } from '@/lib/notificacao/tipos'
+import { NOTIF_DEFAULTS } from '@/lib/notificacao/tipos'
 import { toggleCanalAction, salvarTemplateAction, seedNotificacoesAction } from './_actions/notificacao'
 
 const TEXTAREA = 'w-full rounded-md border border-border bg-input px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary resize-none'
@@ -23,14 +24,15 @@ const PER_PAGE_OPTIONS = [10, 25, 50]
 
 // Badge de cor por tipo
 const TIPO_META: Record<string, { label: string; cls: string }> = {
-  '5d':         { label: '5 dias antes',    cls: 'bg-warning/20 text-warning' },
-  '3d':         { label: '3 dias antes',    cls: 'bg-warning/20 text-warning' },
-  '2d':         { label: '2 dias antes',    cls: 'bg-warning/20 text-warning' },
-  '1d':         { label: '1 dia antes',     cls: 'bg-warning/20 text-warning' },
-  'dia':        { label: 'No dia',          cls: 'bg-primary/20 text-primary' },
-  'vencido1d':  { label: 'Vencida',         cls: 'bg-destructive/20 text-destructive' },
-  'manual':     { label: 'Cobrança manual', cls: 'bg-primary/20 text-primary' },
-  'boasvindas': { label: 'Boas-vindas',     cls: 'bg-success/20 text-success' },
+  '5d':                   { label: '5 dias antes',          cls: 'bg-warning/20 text-warning' },
+  '3d':                   { label: '3 dias antes',          cls: 'bg-warning/20 text-warning' },
+  '2d':                   { label: '2 dias antes',          cls: 'bg-warning/20 text-warning' },
+  '1d':                   { label: '1 dia antes',           cls: 'bg-warning/20 text-warning' },
+  'dia':                  { label: 'No dia',                cls: 'bg-primary/20 text-primary' },
+  'vencido1d':            { label: 'Vencida',               cls: 'bg-destructive/20 text-destructive' },
+  'manual':               { label: 'Cobrança manual',       cls: 'bg-primary/20 text-primary' },
+  'boasvindas':           { label: 'Boas-vindas',           cls: 'bg-success/20 text-success' },
+  'pagamento_confirmado': { label: 'Pagamento confirmado',  cls: 'bg-success/20 text-success' },
 }
 
 // ── Formulário de edição (em Sheet) ─────────────────────────────────────────
@@ -142,7 +144,8 @@ export default function NotificacaoPage() {
     let { data } = await sb.from('notificacoes_config')
       .select('*').eq('conta_id', (conta as any).id).order('created_at')
 
-    if (!data?.length) {
+    // Seed se não existir nenhum config, ou se faltar algum tipo (novo tipo adicionado)
+    if (!data?.length || data.length < NOTIF_DEFAULTS.length) {
       await seedNotificacoesAction()
       const { data: seeded } = await sb.from('notificacoes_config')
         .select('*').eq('conta_id', (conta as any).id)
