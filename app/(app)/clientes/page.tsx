@@ -26,6 +26,13 @@ function hoje() {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' })
 }
 
+function proximoMes() {
+  const sp = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' })
+  const [ano, mes, dia] = sp.split('-').map(Number)
+  // mes é 1-indexed; Date usa 0-indexed, então new Date(ano, mes, dia) já é o mês seguinte
+  return new Date(ano, mes, dia, 12).toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' })
+}
+
 const INPUT =
   'w-full rounded-md border border-border bg-input px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary'
 const LABEL = 'block text-xs font-medium uppercase tracking-wide text-muted-foreground'
@@ -385,7 +392,7 @@ export default function ClientesPage() {
                 <div className="space-y-1.5">
                   <label className={LABEL}>Primeiro vencimento *</label>
                   <input type="date" name="primeiro_vencimento" required
-                    defaultValue={hoje()} min={hoje()} className={INPUT} />
+                    defaultValue={proximoMes()} min={hoje()} className={INPUT} />
                 </div>
 
                 <div className="space-y-1.5">
