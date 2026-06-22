@@ -5,9 +5,23 @@ import Link from 'next/link'
 import { X, Check, Eye, Trash2, CheckCircle } from 'lucide-react'
 import { baixarParcelaAction } from '../_actions/parcelas'
 import { cancelarCobrancaAction } from '../_actions/cobrancas'
-import { badgesCobranca, calcularStatusVisual, STATUS_VISUAL_CFG } from '@/lib/utils/parcelas'
+import { calcularStatusVisual, STATUS_VISUAL_CFG } from '@/lib/utils/parcelas'
 import { formatBRL, formatData } from '@/lib/utils/format'
 import { formatarCelular } from '@/lib/validations/celular'
+
+function diasAteVencimento(dataVencimento: string): number {
+  const hoje = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }))
+  hoje.setHours(0, 0, 0, 0)
+  const venc = new Date(dataVencimento + 'T00:00:00')
+  return Math.round((venc.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24))
+}
+
+function StatusBadge({ dataVencimento }: { dataVencimento: string }) {
+  const dias = diasAteVencimento(dataVencimento)
+  if (dias > 0)  return <span className="inline-flex rounded-full bg-success/20 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-success">Vencer em ({dias} dias)</span>
+  if (dias === 0) return <span className="inline-flex rounded-full bg-warning/20 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-warning">Vence hoje</span>
+  return <span className="inline-flex rounded-full bg-destructive/20 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-destructive">Vencido ({Math.abs(dias)} dias)</span>
+}
 
 type Parcela = {
   id: string
@@ -72,7 +86,6 @@ export function CobrancasTable({ cobrancas }: { cobrancas: CobrancaRow[] }) {
                 .filter(p => p.status === 'aberta')
                 .sort((a, b) => a.data_vencimento.localeCompare(b.data_vencimento))
               const proxima    = abertas[0] ?? null
-              const badges     = badgesCobranca(abertas)
               const cli        = c.clientes
               const pagas      = c.parcelas.filter(p => p.status === 'paga').length
               const total      = c.qtd_parcelas ?? c.parcelas.length
@@ -121,16 +134,10 @@ export function CobrancasTable({ cobrancas }: { cobrancas: CobrancaRow[] }) {
 
                   {/* Status */}
                   <td className="px-4 py-3">
-                    <div className="flex flex-wrap gap-1">
-                      {badges.length === 0
-                        ? <span className="text-xs text-muted-foreground">—</span>
-                        : badges.map(b => (
-                          <span key={b.label} className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${b.cls}`}>
-                            {b.label}
-                          </span>
-                        ))
-                      }
-                    </div>
+                    {proxima
+                      ? <StatusBadge dataVencimento={proxima.data_vencimento} />
+                      : <span className="text-xs text-muted-foreground">—</span>
+                    }
                   </td>
 
                   {/* Ações */}
