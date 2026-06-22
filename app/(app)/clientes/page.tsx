@@ -39,6 +39,16 @@ const INPUT =
   'w-full rounded-md border border-border bg-input px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary'
 const LABEL = 'block text-xs font-medium uppercase tracking-wide text-muted-foreground'
 
+function mascararCelular(raw: string): string {
+  let d = raw.replace(/\D/g, '')
+  if (d.startsWith('55') && d.length > 2) d = d.slice(2)
+  d = d.slice(0, 11)
+  if (d.length === 0)  return ''
+  if (d.length <= 2)   return `+55 (${d}`
+  if (d.length <= 7)   return `+55 (${d.slice(0, 2)}) ${d.slice(2)}`
+  return `+55 (${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`
+}
+
 export default function ClientesPage() {
   const [state,    formAction,    isPending]    = useActionState(criarClienteAction,        { error: null })
   const [stateCob, formActionCob, isPendingCob] = useActionState(criarCobrancaRapidaAction, { error: null })
@@ -61,6 +71,7 @@ export default function ClientesPage() {
   const [excluindoId, setExcluindoId]       = useState<string | null>(null)
   const [refresh, setRefresh]               = useState(0)
   const [pixPadrao, setPixPadrao]           = useState('—')
+  const [celularInput, setCelularInput]     = useState('')
 
   const totalPages = Math.ceil(total / perPage)
   const inicio     = total === 0 ? 0 : (page - 1) * perPage + 1
@@ -111,11 +122,17 @@ export default function ClientesPage() {
     return () => { cancelled = true }
   }, [page, perPage, busca, filtro, refresh])
 
+  function fecharSheetCliente() {
+    setSheetAberto(false)
+    setCelularInput('')
+  }
+
   // Após criar cliente → abre sheet de cobrança
   useEffect(() => {
     if (state.success && state.clienteId) {
       setSheetAberto(false)
       formRef.current?.reset()
+      setCelularInput('')
       setNovoClienteId(state.clienteId)
       setNovoClienteNome(state.clienteNome ?? '')
       setRecorrente(false)
@@ -463,11 +480,11 @@ export default function ClientesPage() {
       {/* ── Sheet — Cadastro de Cliente ────────────────────────────────────────── */}
       {sheetAberto && (
         <>
-          <div className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm" onClick={() => setSheetAberto(false)} />
+          <div className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm" onClick={fecharSheetCliente} />
           <div className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col bg-card shadow-2xl">
             <div className="flex items-center justify-between border-b border-border px-6 py-4">
               <h2 className="text-base font-semibold text-foreground">Cadastro de Cliente</h2>
-              <button onClick={() => setSheetAberto(false)} aria-label="Fechar"
+              <button onClick={fecharSheetCliente} aria-label="Fechar"
                 className="rounded-md p-1 text-muted-foreground transition hover:text-foreground">
                 <X className="h-5 w-5" />
               </button>
@@ -490,8 +507,15 @@ export default function ClientesPage() {
                 </div>
                 <div className="space-y-1.5">
                   <label className={LABEL}>Celular / WhatsApp *</label>
-                  <input type="text" name="celular" required placeholder="(11) 99999-9999" className={INPUT} />
-                  <p className="text-xs text-muted-foreground">Inclua o DDD.</p>
+                  <input
+                    type="text"
+                    name="celular"
+                    required
+                    value={celularInput}
+                    onChange={e => setCelularInput(mascararCelular(e.target.value))}
+                    placeholder="+55 (11) 99999-9999"
+                    className={INPUT}
+                  />
                 </div>
                 <div className="space-y-1.5">
                   <label className={LABEL}>E-mail</label>
@@ -508,7 +532,7 @@ export default function ClientesPage() {
                 {isPending && <Loader2 className="h-4 w-4 animate-spin" />}
                 {isPending ? 'Salvando...' : 'Cadastrar cliente'}
               </button>
-              <button type="button" onClick={() => setSheetAberto(false)}
+              <button type="button" onClick={fecharSheetCliente}
                 className="rounded-md border border-border px-4 py-2 text-sm text-muted-foreground transition hover:text-foreground">
                 Voltar
               </button>
