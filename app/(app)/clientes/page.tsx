@@ -4,20 +4,23 @@ import { useActionState, useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import {
   Search, Plus, ChevronLeft, ChevronRight,
-  ChevronsLeft, ChevronsRight, X, Loader2,
+  ChevronsLeft, ChevronsRight, X, Loader2, MessageCircle, Pencil, Trash2,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { formatarCelular } from '@/lib/validations/celular'
+import { formatBRL } from '@/lib/utils/format'
 import { criarClienteAction } from './_actions/clientes'
 import { criarCobrancaRapidaAction } from '../cobrancas/_actions/cobrancas'
 
 type Filtro = 'todos' | 'ativos' | 'inativos'
+type Cobranca = { id: string; valor_mensalidade: string; status: string }
 type Cliente = {
   id: string
   nome: string
   sobrenome: string
   celular: string
   email: string | null
+  cobrancas: Cobranca[]
 }
 
 const PER_PAGE_OPTIONS = [10, 25, 50]
@@ -29,7 +32,6 @@ function hoje() {
 function proximoMes() {
   const sp = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' })
   const [ano, mes, dia] = sp.split('-').map(Number)
-  // mes é 1-indexed; Date usa 0-indexed, então new Date(ano, mes, dia) já é o mês seguinte
   return new Date(ano, mes, dia, 12).toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' })
 }
 
@@ -43,37 +45,51 @@ export default function ClientesPage() {
   const formRef    = useRef<HTMLFormElement>(null)
   const formCobRef = useRef<HTMLFormElement>(null)
 
-  const [clientes, setClientes]     = useState<Cliente[]>([])
-  const [total, setTotal]           = useState(0)
-  const [loading, setLoading]       = useState(true)
-  const [filtro, setFiltro]         = useState<Filtro>('todos')
-  const [buscaInput, setBuscaInput] = useState('')
-  const [busca, setBusca]           = useState('')
-  const [page, setPage]             = useState(1)
-  const [perPage, setPerPage]       = useState(10)
+  const [clientes, setClientes]             = useState<Cliente[]>([])
+  const [total, setTotal]                   = useState(0)
+  const [loading, setLoading]               = useState(true)
+  const [filtro, setFiltro]                 = useState<Filtro>('todos')
+  const [buscaInput, setBuscaInput]         = useState('')
+  const [busca, setBusca]                   = useState('')
+  const [page, setPage]                     = useState(1)
+  const [perPage, setPerPage]               = useState(10)
   const [sheetAberto, setSheetAberto]       = useState(false)
   const [sheetCob, setSheetCob]             = useState(false)
   const [novoClienteId, setNovoClienteId]   = useState('')
   const [novoClienteNome, setNovoClienteNome] = useState('')
   const [recorrente, setRecorrente]         = useState(false)
   const [excluindoId, setExcluindoId]       = useState<string | null>(null)
-  const [refresh, setRefresh]       = useState(0)
+  const [refresh, setRefresh]               = useState(0)
+  const [pixPadrao, setPixPadrao]           = useState('—')
 
   const totalPages = Math.ceil(total / perPage)
   const inicio     = total === 0 ? 0 : (page - 1) * perPage + 1
   const fim        = Math.min(page * perPage, total)
 
-  // ── Buscar clientes ──────────────────────────────────────────────────────────
+  // PIX padrão da conta (uma vez)
+  useEffect(() => {
+    createClient()
+      .from('meios_pagamento')
+      .select('nome')
+      .eq('is_padrao', true)
+      .maybeSingle()
+      .then(({ data }) => { if (data) setPixPadrao(data.nome) })
+  }, [])
+
+  // Buscar clientes + cobranças
   useEffect(() => {
     let cancelled = false
-
     const run = async () => {
       setLoading(true)
       const sb = createClient()
 
       let query = sb
         .from('clientes')
-        .select('id, nome, sobrenome, celular, email', { count: 'exact' })
+        .select(
+          `id, nome, sobrenome, celular, email,
+           cobrancas(id, valor_mensalidade, status)`,
+          { count: 'exact' },
+        )
         .is('deleted_at', null)
         .order('nome', { ascending: true })
         .range((page - 1) * perPage, page * perPage - 1)
@@ -86,17 +102,16 @@ export default function ClientesPage() {
 
       const { data, count } = await query
       if (!cancelled) {
-        setClientes((data as Cliente[]) ?? [])
+        setClientes((data as unknown as Cliente[]) ?? [])
         setTotal(count ?? 0)
         setLoading(false)
       }
     }
-
     run()
     return () => { cancelled = true }
   }, [page, perPage, busca, filtro, refresh])
 
-  // ── Após criar cliente: fecha sheet 1 e abre sheet de cobrança ───────────────
+  // Após criar cliente → abre sheet de cobrança
   useEffect(() => {
     if (state.success && state.clienteId) {
       setSheetAberto(false)
@@ -109,15 +124,15 @@ export default function ClientesPage() {
     }
   }, [state.success])
 
-  // ── Após criar cobrança: fecha sheet 2 ───────────────────────────────────────
+  // Após criar cobrança
   useEffect(() => {
     if (stateCob.success) {
       setSheetCob(false)
       formCobRef.current?.reset()
+      setRefresh((r) => r + 1)
     }
   }, [stateCob.success])
 
-  // ── Handlers ─────────────────────────────────────────────────────────────────
   function handleBuscar(e: React.FormEvent) {
     e.preventDefault()
     setBusca(buscaInput)
@@ -130,8 +145,7 @@ export default function ClientesPage() {
   }
 
   async function handleExcluir(id: string) {
-    const sb = createClient()
-    await sb
+    await createClient()
       .from('clientes')
       .update({ deleted_at: new Date().toISOString() })
       .eq('id', id)
@@ -145,7 +159,6 @@ export default function ClientesPage() {
     setPage(1)
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────────
   return (
     <div className="p-8">
 
@@ -203,11 +216,8 @@ export default function ClientesPage() {
             />
           </div>
           {busca && (
-            <button
-              type="button"
-              onClick={handleLimparBusca}
-              className="rounded-md border border-border px-3 py-2 text-sm text-muted-foreground transition hover:text-foreground"
-            >
+            <button type="button" onClick={handleLimparBusca}
+              className="rounded-md border border-border px-3 py-2 text-sm text-muted-foreground transition hover:text-foreground">
               Limpar
             </button>
           )}
@@ -215,84 +225,124 @@ export default function ClientesPage() {
       </div>
 
       {/* Tabela */}
-      <div className="overflow-hidden rounded-lg border border-border">
-        <table className="w-full text-sm">
+      <div className="overflow-x-auto rounded-lg border border-border">
+        <table className="w-full min-w-[900px] text-sm">
           <thead className="border-b border-border bg-muted/40">
             <tr>
-              <th className="w-12 px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">#</th>
-              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Nome</th>
-              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Celular</th>
-              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">E-mail</th>
-              <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wide text-muted-foreground">Ações</th>
+              {['#', 'Nome', 'Cobranças', 'Total/mês', 'PIX padrão', 'Status', 'Celular', 'Ações'].map(h => (
+                <th key={h} className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  {h}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
             {loading ? (
               <tr>
-                <td colSpan={5} className="py-12 text-center text-muted-foreground">
+                <td colSpan={8} className="py-12 text-center text-muted-foreground">
                   <Loader2 className="mx-auto h-5 w-5 animate-spin" />
                 </td>
               </tr>
             ) : clientes.length === 0 ? (
               <tr>
-                <td colSpan={5} className="py-12 text-center text-sm text-muted-foreground">
-                  {busca
-                    ? 'Nenhum cliente encontrado para esta busca.'
-                    : 'Nenhum cliente cadastrado ainda.'}
+                <td colSpan={8} className="py-12 text-center text-sm text-muted-foreground">
+                  {busca ? 'Nenhum cliente encontrado para esta busca.' : 'Nenhum cliente cadastrado ainda.'}
                 </td>
               </tr>
             ) : (
-              clientes.map((c, i) => (
-                <tr key={c.id} className="bg-card transition-colors hover:bg-accent/20">
-                  <td className="px-4 py-3 text-xs text-muted-foreground">
-                    {(page - 1) * perPage + i + 1}
-                  </td>
-                  <td className="px-4 py-3 font-medium text-foreground">
-                    {c.nome} {c.sobrenome}
-                  </td>
-                  <td className="px-4 py-3 tabular-nums text-muted-foreground">
-                    {formatarCelular(c.celular)}
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground">
-                    {c.email ?? '—'}
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center justify-end gap-3">
-                      <Link
-                        href={`/clientes/${c.id}`}
-                        className="text-xs text-primary transition hover:opacity-80"
-                      >
-                        Editar
-                      </Link>
+              clientes.map((c, i) => {
+                const cobAtivas = (c.cobrancas ?? []).filter(cob => cob.status === 'ativa')
+                const totalMes  = cobAtivas.reduce((s, cob) => s + parseFloat(cob.valor_mensalidade), 0)
 
-                      {excluindoId === c.id ? (
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-xs text-muted-foreground">Excluir?</span>
-                          <button
-                            onClick={() => handleExcluir(c.id)}
-                            className="text-xs font-medium text-destructive hover:opacity-80"
-                          >
-                            Sim
-                          </button>
-                          <button
-                            onClick={() => setExcluindoId(null)}
-                            className="text-xs text-muted-foreground hover:opacity-80"
-                          >
-                            Não
-                          </button>
-                        </div>
+                return (
+                  <tr key={c.id} className="bg-card transition-colors hover:bg-accent/20">
+
+                    {/* # */}
+                    <td className="px-4 py-3 tabular-nums text-xs text-muted-foreground">
+                      {(page - 1) * perPage + i + 1}
+                    </td>
+
+                    {/* Nome */}
+                    <td className="px-4 py-3">
+                      <p className="font-medium text-foreground">{c.nome} {c.sobrenome}</p>
+                      {c.email && <p className="text-xs text-muted-foreground">{c.email}</p>}
+                    </td>
+
+                    {/* Cobranças ativas */}
+                    <td className="px-4 py-3">
+                      {cobAtivas.length > 0 ? (
+                        <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-primary/20 text-xs font-bold text-primary">
+                          {cobAtivas.length}
+                        </span>
                       ) : (
-                        <button
-                          onClick={() => setExcluindoId(c.id)}
-                          className="text-xs text-destructive transition hover:opacity-70"
-                        >
-                          Excluir
-                        </button>
+                        <span className="text-xs text-muted-foreground">—</span>
                       )}
-                    </div>
-                  </td>
-                </tr>
-              ))
+                    </td>
+
+                    {/* Total/mês */}
+                    <td className="monetary px-4 py-3 font-medium text-foreground">
+                      {totalMes > 0 ? formatBRL(totalMes) : <span className="text-muted-foreground text-xs">—</span>}
+                    </td>
+
+                    {/* PIX padrão */}
+                    <td className="px-4 py-3 text-sm text-muted-foreground">
+                      {pixPadrao}
+                    </td>
+
+                    {/* Status */}
+                    <td className="px-4 py-3">
+                      <span className="inline-flex rounded-full bg-success/20 px-2.5 py-0.5 text-xs font-semibold text-success">
+                        Ativo
+                      </span>
+                    </td>
+
+                    {/* Celular — abre WhatsApp */}
+                    <td className="px-4 py-3">
+                      <a
+                        href={`https://wa.me/55${c.celular.replace(/\D/g, '')}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Abrir no WhatsApp"
+                        className="inline-flex items-center gap-1.5 rounded-md bg-[#25D366] px-2.5 py-1 text-xs font-medium text-white transition hover:opacity-90"
+                      >
+                        <MessageCircle className="h-3.5 w-3.5" />
+                        {formatarCelular(c.celular)}
+                      </a>
+                    </td>
+
+                    {/* Ações */}
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <Link
+                          href={`/clientes/${c.id}`}
+                          title="Editar"
+                          className="flex h-7 w-7 items-center justify-center rounded-md bg-warning/20 text-warning transition hover:opacity-80"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Link>
+
+                        {excluindoId === c.id ? (
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs text-muted-foreground">Excluir?</span>
+                            <button onClick={() => handleExcluir(c.id)}
+                              className="text-xs font-medium text-destructive hover:opacity-80">Sim</button>
+                            <button onClick={() => setExcluindoId(null)}
+                              className="text-xs text-muted-foreground hover:opacity-80">Não</button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => setExcluindoId(c.id)}
+                            title="Excluir"
+                            className="flex h-7 w-7 items-center justify-center rounded-md bg-destructive/20 text-destructive transition hover:opacity-80"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })
             )}
           </tbody>
         </table>
@@ -308,46 +358,28 @@ export default function ClientesPage() {
 
         {totalPages > 1 && (
           <div className="flex items-center gap-1">
-            <button
-              onClick={() => setPage(1)}
-              disabled={page === 1}
-              className="flex items-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs transition hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <ChevronsLeft className="h-3.5 w-3.5" />
-              Primeiro
+            <button onClick={() => setPage(1)} disabled={page === 1}
+              className="flex items-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs transition hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40">
+              <ChevronsLeft className="h-3.5 w-3.5" /> Primeiro
             </button>
-            <button
-              onClick={() => setPage((p) => p - 1)}
-              disabled={page === 1}
-              className="flex items-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs transition hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <ChevronLeft className="h-3.5 w-3.5" />
-              Anterior
+            <button onClick={() => setPage(p => p - 1)} disabled={page === 1}
+              className="flex items-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs transition hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40">
+              <ChevronLeft className="h-3.5 w-3.5" /> Anterior
             </button>
-            <span className="px-3 py-1.5 text-xs">
-              Pág. {page} de {totalPages}
-            </span>
-            <button
-              onClick={() => setPage((p) => p + 1)}
-              disabled={page === totalPages}
-              className="flex items-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs transition hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              Próximo
-              <ChevronRight className="h-3.5 w-3.5" />
+            <span className="px-3 py-1.5 text-xs">Pág. {page} de {totalPages}</span>
+            <button onClick={() => setPage(p => p + 1)} disabled={page === totalPages}
+              className="flex items-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs transition hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40">
+              Próximo <ChevronRight className="h-3.5 w-3.5" />
             </button>
-            <button
-              onClick={() => setPage(totalPages)}
-              disabled={page === totalPages}
-              className="flex items-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs transition hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              Último
-              <ChevronsRight className="h-3.5 w-3.5" />
+            <button onClick={() => setPage(totalPages)} disabled={page === totalPages}
+              className="flex items-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs transition hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40">
+              Último <ChevronsRight className="h-3.5 w-3.5" />
             </button>
           </div>
         )}
       </div>
 
-      {/* ── Sheet — Criar Cobrança ─────────────────────────────────────────────── */}
+      {/* ── Sheet — Criar Cobrança (pós-cadastro) ─────────────────────────────── */}
       {sheetCob && (
         <>
           <div className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm" onClick={() => setSheetCob(false)} />
@@ -362,10 +394,9 @@ export default function ClientesPage() {
                 <X className="h-5 w-5" />
               </button>
             </div>
-
             <div className="flex-1 overflow-y-auto px-6 py-5">
               <form id="nova-cobranca-form" ref={formCobRef} action={formActionCob} className="space-y-4">
-                <input type="hidden" name="cliente_id" value={novoClienteId} />
+                <input type="hidden" name="cliente_id"  value={novoClienteId} />
                 <input type="hidden" name="recorrente"  value={String(recorrente)} />
 
                 <div className="space-y-1.5">
@@ -398,7 +429,7 @@ export default function ClientesPage() {
                 <div className="space-y-1.5">
                   <label className={LABEL}>Observação</label>
                   <textarea name="observacao" rows={2} placeholder="Opcional..."
-                    className="w-full rounded-md border border-border bg-input px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary resize-none" />
+                    className="w-full resize-none rounded-md border border-border bg-input px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary" />
                 </div>
 
                 <div className="flex items-center gap-3 rounded-md border border-border bg-muted/30 px-3 py-3">
@@ -414,7 +445,6 @@ export default function ClientesPage() {
                 )}
               </form>
             </div>
-
             <div className="flex items-center gap-3 border-t border-border px-6 py-4">
               <button type="submit" form="nova-cobranca-form" disabled={isPendingCob}
                 className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50">
@@ -433,116 +463,53 @@ export default function ClientesPage() {
       {/* ── Sheet — Cadastro de Cliente ────────────────────────────────────────── */}
       {sheetAberto && (
         <>
-          {/* Backdrop */}
-          <div
-            className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
-            onClick={() => setSheetAberto(false)}
-          />
-
-          {/* Painel lateral */}
+          <div className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm" onClick={() => setSheetAberto(false)} />
           <div className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col bg-card shadow-2xl">
-            {/* Cabeçalho */}
             <div className="flex items-center justify-between border-b border-border px-6 py-4">
-              <h2 className="text-base font-semibold text-foreground">
-                Cadastro de Cliente
-              </h2>
-              <button
-                onClick={() => setSheetAberto(false)}
-                aria-label="Fechar"
-                className="rounded-md p-1 text-muted-foreground transition hover:text-foreground"
-              >
+              <h2 className="text-base font-semibold text-foreground">Cadastro de Cliente</h2>
+              <button onClick={() => setSheetAberto(false)} aria-label="Fechar"
+                className="rounded-md p-1 text-muted-foreground transition hover:text-foreground">
                 <X className="h-5 w-5" />
               </button>
             </div>
-
-            {/* Formulário */}
             <div className="flex-1 overflow-y-auto px-6 py-5">
-              <form
-                id="novo-cliente-form"
-                ref={formRef}
-                action={formAction}
-                className="space-y-4"
-              >
+              <form id="novo-cliente-form" ref={formRef} action={formAction} className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
                     <label className={LABEL}>Nome *</label>
-                    <input
-                      type="text"
-                      name="nome"
-                      required
-                      placeholder="João"
-                      className={INPUT}
-                    />
+                    <input type="text" name="nome" required placeholder="João" className={INPUT} />
                   </div>
                   <div className="space-y-1.5">
                     <label className={LABEL}>Sobrenome *</label>
-                    <input
-                      type="text"
-                      name="sobrenome"
-                      required
-                      placeholder="Silva"
-                      className={INPUT}
-                    />
+                    <input type="text" name="sobrenome" required placeholder="Silva" className={INPUT} />
                   </div>
                 </div>
-
                 <div className="space-y-1.5">
                   <label className={LABEL}>CPF</label>
-                  <input
-                    type="text"
-                    name="cpf"
-                    placeholder="000.000.000-00"
-                    maxLength={14}
-                    className={INPUT}
-                  />
+                  <input type="text" name="cpf" placeholder="000.000.000-00" maxLength={14} className={INPUT} />
                 </div>
-
                 <div className="space-y-1.5">
                   <label className={LABEL}>Celular / WhatsApp *</label>
-                  <input
-                    type="text"
-                    name="celular"
-                    required
-                    placeholder="(11) 99999-9999"
-                    className={INPUT}
-                  />
+                  <input type="text" name="celular" required placeholder="(11) 99999-9999" className={INPUT} />
                   <p className="text-xs text-muted-foreground">Inclua o DDD.</p>
                 </div>
-
                 <div className="space-y-1.5">
                   <label className={LABEL}>E-mail</label>
-                  <input
-                    type="email"
-                    name="email"
-                    placeholder="joao@email.com"
-                    className={INPUT}
-                  />
+                  <input type="email" name="email" placeholder="joao@email.com" className={INPUT} />
                 </div>
-
                 {state.error && (
-                  <p className="rounded-md bg-destructive-bg px-3 py-2 text-sm text-destructive">
-                    {state.error}
-                  </p>
+                  <p className="rounded-md bg-destructive-bg px-3 py-2 text-sm text-destructive">{state.error}</p>
                 )}
               </form>
             </div>
-
-            {/* Rodapé */}
             <div className="flex items-center gap-3 border-t border-border px-6 py-4">
-              <button
-                type="submit"
-                form="novo-cliente-form"
-                disabled={isPending}
-                className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
-              >
+              <button type="submit" form="novo-cliente-form" disabled={isPending}
+                className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50">
                 {isPending && <Loader2 className="h-4 w-4 animate-spin" />}
                 {isPending ? 'Salvando...' : 'Cadastrar cliente'}
               </button>
-              <button
-                type="button"
-                onClick={() => setSheetAberto(false)}
-                className="rounded-md border border-border px-4 py-2 text-sm text-muted-foreground transition hover:text-foreground"
-              >
+              <button type="button" onClick={() => setSheetAberto(false)}
+                className="rounded-md border border-border px-4 py-2 text-sm text-muted-foreground transition hover:text-foreground">
                 Voltar
               </button>
             </div>
