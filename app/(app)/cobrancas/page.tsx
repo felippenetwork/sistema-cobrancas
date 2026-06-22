@@ -31,7 +31,7 @@ export default async function CobrancasPage({
     supabase.from('clientes').select('*', { count: 'exact', head: true }).is('deleted_at', null),
 
     supabase.from('cobrancas').select(`
-      id, valor_mensalidade, recorrente, observacao,
+      id, valor_mensalidade, recorrente, qtd_parcelas, observacao, created_at,
       clientes!inner (id, nome, sobrenome, celular),
       parcelas (id, numero, valor, data_vencimento, status, data_pagamento)
     `).eq('status', 'ativa').order('created_at', { ascending: false }),

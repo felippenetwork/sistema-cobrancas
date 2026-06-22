@@ -2,8 +2,9 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { X, CheckCircle } from 'lucide-react'
+import { X, Check, Eye, Trash2, CheckCircle } from 'lucide-react'
 import { baixarParcelaAction } from '../_actions/parcelas'
+import { cancelarCobrancaAction } from '../_actions/cobrancas'
 import { badgesCobranca, calcularStatusVisual, STATUS_VISUAL_CFG } from '@/lib/utils/parcelas'
 import { formatBRL, formatData } from '@/lib/utils/format'
 import { formatarCelular } from '@/lib/validations/celular'
@@ -21,18 +22,21 @@ type CobrancaRow = {
   id: string
   valor_mensalidade: string
   recorrente: boolean
+  qtd_parcelas: number | null
   observacao: string | null
+  created_at: string
   clientes: { id: string; nome: string; sobrenome: string; celular: string }
   parcelas: Parcela[]
 }
 
 export function CobrancasTable({ cobrancas }: { cobrancas: CobrancaRow[] }) {
-  const [viewingId, setViewingId] = useState<string | null>(null)
+  const [viewingId, setViewingId]     = useState<string | null>(null)
+  const [cancelandoId, setCancelandoId] = useState<string | null>(null)
   const viewingCob = cobrancas.find(c => c.id === viewingId) ?? null
 
-  // Parcelas a exibir no sheet:
-  // - Recorrente: pagas (ordenadas) + próxima aberta
-  // - Fixas: todas ordenadas por número
+  // Parcelas no sheet:
+  // - Recorrente: pagas + próxima aberta
+  // - Fixas: todas ordenadas
   let parcelasVer: Parcela[] = []
   if (viewingCob) {
     const pagas = [...viewingCob.parcelas]
@@ -51,11 +55,11 @@ export function CobrancasTable({ cobrancas }: { cobrancas: CobrancaRow[] }) {
 
   return (
     <>
-      <div className="overflow-hidden rounded-lg border border-border">
-        <table className="w-full text-sm">
+      <div className="overflow-x-auto rounded-lg border border-border">
+        <table className="w-full min-w-[860px] text-sm">
           <thead className="border-b border-border bg-muted/30">
             <tr>
-              {['Cliente', 'Mensalidade', 'Próximo vencimento', 'Status', ''].map(h => (
+              {['Nome', 'Celular', 'Tipo', 'Mensalidade', 'Início', 'Próx. Venc.', 'Status', ''].map(h => (
                 <th key={h} className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   {h}
                 </th>
@@ -67,26 +71,59 @@ export function CobrancasTable({ cobrancas }: { cobrancas: CobrancaRow[] }) {
               const abertas = [...c.parcelas]
                 .filter(p => p.status === 'aberta')
                 .sort((a, b) => a.data_vencimento.localeCompare(b.data_vencimento))
-              const proxima = abertas[0] ?? null
-              const badges  = badgesCobranca(abertas)
-              const cli     = c.clientes
+              const proxima    = abertas[0] ?? null
+              const badges     = badgesCobranca(abertas)
+              const cli        = c.clientes
+              const pagas      = c.parcelas.filter(p => p.status === 'paga').length
+              const total      = c.qtd_parcelas ?? c.parcelas.length
+              const cancelando = cancelandoId === c.id
 
               return (
                 <tr key={c.id} className="bg-card transition-colors hover:bg-accent/20">
-                  <td className="px-4 py-3">
-                    <p className="font-medium text-foreground">{cli.nome} {cli.sobrenome}</p>
-                    <p className="text-xs text-muted-foreground">{formatarCelular(cli.celular)}</p>
+
+                  {/* Nome */}
+                  <td className="px-4 py-3 font-medium text-foreground">
+                    {cli.nome} {cli.sobrenome}
                   </td>
+
+                  {/* Celular */}
+                  <td className="monetary px-4 py-3 text-muted-foreground">
+                    {formatarCelular(cli.celular)}
+                  </td>
+
+                  {/* Tipo */}
+                  <td className="px-4 py-3">
+                    {c.recorrente ? (
+                      <span className="inline-flex rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
+                        Recorrente
+                      </span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground tabular-nums">
+                        {pagas}/{total} parc.
+                      </span>
+                    )}
+                  </td>
+
+                  {/* Mensalidade */}
                   <td className="monetary px-4 py-3 font-medium text-foreground">
                     {formatBRL(c.valor_mensalidade)}
                   </td>
+
+                  {/* Início */}
+                  <td className="monetary px-4 py-3 text-muted-foreground">
+                    {formatData(c.created_at)}
+                  </td>
+
+                  {/* Próx. Venc. */}
                   <td className="monetary px-4 py-3 text-muted-foreground">
                     {proxima ? formatData(proxima.data_vencimento) : '—'}
                   </td>
+
+                  {/* Status */}
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap gap-1">
                       {badges.length === 0
-                        ? <span className="text-xs text-muted-foreground">Sem parcelas</span>
+                        ? <span className="text-xs text-muted-foreground">—</span>
                         : badges.map(b => (
                           <span key={b.label} className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${b.cls}`}>
                             {b.label}
@@ -95,25 +132,58 @@ export function CobrancasTable({ cobrancas }: { cobrancas: CobrancaRow[] }) {
                       }
                     </div>
                   </td>
+
+                  {/* Ações */}
                   <td className="px-4 py-3">
-                    <div className="flex items-center justify-end gap-2">
+                    <div className="flex items-center justify-end gap-1.5">
+                      {/* Pago */}
                       {proxima && (
                         <form action={baixarParcelaAction}>
                           <input type="hidden" name="parcela_id" value={proxima.id} />
                           <button
                             type="submit"
-                            className="rounded-md bg-success-bg px-3 py-1.5 text-xs font-medium text-success transition hover:opacity-80"
+                            title="Marcar como pago"
+                            className="flex h-7 w-7 items-center justify-center rounded-md bg-success-bg text-success transition hover:opacity-80"
                           >
-                            Pago
+                            <Check className="h-3.5 w-3.5" />
                           </button>
                         </form>
                       )}
+
+                      {/* Ver */}
                       <button
                         onClick={() => setViewingId(c.id)}
-                        className="rounded-md bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary transition hover:bg-primary/20"
+                        title="Ver parcelas"
+                        className="flex h-7 w-7 items-center justify-center rounded-md bg-primary/10 text-primary transition hover:bg-primary/20"
                       >
-                        Ver
+                        <Eye className="h-3.5 w-3.5" />
                       </button>
+
+                      {/* Cancelar */}
+                      {cancelando ? (
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs text-muted-foreground">Cancelar?</span>
+                          <form action={cancelarCobrancaAction}>
+                            <input type="hidden" name="cobranca_id" value={c.id} />
+                            <button type="submit"
+                              className="text-xs font-medium text-destructive hover:opacity-80">
+                              Sim
+                            </button>
+                          </form>
+                          <button onClick={() => setCancelandoId(null)}
+                            className="text-xs text-muted-foreground hover:opacity-80">
+                            Não
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setCancelandoId(c.id)}
+                          title="Cancelar cobrança"
+                          className="flex h-7 w-7 items-center justify-center rounded-md bg-destructive-bg text-destructive transition hover:opacity-80"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -123,7 +193,7 @@ export function CobrancasTable({ cobrancas }: { cobrancas: CobrancaRow[] }) {
         </table>
       </div>
 
-      {/* Sheet — Ver parcelas */}
+      {/* ── Sheet — Ver parcelas ──────────────────────────────────────────────── */}
       {viewingCob && (
         <>
           <div
@@ -140,7 +210,7 @@ export function CobrancasTable({ cobrancas }: { cobrancas: CobrancaRow[] }) {
                   {formatBRL(viewingCob.valor_mensalidade)}/mês
                   {viewingCob.recorrente
                     ? ' · Recorrente'
-                    : ` · ${viewingCob.parcelas.length} parcela(s)`}
+                    : ` · ${viewingCob.qtd_parcelas ?? viewingCob.parcelas.length} parcela(s)`}
                   {viewingCob.observacao && ` · ${viewingCob.observacao}`}
                 </p>
               </div>
