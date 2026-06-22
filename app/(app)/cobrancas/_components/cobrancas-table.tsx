@@ -67,6 +67,16 @@ export function CobrancasTable({ cobrancas }: { cobrancas: CobrancaRow[] }) {
     }
   }
 
+  // Ordena por próximo vencimento crescente; sem parcelas abertas vai para o fim
+  const ordenadas = [...cobrancas].sort((a, b) => {
+    const pA = [...a.parcelas].filter(p => p.status === 'aberta').sort((x, y) => x.data_vencimento.localeCompare(y.data_vencimento))[0]
+    const pB = [...b.parcelas].filter(p => p.status === 'aberta').sort((x, y) => x.data_vencimento.localeCompare(y.data_vencimento))[0]
+    if (!pA && !pB) return 0
+    if (!pA) return 1
+    if (!pB) return -1
+    return pA.data_vencimento.localeCompare(pB.data_vencimento)
+  })
+
   return (
     <>
       <div className="overflow-x-auto rounded-lg border border-border">
@@ -81,7 +91,7 @@ export function CobrancasTable({ cobrancas }: { cobrancas: CobrancaRow[] }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {cobrancas.map((c) => {
+            {ordenadas.map((c) => {
               const abertas = [...c.parcelas]
                 .filter(p => p.status === 'aberta')
                 .sort((a, b) => a.data_vencimento.localeCompare(b.data_vencimento))
