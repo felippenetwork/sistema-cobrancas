@@ -82,12 +82,12 @@ export async function criarCobrancaAction(
       const { data: cli } = await supabase
         .from('clientes').select('id').eq('id', clienteId).single()
       if (cli) {
-        // Inserções por canal (só se o canal estiver ativo — verificado pelo worker)
+        const agora = new Date().toISOString()
         await supabase.from('notificacoes_enviadas').insert([
           { conta_id: contaId, cobranca_id: cob.id, cliente_id: clienteId,
-            tipo: 'boasvindas', canal: 'whatsapp', status: 'fila' },
+            tipo: 'boasvindas', canal: 'whatsapp', status: 'fila', agendado_para: agora },
           { conta_id: contaId, cobranca_id: cob.id, cliente_id: clienteId,
-            tipo: 'boasvindas', canal: 'email',    status: 'fila' },
+            tipo: 'boasvindas', canal: 'email',    status: 'fila', agendado_para: agora },
         ]).throwOnError()
       }
     }
@@ -157,11 +157,12 @@ export async function criarCobrancaRapidaAction(
     if (parcErr) return { error: parcErr.message }
 
     if (enviarBoasVindas) {
+      const agora = new Date().toISOString()
       await supabase.from('notificacoes_enviadas').insert([
         { conta_id: contaId, cobranca_id: cob.id, cliente_id: clienteId,
-          tipo: 'boasvindas', canal: 'whatsapp', status: 'fila' },
+          tipo: 'boasvindas', canal: 'whatsapp', status: 'fila', agendado_para: agora },
         { conta_id: contaId, cobranca_id: cob.id, cliente_id: clienteId,
-          tipo: 'boasvindas', canal: 'email',    status: 'fila' },
+          tipo: 'boasvindas', canal: 'email',    status: 'fila', agendado_para: agora },
       ])
     }
 
