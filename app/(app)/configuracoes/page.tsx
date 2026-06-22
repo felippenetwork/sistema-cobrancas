@@ -23,33 +23,37 @@ export default function ConfiguracoesPage() {
   const [localPart, setLocalPart] = useState('')
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
+  const loadData = async () => {
     const sb = createClient()
-    async function load() {
-      const { data: { user } } = await sb.auth.getUser()
-      if (!user) return
+    const { data: { user } } = await sb.auth.getUser()
+    if (!user) return
 
-      const [{ data: conta }, { data: plat }] = await Promise.all([
-        sb.from('contas').select('id').eq('owner_user_id', user.id).single(),
-        sb.from('plataforma_config').select('dominio_email_operador').single(),
-      ])
-      if (!conta) return
+    const [{ data: conta }, { data: plat }] = await Promise.all([
+      sb.from('contas').select('id').eq('owner_user_id', user.id).single(),
+      sb.from('plataforma_config').select('dominio_email_operador').single(),
+    ])
+    if (!conta) return
 
-      const [{ data: cfg }, { data: rem }] = await Promise.all([
-        sb.from('configuracoes').select('*').eq('conta_id', conta.id).maybeSingle(),
-        sb.from('email_remetente').select('*').eq('conta_id', conta.id).maybeSingle(),
-      ])
+    const [{ data: cfg }, { data: rem }] = await Promise.all([
+      sb.from('configuracoes').select('*').eq('conta_id', conta.id).maybeSingle(),
+      sb.from('email_remetente').select('*').eq('conta_id', conta.id).maybeSingle(),
+    ])
 
-      setData({
-        cfg:    (cfg as Record<string, string | null>) ?? {},
-        rem:    rem as Record<string, string | null> | null,
-        domain: (plat as any)?.dominio_email_operador ?? null,
-      })
-      setLocalPart((rem as any)?.local_part ?? '')
-      setLoading(false)
-    }
-    load()
-  }, [])
+    setData({
+      cfg:    (cfg as Record<string, string | null>) ?? {},
+      rem:    rem as Record<string, string | null> | null,
+      domain: (plat as any)?.dominio_email_operador ?? null,
+    })
+    setLocalPart((rem as any)?.local_part ?? '')
+    setLoading(false)
+  }
+
+  useEffect(() => { loadData() }, [])
+
+  // Recarrega os dados após salvar com sucesso
+  useEffect(() => {
+    if (state.success) loadData()
+  }, [state.success])
 
   const previewEmail = data?.domain && localPart
     ? `${sanitizarLocalPart(localPart)}@${data.domain}`
