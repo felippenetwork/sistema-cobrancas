@@ -190,11 +190,6 @@ export default function ConexaoPage() {
           )}
         </div>
 
-        {/* Nota informativa sobre o worker */}
-        <p className="text-xs text-muted-foreground">
-          A conexão é mantida pelo worker no VPS Vortexus. Esta tela mostra o estado em tempo real via Supabase Realtime.
-        </p>
-
       </div>
     </div>
   )
