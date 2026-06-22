@@ -1,9 +1,9 @@
 'use client'
 
 import { useActionState, useState, useEffect } from 'react'
-import { Loader2, CheckCircle, Star, Trash2 } from 'lucide-react'
+import { Loader2, CheckCircle, Star, Trash2, Pencil, X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { criarMeioAction, definirPadraoAction, excluirMeioAction } from './_actions/meios'
+import { criarMeioAction, editarMeioAction, definirPadraoAction, excluirMeioAction } from './_actions/meios'
 
 const INPUT = 'w-full rounded-md border border-border bg-input px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary focus:ring-offset-1 focus:ring-offset-card'
 const LABEL = 'block text-xs font-medium uppercase tracking-wide text-muted-foreground'
@@ -11,9 +11,13 @@ const LABEL = 'block text-xs font-medium uppercase tracking-wide text-muted-fore
 type Meio = { id: string; nome: string; mensagem: string; is_padrao: boolean }
 
 export default function TipoPagamentoPage() {
-  const [state, formAction, isPending] = useActionState(criarMeioAction, { error: null })
-  const [meios, setMeios]  = useState<Meio[]>([])
-  const [padrao, setPadrao] = useState(false)
+  const [stateNovo,  formActionNovo,  isPendingNovo]  = useActionState(criarMeioAction,  { error: null })
+  const [stateEdit,  formActionEdit,  isPendingEdit]  = useActionState(editarMeioAction, { error: null })
+  const [meios, setMeios]     = useState<Meio[]>([])
+  const [padrao, setPadrao]   = useState(false)
+  const [editando, setEditando] = useState<Meio | null>(null)
+  const [editPadrao, setEditPadrao] = useState(false)
+  const [excluindo, setExcluindo]   = useState<string | null>(null)
 
   async function fetchMeios() {
     const sb = createClient()
@@ -26,7 +30,13 @@ export default function TipoPagamentoPage() {
   }
 
   useEffect(() => { fetchMeios() }, [])
-  useEffect(() => { if (state.success) fetchMeios() }, [state.success])
+  useEffect(() => { if (stateNovo.success) { fetchMeios(); setPadrao(false) } }, [stateNovo.success])
+  useEffect(() => { if (stateEdit.success) { fetchMeios(); setEditando(null) } }, [stateEdit.success])
+
+  function abrirEdicao(m: Meio) {
+    setEditando(m)
+    setEditPadrao(m.is_padrao)
+  }
 
   return (
     <div className="p-8">
@@ -71,12 +81,31 @@ export default function TipoPagamentoPage() {
                             <button type="submit" className="text-xs text-primary hover:opacity-80">Definir padrão</button>
                           </form>
                         )}
-                        <form action={excluirMeioAction}>
-                          <input type="hidden" name="meio_id" value={m.id} />
-                          <button type="submit" className="rounded p-1 text-muted-foreground hover:text-destructive">
+                        <button
+                          onClick={() => abrirEdicao(m)}
+                          className="rounded p-1 text-muted-foreground hover:text-primary"
+                          aria-label="Editar"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        {excluindo === m.id ? (
+                          <div className="flex items-center gap-1">
+                            <span className="text-xs text-muted-foreground">Excluir?</span>
+                            <form action={excluirMeioAction} onSubmit={() => setExcluindo(null)}>
+                              <input type="hidden" name="meio_id" value={m.id} />
+                              <button type="submit" className="text-xs font-medium text-destructive hover:opacity-80">Sim</button>
+                            </form>
+                            <button onClick={() => setExcluindo(null)} className="text-xs text-muted-foreground hover:opacity-80">Não</button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => setExcluindo(m.id)}
+                            className="rounded p-1 text-muted-foreground hover:text-destructive"
+                            aria-label="Excluir"
+                          >
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
-                        </form>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -86,10 +115,57 @@ export default function TipoPagamentoPage() {
           </div>
         )}
 
+        {/* Editar */}
+        {editando && (
+          <div className="rounded-lg border border-primary/40 bg-card p-6">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-foreground">Editar Pix</h2>
+              <button onClick={() => setEditando(null)} className="text-muted-foreground hover:text-foreground">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <form action={formActionEdit} className="space-y-4">
+              <input type="hidden" name="meio_id"  value={editando.id} />
+              <input type="hidden" name="is_padrao" value={String(editPadrao)} />
+
+              <div className="space-y-1.5">
+                <label className={LABEL}>Nome *</label>
+                <input type="text" name="nome" required defaultValue={editando.nome} className={INPUT} />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className={LABEL}>Chave ou instrução Pix *</label>
+                <textarea name="mensagem" required rows={3} defaultValue={editando.mensagem}
+                  className="w-full rounded-md border border-border bg-input px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary resize-none" />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input type="checkbox" id="edit-padrao" checked={editPadrao} onChange={e => setEditPadrao(e.target.checked)}
+                  className="h-4 w-4 accent-primary" />
+                <label htmlFor="edit-padrao" className="cursor-pointer text-sm text-foreground">Definir como padrão</label>
+              </div>
+
+              {stateEdit.error && <p className="text-sm text-destructive">{stateEdit.error}</p>}
+
+              <div className="flex gap-2">
+                <button type="submit" disabled={isPendingEdit}
+                  className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50">
+                  {isPendingEdit && <Loader2 className="h-4 w-4 animate-spin" />}
+                  {isPendingEdit ? 'Salvando...' : 'Salvar alterações'}
+                </button>
+                <button type="button" onClick={() => setEditando(null)}
+                  className="rounded-md border border-border px-4 py-2 text-sm text-foreground hover:bg-accent">
+                  Cancelar
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
         {/* Novo */}
         <div className="rounded-lg border border-border bg-card p-6">
           <h2 className="mb-4 text-sm font-semibold text-foreground">Adicionar Pix</h2>
-          <form action={formAction} className="space-y-4">
+          <form action={formActionNovo} className="space-y-4">
             <input type="hidden" name="is_padrao" value={String(padrao)} />
 
             <div className="space-y-1.5">
@@ -99,7 +175,8 @@ export default function TipoPagamentoPage() {
 
             <div className="space-y-1.5">
               <label className={LABEL}>Chave ou instrução Pix *</label>
-              <textarea name="mensagem" required rows={3} placeholder="Pix: 00.000.000/0001-00" className="w-full rounded-md border border-border bg-input px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary resize-none" />
+              <textarea name="mensagem" required rows={3} placeholder="Pix: 00.000.000/0001-00"
+                className="w-full rounded-md border border-border bg-input px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary resize-none" />
               <p className="text-xs text-muted-foreground">Este texto será inserido onde aparecer #PIX# nos templates.</p>
             </div>
 
@@ -109,17 +186,17 @@ export default function TipoPagamentoPage() {
               <label htmlFor="padrao" className="cursor-pointer text-sm text-foreground">Definir como padrão</label>
             </div>
 
-            {state.error && <p className="text-sm text-destructive">{state.error}</p>}
-            {state.success && (
+            {stateNovo.error && <p className="text-sm text-destructive">{stateNovo.error}</p>}
+            {stateNovo.success && (
               <p className="flex items-center gap-2 text-sm text-success">
                 <CheckCircle className="h-4 w-4" /> Pix adicionado.
               </p>
             )}
 
-            <button type="submit" disabled={isPending}
+            <button type="submit" disabled={isPendingNovo}
               className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50">
-              {isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-              {isPending ? 'Salvando...' : 'Adicionar'}
+              {isPendingNovo && <Loader2 className="h-4 w-4 animate-spin" />}
+              {isPendingNovo ? 'Salvando...' : 'Adicionar'}
             </button>
           </form>
         </div>

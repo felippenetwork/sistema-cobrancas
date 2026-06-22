@@ -49,6 +49,32 @@ export async function definirPadraoAction(formData: FormData) {
   revalidatePath('/tipo-pagamento')
 }
 
+export async function editarMeioAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  try {
+    const { supabase, contaId } = await getConta()
+    const meioId  = formData.get('meio_id')  as string
+    const nome     = (formData.get('nome')     as string).trim()
+    const mensagem = (formData.get('mensagem') as string).trim()
+    const padrao   = formData.get('is_padrao') === 'true'
+
+    if (!nome || !mensagem) return { error: 'Preencha nome e mensagem/chave Pix.' }
+
+    if (padrao) {
+      await supabase.from('meios_pagamento').update({ is_padrao: false })
+        .eq('conta_id', contaId).eq('is_padrao', true)
+    }
+
+    const { error } = await supabase.from('meios_pagamento')
+      .update({ nome, mensagem, is_padrao: padrao })
+      .eq('id', meioId).eq('conta_id', contaId)
+    if (error) return { error: error.message }
+  } catch (e: unknown) {
+    return { error: e instanceof Error ? e.message : 'Erro desconhecido.' }
+  }
+  revalidatePath('/tipo-pagamento')
+  return { error: null, success: true }
+}
+
 export async function excluirMeioAction(formData: FormData) {
   const meioId = formData.get('meio_id') as string
   const { supabase } = await getConta()
