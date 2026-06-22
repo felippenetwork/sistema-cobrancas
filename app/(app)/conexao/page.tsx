@@ -132,10 +132,7 @@ export default function ConexaoPage() {
               <div className="flex flex-col items-center gap-3 py-8">
                 <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
                 <p className="text-sm text-muted-foreground">
-                  Aguardando o worker gerar o QR Code…
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Certifique-se de que o worker está rodando no VPS.
+                  Gerando QR Code…
                 </p>
               </div>
             )}
