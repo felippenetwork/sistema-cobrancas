@@ -83,6 +83,24 @@ export default function TipoPagamentoPage() {
                         >
                           <Pencil className="h-4 w-4" />
                         </button>
+                        {excluindo === m.id ? (
+                          <div className="flex items-center gap-1">
+                            <span className="text-xs text-muted-foreground">Excluir?</span>
+                            <form action={excluirMeioAction} onSubmit={() => setExcluindo(null)}>
+                              <input type="hidden" name="meio_id" value={m.id} />
+                              <button type="submit" className="text-xs font-medium text-destructive hover:opacity-80">Sim</button>
+                            </form>
+                            <button onClick={() => setExcluindo(null)} className="text-xs text-muted-foreground hover:opacity-80">Não</button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => setExcluindo(m.id)}
+                            aria-label="Excluir"
+                            className="rounded p-1 text-muted-foreground hover:text-destructive"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
