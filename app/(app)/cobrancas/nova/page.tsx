@@ -11,9 +11,10 @@ const LABEL = 'block text-xs font-medium uppercase tracking-wide text-muted-fore
 
 type Cliente = { id: string; nome: string; sobrenome: string }
 
-// Mês corrente no formato "YYYY-MM"
-function mesAtual() {
+// Próximo mês no formato "YYYY-MM"
+function proximoMes() {
   const d = new Date()
+  d.setMonth(d.getMonth() + 1)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
@@ -92,7 +93,7 @@ export default function NovaCobrancaPage() {
             </div>
             <div className="space-y-1.5">
               <label className={LABEL}>Mês/ano de início *</label>
-              <input type="month" name="mes_ano_inicio" required defaultValue={mesAtual()} className={INPUT} />
+              <input type="month" name="mes_ano_inicio" required defaultValue={proximoMes()} className={INPUT} />
             </div>
           </div>
 
