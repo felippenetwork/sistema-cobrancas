@@ -54,58 +54,35 @@ export default function TipoPagamentoPage() {
             <table className="w-full text-sm">
               <thead className="border-b border-border bg-muted/30">
                 <tr>
-                  {['Nome', 'Chave / Mensagem Pix', ''].map(h => (
-                    <th key={h} className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">{h}</th>
-                  ))}
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Nome</th>
+                  <th className="px-4 py-3" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
                 {meios.map(m => (
                   <tr key={m.id} className="bg-card hover:bg-accent/20">
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium text-foreground">{m.nome}</span>
-                        {m.is_padrao && (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-warning-bg px-1.5 py-0.5 text-xs font-semibold text-warning">
-                            <Star className="h-2.5 w-2.5" /> Padrão
-                          </span>
-                        )}
-                      </div>
+                      <span className="font-medium text-foreground">{m.nome}</span>
                     </td>
-                    <td className="max-w-xs truncate px-4 py-3 text-muted-foreground">{m.mensagem}</td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center justify-end gap-2">
-                        {!m.is_padrao && (
-                          <form action={definirPadraoAction}>
-                            <input type="hidden" name="meio_id" value={m.id} />
-                            <button type="submit" className="text-xs text-primary hover:opacity-80">Definir padrão</button>
-                          </form>
-                        )}
+                      <div className="flex items-center justify-end gap-1">
+                        <form action={definirPadraoAction}>
+                          <input type="hidden" name="meio_id" value={m.id} />
+                          <button
+                            type="submit"
+                            aria-label={m.is_padrao ? 'Padrão' : 'Definir como padrão'}
+                            className={`rounded p-1 transition ${m.is_padrao ? 'text-warning' : 'text-muted-foreground hover:text-warning'}`}
+                          >
+                            <Star className={`h-4 w-4 ${m.is_padrao ? 'fill-warning' : ''}`} />
+                          </button>
+                        </form>
                         <button
                           onClick={() => abrirEdicao(m)}
-                          className="rounded p-1 text-muted-foreground hover:text-primary"
                           aria-label="Editar"
+                          className="rounded p-1 text-muted-foreground hover:text-primary"
                         >
-                          <Pencil className="h-3.5 w-3.5" />
+                          <Pencil className="h-4 w-4" />
                         </button>
-                        {excluindo === m.id ? (
-                          <div className="flex items-center gap-1">
-                            <span className="text-xs text-muted-foreground">Excluir?</span>
-                            <form action={excluirMeioAction} onSubmit={() => setExcluindo(null)}>
-                              <input type="hidden" name="meio_id" value={m.id} />
-                              <button type="submit" className="text-xs font-medium text-destructive hover:opacity-80">Sim</button>
-                            </form>
-                            <button onClick={() => setExcluindo(null)} className="text-xs text-muted-foreground hover:opacity-80">Não</button>
-                          </div>
-                        ) : (
-                          <button
-                            onClick={() => setExcluindo(m.id)}
-                            className="rounded p-1 text-muted-foreground hover:text-destructive"
-                            aria-label="Excluir"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        )}
                       </div>
                     </td>
                   </tr>
@@ -147,16 +124,33 @@ export default function TipoPagamentoPage() {
 
               {stateEdit.error && <p className="text-sm text-destructive">{stateEdit.error}</p>}
 
-              <div className="flex gap-2">
-                <button type="submit" disabled={isPendingEdit}
-                  className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50">
-                  {isPendingEdit && <Loader2 className="h-4 w-4 animate-spin" />}
-                  {isPendingEdit ? 'Salvando...' : 'Salvar alterações'}
-                </button>
-                <button type="button" onClick={() => setEditando(null)}
-                  className="rounded-md border border-border px-4 py-2 text-sm text-foreground hover:bg-accent">
-                  Cancelar
-                </button>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex gap-2">
+                  <button type="submit" disabled={isPendingEdit}
+                    className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50">
+                    {isPendingEdit && <Loader2 className="h-4 w-4 animate-spin" />}
+                    {isPendingEdit ? 'Salvando...' : 'Salvar alterações'}
+                  </button>
+                  <button type="button" onClick={() => setEditando(null)}
+                    className="rounded-md border border-border px-4 py-2 text-sm text-foreground hover:bg-accent">
+                    Cancelar
+                  </button>
+                </div>
+                {excluindo === editando?.id ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">Confirmar exclusão?</span>
+                    <form action={excluirMeioAction} onSubmit={() => { setExcluindo(null); setEditando(null) }}>
+                      <input type="hidden" name="meio_id" value={editando.id} />
+                      <button type="submit" className="text-xs font-medium text-destructive hover:opacity-80">Excluir</button>
+                    </form>
+                    <button onClick={() => setExcluindo(null)} className="text-xs text-muted-foreground hover:opacity-80">Cancelar</button>
+                  </div>
+                ) : (
+                  <button type="button" onClick={() => setExcluindo(editando?.id ?? null)}
+                    className="flex items-center gap-1.5 rounded-md border border-destructive/40 px-3 py-2 text-xs font-medium text-destructive hover:bg-destructive/10">
+                    <Trash2 className="h-3.5 w-3.5" /> Excluir
+                  </button>
+                )}
               </div>
             </form>
           </div>
