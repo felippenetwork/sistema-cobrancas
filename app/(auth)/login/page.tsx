@@ -41,7 +41,7 @@ export default function LoginPage() {
 
         {/* Marca */}
         <div className="mb-8">
-          <h1 className="text-lg font-semibold text-foreground">Quita</h1>
+          <h1 className="text-lg font-semibold text-foreground">Cobranx</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Acesse sua conta para gerenciar cobranças.
           </p>

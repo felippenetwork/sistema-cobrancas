@@ -3,9 +3,9 @@ name: design-system
 description: Sistema de design do produto (SaaS de cobrança, tema dark fintech). Use SEMPRE que for criar, alterar ou estilizar qualquer tela, componente ou elemento de UI deste projeto — dashboard, tabelas, formulários, cards, modais, botões, navegação, estados de status financeiro. Define paleta, tipografia, espaçamento, componentes (shadcn/ui + Tailwind) e regras de aparência. Consulte antes de escrever qualquer JSX/TSX ou CSS.
 ---
 
-# Design System — Quita (cobrança / fintech)
+# Design System — Cobranx (cobrança / fintech)
 
-> Marca de trabalho: **Quita**. Tom: **dark, sóbrio, corporativo (banco/fintech)** — transmite confiança e seriedade com dinheiro. Para trocar o nome do produto, altere só onde estiver "Quita".
+> Marca de trabalho: **Cobranx**. Tom: **dark, sóbrio, corporativo (banco/fintech)** — transmite confiança e seriedade com dinheiro. Para trocar o nome do produto, altere só onde estiver "Cobranx".
 
 ## 0. Stack de UI obrigatória
 - **Tailwind CSS** + **shadcn/ui** como base de componentes. **Não** criar componentes do zero quando o shadcn/ui já tem (Button, Card, Table, Dialog, Input, Select, Badge, Toast/Sonner, DropdownMenu, Tabs, Sheet, Skeleton).

@@ -5,7 +5,7 @@ import './globals.css'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: { default: 'Quita', template: '%s — Quita' },
+  title: { default: 'Cobranx', template: '%s — Cobranx' },
   description: 'Gestão de cobranças recorrentes via WhatsApp e e-mail.',
 }
 

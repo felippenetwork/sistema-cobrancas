@@ -60,7 +60,7 @@ export async function criarAssinaturaAction(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        reason:        descricao || `Assinatura Quita — ${(conta as any).nome_empresa}`,
+        reason:        descricao || `Assinatura Cobranx — ${(conta as any).nome_empresa}`,
         auto_recurring: {
           frequency:          1,
           frequency_type:     'months',

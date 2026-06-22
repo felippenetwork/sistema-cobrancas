@@ -38,7 +38,7 @@ export default function AdminLoginPage() {
       <div className="w-full max-w-sm">
 
         <div className="mb-8">
-          <p className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Quita</p>
+          <p className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Cobranx</p>
           <h1 className="mt-1 text-lg font-semibold text-foreground">Acesso administrativo</h1>
         </div>
 

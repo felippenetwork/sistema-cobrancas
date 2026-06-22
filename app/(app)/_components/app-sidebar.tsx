@@ -41,7 +41,7 @@ export function AppSidebar({ nomeEmpresa }: { nomeEmpresa: string }) {
 
       {/* Marca */}
       <div className="border-b border-border px-5 py-5">
-        <p className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">Quita</p>
+        <p className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">Cobranx</p>
         <p className="mt-0.5 truncate text-sm font-semibold text-foreground">{nomeEmpresa}</p>
       </div>
 

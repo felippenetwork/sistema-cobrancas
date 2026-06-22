@@ -71,7 +71,7 @@ export default function AssinaturasPage() {
 
             <div className="space-y-1.5">
               <label className="block text-xs font-medium uppercase tracking-wide text-muted-foreground">Descrição (opcional)</label>
-              <input type="text" name="descricao" placeholder="Assinatura Quita — Plano Mensal" className={INPUT} />
+              <input type="text" name="descricao" placeholder="Assinatura Cobranx — Plano Mensal" className={INPUT} />
             </div>
 
             {state.error && (
