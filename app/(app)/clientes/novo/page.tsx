@@ -36,9 +36,9 @@ export default function NovoClientePage() {
           </div>
 
           <div className="space-y-1.5">
-            <label className={LABEL}>CPF *</label>
+            <label className={LABEL}>CPF</label>
             <input
-              type="text" name="cpf" required
+              type="text" name="cpf"
               placeholder="000.000.000-00"
               maxLength={14}
               className={INPUT}
@@ -58,9 +58,9 @@ export default function NovoClientePage() {
           </div>
 
           <div className="space-y-1.5">
-            <label className={LABEL}>E-mail *</label>
+            <label className={LABEL}>E-mail</label>
             <input
-              type="email" name="email" required
+              type="email" name="email"
               placeholder="joao@email.com"
               className={INPUT}
             />

@@ -36,12 +36,12 @@ function extrairCampos(formData: FormData) {
 }
 
 function validarCampos(campos: ReturnType<typeof extrairCampos>) {
-  const { nome, sobrenome, cpfRaw, celRaw, email } = campos
-  if (!nome || !sobrenome || !cpfRaw || !celRaw || !email) {
-    return { error: 'Preencha todos os campos obrigatórios.' }
+  const { nome, sobrenome, cpfRaw, celRaw } = campos
+  if (!nome || !sobrenome || !celRaw) {
+    return { error: 'Preencha nome, sobrenome e celular.' }
   }
-  const cpf = normalizarCPF(cpfRaw)
-  if (!validarCPF(cpf)) {
+  const cpf = cpfRaw ? normalizarCPF(cpfRaw) : null
+  if (cpf && !validarCPF(cpf)) {
     return { error: 'CPF inválido. Verifique os dígitos informados.' }
   }
   const celular = normalizarCelular(celRaw)
@@ -72,22 +72,20 @@ export async function criarClienteAction(
       return { error: `Limite de ${limite} clientes atingido. Contate o suporte para ampliar o plano.` }
     }
 
-    // CPF único por conta (RLS filtra automaticamente para a conta do usuário)
-    const { data: cpfDuplicado } = await supabase
-      .from('clientes')
-      .select('id')
-      .eq('cpf', cpf)
-      .is('deleted_at', null)
-      .maybeSingle()
-    if (cpfDuplicado) return { error: 'CPF já cadastrado para outro cliente desta conta.' }
+    // CPF único por conta — só verifica se foi informado
+    if (cpf) {
+      const { data: cpfDuplicado } = await supabase
+        .from('clientes').select('id').eq('cpf', cpf).is('deleted_at', null).maybeSingle()
+      if (cpfDuplicado) return { error: 'CPF já cadastrado para outro cliente desta conta.' }
+    }
 
     const { error } = await supabase.from('clientes').insert({
       conta_id:  contaId,
       nome:      campos.nome,
       sobrenome: campos.sobrenome,
       celular,
-      cpf,
-      email:     campos.email,
+      cpf:       cpf ?? null,
+      email:     campos.email || null,
     })
     if (error) return { error: error.message }
 
@@ -113,19 +111,16 @@ export async function atualizarClienteAction(
     if ('error' in validated) return validated as ActionState
     const { cpf, celular } = validated
 
-    // CPF único excluindo o próprio cliente
-    const { data: cpfDuplicado } = await supabase
-      .from('clientes')
-      .select('id')
-      .eq('cpf', cpf)
-      .neq('id', clienteId)
-      .is('deleted_at', null)
-      .maybeSingle()
-    if (cpfDuplicado) return { error: 'CPF já cadastrado para outro cliente desta conta.' }
+    // CPF único excluindo o próprio cliente — só verifica se foi informado
+    if (cpf) {
+      const { data: cpfDuplicado } = await supabase
+        .from('clientes').select('id').eq('cpf', cpf).neq('id', clienteId).is('deleted_at', null).maybeSingle()
+      if (cpfDuplicado) return { error: 'CPF já cadastrado para outro cliente desta conta.' }
+    }
 
     const { error } = await supabase
       .from('clientes')
-      .update({ nome: campos.nome, sobrenome: campos.sobrenome, celular, cpf, email: campos.email })
+      .update({ nome: campos.nome, sobrenome: campos.sobrenome, celular, cpf: cpf ?? null, email: campos.email || null })
       .eq('id', clienteId)   // RLS garante que só altera cliente da própria conta
     if (error) return { error: error.message }
 
