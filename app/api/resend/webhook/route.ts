@@ -37,6 +37,7 @@ export async function POST(request: NextRequest) {
       'svix-signature': request.headers.get('svix-signature') ?? '',
     }) as typeof event
   } catch {
+    console.warn('[resend-webhook] Assinatura Svix inválida — possível tentativa não autorizada.')
     return NextResponse.json({ error: 'invalid_signature' }, { status: 400 })
   }
 

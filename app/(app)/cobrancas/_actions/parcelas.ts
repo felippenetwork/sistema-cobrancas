@@ -127,14 +127,19 @@ export async function editarParcelaAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  const parcelaId     = formData.get('parcela_id') as string
+  const parcelaId      = formData.get('parcela_id') as string
   const dataVencimento = formData.get('data_vencimento') as string
-  const valorStr      = (formData.get('valor') as string).replace(',', '.')
-  const observacao    = (formData.get('observacao') as string)?.trim() || null
+  const valorStr       = (formData.get('valor') as string).replace(',', '.')
+  const observacao     = (formData.get('observacao') as string)?.trim() || null
 
   const valor = parseFloat(valorStr)
   if (isNaN(valor) || valor <= 0) return { error: 'Valor inválido.' }
   if (!dataVencimento)             return { error: 'Data de vencimento obrigatória.' }
+
+  // Valida que a data não está mais de 10 anos no futuro
+  const limite = new Date()
+  limite.setFullYear(limite.getFullYear() + 10)
+  if (new Date(dataVencimento) > limite) return { error: 'Data de vencimento muito distante.' }
 
   const { supabase } = await requireUser()
 
@@ -145,6 +150,37 @@ export async function editarParcelaAction(
     .eq('status', 'aberta')  // não editar parcela já paga
 
   if (error) return { error: error.message }
+
+  // Reagendar notificações em fila com base no novo vencimento
+  const TYPE_OFFSET: Record<string, number> = {
+    '5d': -5, '3d': -3, '2d': -2, '1d': -1, 'dia': 0, 'vencido1d': 1,
+  }
+  const { data: notifsEmFila } = await supabase
+    .from('notificacoes_enviadas')
+    .select('id, tipo')
+    .eq('parcela_id', parcelaId)
+    .eq('status', 'fila')
+
+  if (notifsEmFila?.length) {
+    const hojeStr  = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' })
+    const hojeRef  = new Date(`${hojeStr}T09:00:00-03:00`)
+
+    for (const notif of notifsEmFila) {
+      const offset = TYPE_OFFSET[notif.tipo]
+      if (offset === undefined) continue  // manual/boasvindas: não reagendar
+
+      const novaData = new Date(`${dataVencimento}T09:00:00-03:00`)
+      novaData.setDate(novaData.getDate() + offset)
+
+      // Se a nova data já passou, mantém para ser enviado no próximo ciclo
+      const agendadoPara = novaData < hojeRef ? hojeRef : novaData
+
+      await supabase
+        .from('notificacoes_enviadas')
+        .update({ agendado_para: agendadoPara.toISOString() })
+        .eq('id', notif.id)
+    }
+  }
 
   revalidatePath('/cobrancas')
   return { error: null, success: true }

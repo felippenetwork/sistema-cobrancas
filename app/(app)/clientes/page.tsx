@@ -6,13 +6,16 @@ import { excluirClienteAction } from './_actions/clientes'
 
 export const metadata = { title: 'Clientes' }
 
+const PER_PAGE = 50
+
 export default async function ClientesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string }>
+  searchParams: Promise<{ q?: string; page?: string }>
 }) {
-  const { q } = await searchParams
+  const { q, page: pageParam } = await searchParams
   const busca = q?.trim() ?? ''
+  const page  = Math.max(1, parseInt(pageParam ?? '1') || 1)
 
   const supabase = await createClient()
 
@@ -21,6 +24,7 @@ export default async function ClientesPage({
     .select('id, nome, sobrenome, celular, email')
     .is('deleted_at', null)
     .order('nome', { ascending: true })
+    .range((page - 1) * PER_PAGE, page * PER_PAGE - 1)
 
   if (busca) {
     query = query.or(
@@ -30,11 +34,13 @@ export default async function ClientesPage({
 
   const { data: clientes } = await query
 
-  // Contagem total para exibir vs limite
+  // Contagem total para exibir vs limite e paginação
   const { count: total } = await supabase
     .from('clientes')
     .select('*', { count: 'exact', head: true })
     .is('deleted_at', null)
+
+  const totalPages = Math.ceil((total ?? 0) / PER_PAGE)
 
   return (
     <div className="p-8">
@@ -138,6 +144,31 @@ export default async function ClientesPage({
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Paginação */}
+      {totalPages > 1 && (
+        <div className="mt-4 flex items-center justify-between text-sm text-muted-foreground">
+          <span>Página {page} de {totalPages}</span>
+          <div className="flex gap-2">
+            {page > 1 && (
+              <Link
+                href={`/clientes?${new URLSearchParams({ ...(busca && { q: busca }), page: String(page - 1) })}`}
+                className="rounded-md border border-border px-3 py-1.5 transition hover:text-foreground"
+              >
+                Anterior
+              </Link>
+            )}
+            {page < totalPages && (
+              <Link
+                href={`/clientes?${new URLSearchParams({ ...(busca && { q: busca }), page: String(page + 1) })}`}
+                className="rounded-md border border-border px-3 py-1.5 transition hover:text-foreground"
+              >
+                Próxima
+              </Link>
+            )}
+          </div>
         </div>
       )}
 

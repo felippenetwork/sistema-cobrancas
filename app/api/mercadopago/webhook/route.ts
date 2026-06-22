@@ -30,6 +30,7 @@ export async function POST(request: NextRequest) {
       .digest('hex')
 
     if (expected !== hashMatch[1]) {
+      console.warn('[mp-webhook] Assinatura HMAC inválida — possível tentativa não autorizada.')
       return NextResponse.json({ error: 'invalid_signature' }, { status: 401 })
     }
   }
@@ -85,9 +86,9 @@ async function processarPagamento(admin: ReturnType<typeof createAdminClient>, p
   const ultimo = (assinatura as any).ultimo_evento_mp
   if (ultimo?.payment_id === paymentId) return
 
-  // Renovar validade do plano (+30 dias a partir de hoje)
-  const hoje  = new Date()
-  const nova  = new Date(hoje)
+  // Renovar validade do plano (+30 dias a partir de hoje em SP)
+  const hojeStr   = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' })
+  const nova      = new Date(`${hojeStr}T00:00:00-03:00`)
   nova.setDate(nova.getDate() + 30)
   const novaValidade = nova.toISOString().slice(0, 10)
 
