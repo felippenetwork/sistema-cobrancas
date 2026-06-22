@@ -39,6 +39,7 @@ export default function ConexaoPage() {
   useEffect(() => {
     const sb = createClient()
     let cleanup: (() => void) | undefined
+    let pollInterval: ReturnType<typeof setInterval> | undefined
 
     async function init() {
       const { data: { user } } = await sb.auth.getUser()
@@ -50,12 +51,16 @@ export default function ConexaoPage() {
 
       setContaId(conta.id)
 
-      const { data } = await sb
-        .from('conexoes').select('*').eq('conta_id', conta.id).maybeSingle()
-      setConexao(data as Conexao)
+      const fetchConexao = async () => {
+        const { data } = await sb
+          .from('conexoes').select('*').eq('conta_id', conta.id).maybeSingle()
+        if (data) setConexao(data as Conexao)
+      }
+
+      await fetchConexao()
       setLoading(false)
 
-      // Realtime: recebe QR e status do worker instantaneamente
+      // Realtime: atualização instantânea quando disponível
       const channel = sb
         .channel('conexao-live')
         .on(
@@ -65,7 +70,13 @@ export default function ConexaoPage() {
         )
         .subscribe()
 
-      cleanup = () => { sb.removeChannel(channel) }
+      // Polling fallback: garante sincronia mesmo sem Realtime
+      pollInterval = setInterval(fetchConexao, 3_000)
+
+      cleanup = () => {
+        sb.removeChannel(channel)
+        clearInterval(pollInterval)
+      }
     }
 
     init()
