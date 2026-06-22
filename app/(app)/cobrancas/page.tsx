@@ -3,9 +3,8 @@ import { Plus } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { MonthSelector } from '@/app/(app)/_components/month-selector'
 import { parseMes, getMesBounds } from '@/lib/utils/mes'
-import { baixarParcelaAction } from './_actions/parcelas'
-import { badgesCobranca, calcularStatusVisual, STATUS_VISUAL_CFG } from '@/lib/utils/parcelas'
-import { formatBRL, formatData, somarValores } from '@/lib/utils/format'
+import { formatBRL, somarValores } from '@/lib/utils/format'
+import { CobrancasTable } from './_components/cobrancas-table'
 
 export const metadata = { title: 'Cobranças' }
 
@@ -34,7 +33,7 @@ export default async function CobrancasPage({
     supabase.from('cobrancas').select(`
       id, valor_mensalidade, recorrente, observacao,
       clientes!inner (id, nome, sobrenome, celular),
-      parcelas (id, numero, valor, data_vencimento, status)
+      parcelas (id, numero, valor, data_vencimento, status, data_pagamento)
     `).eq('status', 'ativa').order('created_at', { ascending: false }),
 
     supabase.from('parcelas')
@@ -96,77 +95,7 @@ export default async function CobrancasPage({
           </Link>
         </div>
       ) : (
-        <div className="overflow-hidden rounded-lg border border-border">
-          <table className="w-full text-sm">
-            <thead className="border-b border-border bg-muted/30">
-              <tr>
-                {['Cliente', 'Mensalidade', 'Próximo vencimento', 'Status', ''].map(h => (
-                  <th key={h} className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {(cobrancas ?? []).map((c: any) => {
-                const abertas = (c.parcelas as any[])
-                  .filter((p: any) => p.status === 'aberta')
-                  .sort((a: any, b: any) => a.data_vencimento.localeCompare(b.data_vencimento))
-                const proxima = abertas[0] ?? null
-                const badges  = badgesCobranca(abertas)
-                const cli     = c.clientes as any
-
-                return (
-                  <tr key={c.id} className="bg-card transition-colors hover:bg-accent/20">
-                    <td className="px-4 py-3">
-                      <p className="font-medium text-foreground">{cli.nome} {cli.sobrenome}</p>
-                      <p className="text-xs text-muted-foreground">{cli.celular}</p>
-                    </td>
-                    <td className="monetary px-4 py-3 font-medium text-foreground">
-                      {formatBRL(c.valor_mensalidade)}
-                    </td>
-                    <td className="monetary px-4 py-3 text-muted-foreground">
-                      {proxima ? formatData(proxima.data_vencimento) : '—'}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-1">
-                        {badges.length === 0
-                          ? <span className="text-xs text-muted-foreground">Sem parcelas</span>
-                          : badges.map(b => (
-                            <span key={b.label} className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${b.cls}`}>
-                              {b.label}
-                            </span>
-                          ))
-                        }
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center justify-end gap-3">
-                        {proxima && (
-                          <form action={baixarParcelaAction}>
-                            <input type="hidden" name="parcela_id" value={proxima.id} />
-                            <button
-                              type="submit"
-                              className="rounded-md bg-success-bg px-2.5 py-1 text-xs font-medium text-success transition hover:opacity-80"
-                            >
-                              Pago
-                            </button>
-                          </form>
-                        )}
-                        <Link
-                          href={`/cobrancas/${c.id}`}
-                          className="text-xs text-primary transition hover:opacity-80"
-                        >
-                          Ver
-                        </Link>
-                      </div>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
+        <CobrancasTable cobrancas={cobrancas as any} />
       )}
     </div>
   )
