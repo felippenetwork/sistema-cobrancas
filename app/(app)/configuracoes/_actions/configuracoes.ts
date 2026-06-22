@@ -30,12 +30,13 @@ export async function salvarConfiguracoesAction(
     const endereco      = (formData.get('endereco')        as string).trim()
     const contato       = (formData.get('contato')         as string).trim()
 
-    const { error: cfgErr } = await supabase.from('configuracoes').upsert(
+    const { error: cfgErr, count: cfgCount } = await supabase.from('configuracoes').upsert(
       { conta_id: contaId, nome_comercial: nomeComercial || null, cpf_cnpj: cpfCnpj || null,
         endereco: endereco || null, contato: contato || null },
-      { onConflict: 'conta_id' },
+      { onConflict: 'conta_id', count: 'exact' },
     )
-    if (cfgErr) return { error: cfgErr.message }
+    if (cfgErr) return { error: `Erro ao salvar empresa: ${cfgErr.message}` }
+    if (cfgCount === 0) return { error: 'Sem permissão para salvar dados da empresa. Verifique sua conta.' }
 
     // Remetente de e-mail (opcional — só salva se local_part informado)
     const localPartRaw = (formData.get('local_part') as string).trim()
