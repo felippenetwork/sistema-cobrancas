@@ -4,9 +4,14 @@ import { createClient } from '@/lib/supabase/server'
 import { validarCPF, normalizarCPF } from '@/lib/validations/cpf'
 import { normalizarCelular } from '@/lib/validations/celular'
 import { revalidatePath } from 'next/cache'
-import { redirect } from 'next/navigation'
+import { redirect } from 'next/navigation' // usado em excluirClienteAction
 
-export type ActionState = { error: string | null; success?: boolean }
+export type ActionState = {
+  error: string | null
+  success?: boolean
+  clienteId?: string
+  clienteNome?: string
+}
 
 // ── Helper: retorna a conta do usuário logado ────────────────────────────────
 async function getConta() {
@@ -79,22 +84,27 @@ export async function criarClienteAction(
       if (cpfDuplicado) return { error: 'CPF já cadastrado para outro cliente desta conta.' }
     }
 
-    const { error } = await supabase.from('clientes').insert({
+    const { data: novo, error } = await supabase.from('clientes').insert({
       conta_id:  contaId,
       nome:      campos.nome,
       sobrenome: campos.sobrenome,
       celular,
       cpf:       cpf ?? null,
       email:     campos.email || null,
-    })
+    }).select('id').single()
     if (error) return { error: error.message }
+
+    revalidatePath('/clientes')
+    return {
+      error:       null,
+      success:     true,
+      clienteId:   novo.id,
+      clienteNome: `${campos.nome} ${campos.sobrenome}`,
+    }
 
   } catch (e: unknown) {
     return { error: e instanceof Error ? e.message : 'Erro desconhecido.' }
   }
-
-  revalidatePath('/clientes')
-  redirect('/clientes')
 }
 
 // ── Atualizar cliente ────────────────────────────────────────────────────────
