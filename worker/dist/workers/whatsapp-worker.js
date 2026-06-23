@@ -1,6 +1,6 @@
 // Worker WhatsApp — anti-ban + resiliência integrados.
 //
-// Regras obrigatórias (baileys-conexao §3 + notificacoes-fila §5):
+// Regras obrigatórias (notificacoes-fila §5):
 //   • Janela 09:00–20:00 SP. Fora disso: overflow → dia seguinte às 09h.
 //   • Intervalo 45–80s aleatório ENTRE contas (nunca em paralelo no mesmo número).
 //   • Warmup 60s após conectar (hasSocket retorna false durante esse período).
