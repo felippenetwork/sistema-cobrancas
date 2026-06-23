@@ -211,15 +211,30 @@ export class BaileysManager {
 
   // ── Desconectar (logout) ────────────────────────────────────────────────────
   async desconectar(contaId: string) {
+    const socket = this.sockets.get(contaId)
+    if (socket) {
+      // logout() invalida a sessão no servidor do WhatsApp — forçando novo QR na próxima conexão.
+      // Sem isso, o WhatsApp ainda aceita as credenciais antigas e reconecta sem pedir QR.
+      try { await socket.logout() } catch { /* pode falhar se já desconectado — não é crítico */ }
+    }
+
     await this.encerrarSocket(contaId)
 
-    // Apagar sessão do disco (evita restauração indesejada)
+    // Apagar sessão do disco
     await fs.rm(sessionPath(contaId), { recursive: true, force: true })
 
+    // Limpar todas as informações de conexão no banco
     await this.supabase
       .from('conexoes')
       .upsert(
-        { conta_id: contaId, status: 'desconectado', qr_code: null, comando: null },
+        {
+          conta_id:         contaId,
+          status:           'desconectado',
+          qr_code:          null,
+          comando:          null,
+          numero_conectado: null,
+          device_name:      null,
+        },
         { onConflict: 'conta_id' },
       )
   }
@@ -259,11 +274,12 @@ export class BaileysManager {
   }
 
   /**
-   * Retorna true SOMENTE se o socket existe E já passou o período de warmup.
-   * O worker de WhatsApp consulta este método antes de cada envio.
+   * Retorna true se o socket existe e está pronto.
+   * bypassWarmup=true: ignora o período de warmup (usado para mensagens imediatas como pagamento_confirmado).
    */
-  hasSocket(contaId: string): boolean {
+  hasSocket(contaId: string, bypassWarmup = false): boolean {
     if (!this.sockets.has(contaId)) return false
+    if (bypassWarmup) return true
     const pronto = this.prontoEm.get(contaId) ?? 0
     return Date.now() >= pronto
   }

@@ -162,12 +162,29 @@ export class BaileysManager {
     }
     // ── Desconectar (logout) ────────────────────────────────────────────────────
     async desconectar(contaId) {
+        const socket = this.sockets.get(contaId);
+        if (socket) {
+            // logout() invalida a sessão no servidor do WhatsApp — forçando novo QR na próxima conexão.
+            // Sem isso, o WhatsApp ainda aceita as credenciais antigas e reconecta sem pedir QR.
+            try {
+                await socket.logout();
+            }
+            catch { /* pode falhar se já desconectado — não é crítico */ }
+        }
         await this.encerrarSocket(contaId);
-        // Apagar sessão do disco (evita restauração indesejada)
+        // Apagar sessão do disco
         await fs.rm(sessionPath(contaId), { recursive: true, force: true });
+        // Limpar todas as informações de conexão no banco
         await this.supabase
             .from('conexoes')
-            .upsert({ conta_id: contaId, status: 'desconectado', qr_code: null, comando: null }, { onConflict: 'conta_id' });
+            .upsert({
+            conta_id: contaId,
+            status: 'desconectado',
+            qr_code: null,
+            comando: null,
+            numero_conectado: null,
+            device_name: null,
+        }, { onConflict: 'conta_id' });
     }
     // ── Reconectar (reiniciar com novo QR) ─────────────────────────────────────
     async reconectar(contaId) {
@@ -180,30 +197,35 @@ export class BaileysManager {
     //   2. aguarda ~25s (com leve jitter para não ser previsível)
     //   3. sendPresenceUpdate('paused')   → para de "digitar"
     //   4. sendMessage                    → envia a mensagem
-    async enviarMensagem(contaId, para, texto) {
+    // semDigitacao=true: pula a simulação de typing (para mensagens imediatas como pagamento_confirmado)
+    async enviarMensagem(contaId, para, texto, semDigitacao = false) {
         const socket = this.sockets.get(contaId);
         if (!socket)
             throw new Error(`[${contaId}] Sem socket ativo.`);
         const jid = para.includes('@') ? para : `${para}@s.whatsapp.net`;
-        // Jitter leve: 23–27s para não parecer robótico
-        const digitandoMs = 23_000 + Math.floor(Math.random() * 4_000);
-        try {
-            await socket.sendPresenceUpdate('composing', jid);
-            await sleep(digitandoMs);
-            await socket.sendPresenceUpdate('paused', jid);
-        }
-        catch {
-            // Falha na presence não impede o envio
+        if (!semDigitacao) {
+            // Jitter leve: 23–27s para não parecer robótico
+            const digitandoMs = 23_000 + Math.floor(Math.random() * 4_000);
+            try {
+                await socket.sendPresenceUpdate('composing', jid);
+                await sleep(digitandoMs);
+                await socket.sendPresenceUpdate('paused', jid);
+            }
+            catch {
+                // Falha na presence não impede o envio
+            }
         }
         await socket.sendMessage(jid, { text: texto });
     }
     /**
-     * Retorna true SOMENTE se o socket existe E já passou o período de warmup.
-     * O worker de WhatsApp consulta este método antes de cada envio.
+     * Retorna true se o socket existe e está pronto.
+     * bypassWarmup=true: ignora o período de warmup (usado para mensagens imediatas como pagamento_confirmado).
      */
-    hasSocket(contaId) {
+    hasSocket(contaId, bypassWarmup = false) {
         if (!this.sockets.has(contaId))
             return false;
+        if (bypassWarmup)
+            return true;
         const pronto = this.prontoEm.get(contaId) ?? 0;
         return Date.now() >= pronto;
     }

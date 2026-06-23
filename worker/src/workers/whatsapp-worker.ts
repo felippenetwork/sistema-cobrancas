@@ -147,7 +147,7 @@ async function processarUmaNotificacao(
 
   for (let tentativa = 1; tentativa <= MAX_RETRIES; tentativa++) {
     // Re-verificar socket a cada tentativa (pode ter caído entre uma e outra)
-    if (!manager.hasSocket(contaId)) {
+    if (!manager.hasSocket(contaId, semDigitacao)) {
       logger.warn({ notifId: notif.id, tentativa }, 'Socket indisponível — reagendando')
       await reagendar(supabase, notif.id)
       return
@@ -218,7 +218,7 @@ export async function processarFilaImediata(
   const porConta = new Map<string, Notif>()
   for (const n of pendentes) {
     const contaId = n.conta_id as string
-    if (!porConta.has(contaId) && manager.hasSocket(contaId)) {
+    if (!porConta.has(contaId) && manager.hasSocket(contaId, true)) {
       porConta.set(contaId, n as Notif)
     }
   }
