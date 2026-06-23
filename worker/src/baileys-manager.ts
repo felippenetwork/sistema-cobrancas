@@ -236,21 +236,23 @@ export class BaileysManager {
   //   2. aguarda ~25s (com leve jitter para não ser previsível)
   //   3. sendPresenceUpdate('paused')   → para de "digitar"
   //   4. sendMessage                    → envia a mensagem
-  async enviarMensagem(contaId: string, para: string, texto: string): Promise<void> {
+  // semDigitacao=true: pula a simulação de typing (para mensagens imediatas como pagamento_confirmado)
+  async enviarMensagem(contaId: string, para: string, texto: string, semDigitacao = false): Promise<void> {
     const socket = this.sockets.get(contaId)
     if (!socket) throw new Error(`[${contaId}] Sem socket ativo.`)
 
     const jid = para.includes('@') ? para : `${para}@s.whatsapp.net`
 
-    // Jitter leve: 23–27s para não parecer robótico
-    const digitandoMs = 23_000 + Math.floor(Math.random() * 4_000)
-
-    try {
-      await socket.sendPresenceUpdate('composing', jid)
-      await sleep(digitandoMs)
-      await socket.sendPresenceUpdate('paused', jid)
-    } catch {
-      // Falha na presence não impede o envio
+    if (!semDigitacao) {
+      // Jitter leve: 23–27s para não parecer robótico
+      const digitandoMs = 23_000 + Math.floor(Math.random() * 4_000)
+      try {
+        await socket.sendPresenceUpdate('composing', jid)
+        await sleep(digitandoMs)
+        await socket.sendPresenceUpdate('paused', jid)
+      } catch {
+        // Falha na presence não impede o envio
+      }
     }
 
     await socket.sendMessage(jid, { text: texto })
