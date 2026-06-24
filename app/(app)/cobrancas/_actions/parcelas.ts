@@ -18,17 +18,21 @@ export async function cobrarManualAction(formData: FormData) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('Não autenticado.')
 
+  // parcelas não tem cliente_id direto — buscar via cobranca
   const { data: parcela } = await supabase
     .from('parcelas')
-    .select('id, conta_id, cliente_id, cobranca_id')
+    .select('id, conta_id, cobranca_id, cobrancas!inner(cliente_id)')
     .eq('id', parcelaId)
     .single()
   if (!parcela) throw new Error('Parcela não encontrada.')
 
+  const clienteId = (parcela.cobrancas as any).cliente_id as string
+
   await supabase.from('notificacoes_enviadas').insert({
     conta_id:      parcela.conta_id,
     parcela_id:    parcela.id,
-    cliente_id:    parcela.cliente_id,
+    cobranca_id:   parcela.cobranca_id,
+    cliente_id:    clienteId,
     tipo:          'manual',
     canal:         'whatsapp',
     status:        'fila',
