@@ -77,15 +77,15 @@ export default function EditarClientePage() {
                 <input type="text" name="nome" required defaultValue={cliente.nome} className={INPUT} />
               </div>
               <div className="space-y-1.5">
-                <label className={LABEL}>Sobrenome *</label>
-                <input type="text" name="sobrenome" required defaultValue={cliente.sobrenome} className={INPUT} />
+                <label className={LABEL}>Sobrenome</label>
+                <input type="text" name="sobrenome" defaultValue={cliente.sobrenome} className={INPUT} />
               </div>
             </div>
 
             <div className="space-y-1.5">
-              <label className={LABEL}>CPF *</label>
+              <label className={LABEL}>CPF</label>
               <input
-                type="text" name="cpf" required maxLength={14}
+                type="text" name="cpf" maxLength={14}
                 defaultValue={formatarCPF(cliente.cpf)}
                 className={INPUT}
               />
@@ -101,8 +101,8 @@ export default function EditarClientePage() {
             </div>
 
             <div className="space-y-1.5">
-              <label className={LABEL}>E-mail *</label>
-              <input type="email" name="email" required defaultValue={cliente.email} className={INPUT} />
+              <label className={LABEL}>E-mail</label>
+              <input type="email" name="email" defaultValue={cliente.email} className={INPUT} />
             </div>
 
             {state.error && (

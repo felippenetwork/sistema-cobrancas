@@ -36,8 +36,8 @@ export default function NovoClientePage() {
               <input type="text" name="nome" required placeholder="João" className={INPUT} />
             </div>
             <div className="space-y-1.5">
-              <label className={LABEL}>Sobrenome *</label>
-              <input type="text" name="sobrenome" required placeholder="Silva" className={INPUT} />
+              <label className={LABEL}>Sobrenome</label>
+              <input type="text" name="sobrenome" placeholder="Silva" className={INPUT} />
             </div>
           </div>
 

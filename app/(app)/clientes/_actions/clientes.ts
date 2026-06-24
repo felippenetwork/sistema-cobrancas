@@ -32,18 +32,18 @@ async function getConta() {
 // ── Validações comuns ────────────────────────────────────────────────────────
 function extrairCampos(formData: FormData) {
   return {
-    nome:      (formData.get('nome')     as string).trim(),
-    sobrenome: (formData.get('sobrenome') as string).trim(),
-    cpfRaw:    (formData.get('cpf')      as string).trim(),
-    celRaw:    (formData.get('celular')   as string).trim(),
-    email:     (formData.get('email')    as string).trim().toLowerCase(),
+    nome:      ((formData.get('nome')      as string) ?? '').trim(),
+    sobrenome: ((formData.get('sobrenome') as string) ?? '').trim(),
+    cpfRaw:    ((formData.get('cpf')       as string) ?? '').trim(),
+    celRaw:    ((formData.get('celular')   as string) ?? '').trim(),
+    email:     ((formData.get('email')     as string) ?? '').trim().toLowerCase(),
   }
 }
 
 function validarCampos(campos: ReturnType<typeof extrairCampos>) {
-  const { nome, sobrenome, cpfRaw, celRaw } = campos
-  if (!nome || !sobrenome || !celRaw) {
-    return { error: 'Preencha nome, sobrenome e celular.' }
+  const { nome, cpfRaw, celRaw } = campos
+  if (!nome || !celRaw) {
+    return { error: 'Preencha nome e celular.' }
   }
   const cpf = cpfRaw ? normalizarCPF(cpfRaw) : null
   if (cpf && !validarCPF(cpf)) {
