@@ -26,13 +26,12 @@ export async function cobrarManualAction(formData: FormData) {
   if (!parcela) throw new Error('Parcela não encontrada.')
 
   await supabase.from('notificacoes_enviadas').insert({
-    conta_id:    parcela.conta_id,
-    parcela_id:  parcela.id,
-    cobranca_id: parcela.cobranca_id,
-    cliente_id:  parcela.cliente_id,
-    tipo:        'manual',
-    canal:       'whatsapp',
-    status:      'fila',
+    conta_id:      parcela.conta_id,
+    parcela_id:    parcela.id,
+    cliente_id:    parcela.cliente_id,
+    tipo:          'manual',
+    canal:         'whatsapp',
+    status:        'fila',
     agendado_para: new Date().toISOString(),
   })
 
@@ -107,7 +106,6 @@ export async function baixarParcelaAction(formData: FormData) {
     await supabase.from('notificacoes_enviadas').insert({
       conta_id:      parcela.conta_id,
       parcela_id:    parcela.id,
-      cobranca_id:   parcela.cobranca_id,
       cliente_id:    clienteId,
       tipo:          'pagamento_confirmado',
       canal:         'whatsapp',
