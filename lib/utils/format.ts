@@ -1,8 +1,9 @@
 // Formatação de valores monetários e datas em pt-BR.
 // Sempre usar para exibição — nunca usar float diretamente em cálculos.
 
-const brl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })
+const brl  = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })
 const dFmt = new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo' })
+const hFmt = new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' })
 
 /** Formata número para R$ 1.234,56 */
 export function formatBRL(value: number | string): string {
@@ -19,6 +20,12 @@ export function somarValores(items: { valor: unknown }[]): number {
 export function formatData(iso: string | null | undefined): string {
   if (!iso) return '—'
   return dFmt.format(new Date(iso.slice(0, 10) + 'T12:00:00'))
+}
+
+/** Formata timestamp ISO para HH:mm (fuso SP) */
+export function formatHora(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  return hFmt.format(new Date(iso))
 }
 
 const MESES = [

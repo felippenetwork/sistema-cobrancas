@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { MonthSelector } from '@/app/(app)/_components/month-selector'
 import { parseMes, getMesBounds } from '@/lib/utils/mes'
-import { formatData } from '@/lib/utils/format'
+import { formatData, formatHora } from '@/lib/utils/format'
 
 export const metadata = { title: 'Log de Notificações' }
 
@@ -39,7 +39,7 @@ export default async function LogPage({
   let query = supabase
     .from('notificacoes_enviadas')
     .select(`
-      id, tipo, canal, status, created_at, enviado_em,
+      id, tipo, canal, status, created_at, agendado_para, enviado_em,
       clientes!inner (nome, sobrenome)
     `)
     .gte('created_at', inicio + 'T00:00:00')
@@ -90,7 +90,7 @@ export default async function LogPage({
           <table className="w-full text-sm">
             <thead className="border-b border-border bg-muted/30">
               <tr>
-                {['Cliente', 'Tipo', 'Canal', 'Status', 'Data'].map(h => (
+                {['Cliente', 'Tipo', 'Canal', 'Status', 'Data', 'Agendado', 'Enviado'].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">{h}</th>
                 ))}
               </tr>
@@ -108,7 +108,9 @@ export default async function LogPage({
                         {l.status}
                       </span>
                     </td>
-                    <td className="monetary px-4 py-3 text-muted-foreground">{formatData(l.enviado_em ?? l.created_at)}</td>
+                    <td className="monetary px-4 py-3 text-muted-foreground">{formatData(l.created_at)}</td>
+                    <td className="monetary px-4 py-3 text-muted-foreground">{formatHora(l.agendado_para)}</td>
+                    <td className="monetary px-4 py-3 text-muted-foreground">{formatHora(l.enviado_em)}</td>
                   </tr>
                 )
               })}

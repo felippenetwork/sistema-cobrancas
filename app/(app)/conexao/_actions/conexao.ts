@@ -35,7 +35,14 @@ export async function desconectarAction() {
   const { supabase, contaId } = await getConta()
 
   await supabase.from('conexoes').upsert(
-    { conta_id: contaId, status: 'desconectado', comando: 'desconectar', qr_code: null },
+    {
+      conta_id:         contaId,
+      status:           'desconectado',
+      comando:          'desconectar',
+      qr_code:          null,
+      numero_conectado: null,
+      device_name:      null,
+    },
     { onConflict: 'conta_id' },
   )
 
