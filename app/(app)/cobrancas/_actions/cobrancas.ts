@@ -193,6 +193,12 @@ export async function cancelarCobrancaAction(formData: FormData) {
       .eq('status', 'fila')
       .in('parcela_id', ids)
   }
+  // Cancelar boasvindas em fila (têm cobranca_id mas não parcela_id)
+  await supabase
+    .from('notificacoes_enviadas')
+    .update({ status: 'cancelado' })
+    .eq('cobranca_id', cobrancaId)
+    .eq('status', 'fila')
 
   revalidatePath('/cobrancas')
   redirect('/cobrancas')
