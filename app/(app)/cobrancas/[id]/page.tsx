@@ -1,9 +1,9 @@
 'use client'
 
-import { useActionState, useState, useEffect, useCallback } from 'react'
+import { useActionState, useState, useEffect, useCallback, useTransition } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { Loader2, CheckCircle, Pencil, CalendarCheck, Bell, X } from 'lucide-react'
+import { Loader2, CheckCircle, Pencil, CalendarCheck, Bell, X, Send } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { baixarParcelaAction, editarParcelaAction, cobrarManualAction } from '../_actions/parcelas'
 import { cancelarCobrancaAction } from '../_actions/cobrancas'
@@ -52,6 +52,41 @@ function EditarParcelaForm({ parcela, onSucesso }: { parcela: Parcela; onSucesso
         {isPending ? 'Salvando...' : 'Salvar'}
       </button>
     </form>
+  )
+}
+
+function NotificarBtn({ parcelaId }: { parcelaId: string }) {
+  const [isPending, startTransition] = useTransition()
+  const [enviado, setEnviado] = useState(false)
+
+  function handleClick() {
+    const fd = new FormData()
+    fd.append('parcela_id', parcelaId)
+    startTransition(async () => {
+      await cobrarManualAction(fd)
+      setEnviado(true)
+      setTimeout(() => setEnviado(false), 4000)
+    })
+  }
+
+  if (enviado) {
+    return (
+      <span className="flex items-center gap-1 rounded-md bg-success-bg px-2 py-1 text-xs font-medium text-success">
+        <Send className="h-3 w-3" /> Enfileirada!
+      </span>
+    )
+  }
+
+  return (
+    <button
+      onClick={handleClick}
+      disabled={isPending}
+      title="Enviar notificação via WhatsApp"
+      className="flex items-center gap-1 rounded-md bg-primary/10 px-2 py-1 text-xs font-medium text-primary transition hover:bg-primary/20 disabled:opacity-50"
+    >
+      {isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Bell className="h-3 w-3" />}
+      {isPending ? 'Enviando...' : 'Notificar'}
+    </button>
   )
 }
 
@@ -166,18 +201,7 @@ export default function CobrancaDetailPage() {
                                 <CalendarCheck className="h-3.5 w-3.5" />
                               </button>
                             </form>
-                            <form action={cobrarManualAction}>
-                              <input type="hidden" name="parcela_id" value={p.id} />
-                              <button
-                                type="submit"
-                                aria-label="Notificar via WhatsApp"
-                                title="Enviar notificação via WhatsApp"
-                                className="flex items-center gap-1 rounded-md bg-primary/10 px-2 py-1 text-xs font-medium text-primary transition hover:bg-primary/20"
-                              >
-                                <Bell className="h-3 w-3" />
-                                Notificar
-                              </button>
-                            </form>
+                            <NotificarBtn parcelaId={p.id} />
                           </>
                         )}
                       </div>
