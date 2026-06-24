@@ -7,6 +7,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
+import { calcularVencimento } from '@/lib/utils/parcelas'
 
 // ── Cobrança manual via WhatsApp ─────────────────────────────────────────────
 // Cria notificacoes_enviadas com tipo='manual', status='fila'.
@@ -93,10 +94,10 @@ export async function baixarParcelaAction(formData: FormData) {
     .eq('parcela_id', parcelaId)
     .eq('status', 'fila')
 
-  // 4. Buscar cobrança (recorrente + cliente_id para notificação)
+  // 4. Buscar cobrança (recorrente + dados para geração de próxima parcela)
   const { data: cob } = await supabase
     .from('cobrancas')
-    .select('recorrente, cliente_id')
+    .select('recorrente, cliente_id, dia_pagamento, valor_mensalidade')
     .eq('id', parcela.cobranca_id)
     .single()
 
@@ -130,8 +131,42 @@ export async function baixarParcelaAction(formData: FormData) {
         .eq('id', parcela.cobranca_id)
     }
   }
-  // ⚠️ Recorrente: NÃO gerar próxima parcela aqui.
-  //    O scheduler (Sprint 8) varre por data e mantém 1 parcela aberta à frente.
+  // 6. Recorrente: gerar próxima parcela imediatamente se não sobrou nenhuma aberta.
+  //    O scheduler (1h) serve de safety net; aqui garante UX imediata.
+  if (cob && (cob as any).recorrente) {
+    const { count: abertas } = await supabase
+      .from('parcelas')
+      .select('*', { count: 'exact', head: true })
+      .eq('cobranca_id', parcela.cobranca_id)
+      .eq('status', 'aberta')
+
+    if ((abertas ?? 0) === 0) {
+      const { data: ultimaArr } = await supabase
+        .from('parcelas')
+        .select('numero, data_vencimento')
+        .eq('cobranca_id', parcela.cobranca_id)
+        .order('numero', { ascending: false })
+        .limit(1)
+
+      if (ultimaArr?.length) {
+        const ultima = ultimaArr[0]
+        const proximoVencimento = calcularVencimento(
+          new Date((ultima.data_vencimento as string) + 'T12:00:00'),
+          (cob as any).dia_pagamento as number,
+          1,
+        ).toISOString().slice(0, 10)
+
+        await supabase.from('parcelas').insert({
+          conta_id:        parcela.conta_id,
+          cobranca_id:     parcela.cobranca_id,
+          numero:          (ultima.numero as number) + 1,
+          valor:           (cob as any).valor_mensalidade,
+          data_vencimento: proximoVencimento,
+          status:          'aberta',
+        })
+      }
+    }
+  }
 
   revalidatePath('/cobrancas')
   revalidatePath(`/cobrancas/${parcela.cobranca_id}`)
