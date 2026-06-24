@@ -87,7 +87,7 @@ export async function criarClienteAction(
     const { data: novo, error } = await supabase.from('clientes').insert({
       conta_id:  contaId,
       nome:      campos.nome,
-      sobrenome: campos.sobrenome,
+      sobrenome: campos.sobrenome || null,
       celular,
       cpf:       cpf ?? null,
       email:     campos.email || null,
@@ -130,7 +130,7 @@ export async function atualizarClienteAction(
 
     const { error } = await supabase
       .from('clientes')
-      .update({ nome: campos.nome, sobrenome: campos.sobrenome, celular, cpf: cpf ?? null, email: campos.email || null })
+      .update({ nome: campos.nome, sobrenome: campos.sobrenome || null, celular, cpf: cpf ?? null, email: campos.email || null })
       .eq('id', clienteId)   // RLS garante que só altera cliente da própria conta
     if (error) return { error: error.message }
 
