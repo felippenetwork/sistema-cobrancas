@@ -2,10 +2,9 @@
 
 // Página de conexão WhatsApp.
 // Usa Supabase Realtime para receber QR e atualizações de status em tempo real.
-// O socket Baileys fica no worker VPS — este componente só exibe o estado.
+// O worker uazapi fica no VPS — este componente só exibe o estado.
 
 import { useState, useEffect, useCallback } from 'react'
-import QRCode from 'react-qr-code'
 import { Loader2, Wifi, WifiOff, RefreshCw, LogOut } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { conectarAction, desconectarAction, reiniciarAction } from './_actions/conexao'
@@ -130,7 +129,8 @@ export default function ConexaoPage() {
             {conexao?.qr_code ? (
               <>
                 <div className="mx-auto inline-block rounded-lg bg-white p-3">
-                  <QRCode value={conexao.qr_code} size={200} />
+                  {/* uazapi retorna PNG data URL — renderizar como imagem diretamente */}
+                  <img src={conexao.qr_code} alt="QR Code WhatsApp" width={200} height={200} />
                 </div>
                 <p className="mt-4 text-sm text-muted-foreground">
                   Abra o WhatsApp → <strong className="text-foreground">Aparelhos conectados</strong> → Conectar aparelho
