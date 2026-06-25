@@ -14,8 +14,8 @@ const INPUT = 'w-full rounded-md border border-border bg-input px-3 py-2 text-sm
 const LABEL = 'block text-xs font-medium uppercase tracking-wide text-muted-foreground'
 
 type Cliente = {
-  id: string; nome: string; sobrenome: string
-  celular: string; cpf: string; email: string
+  id: string; nome: string; sobrenome: string | null
+  celular: string; cpf: string | null; email: string | null
 }
 
 export default function EditarClientePage() {
@@ -59,7 +59,7 @@ export default function EditarClientePage() {
           ← Clientes
         </Link>
         <h1 className="mt-2 text-xl font-semibold text-foreground">
-          {cliente.nome} {cliente.sobrenome}
+          {cliente.nome} {cliente.sobrenome ?? ''}
         </h1>
       </div>
 
@@ -78,7 +78,7 @@ export default function EditarClientePage() {
               </div>
               <div className="space-y-1.5">
                 <label className={LABEL}>Sobrenome</label>
-                <input type="text" name="sobrenome" defaultValue={cliente.sobrenome} className={INPUT} />
+                <input type="text" name="sobrenome" defaultValue={cliente.sobrenome ?? ''} className={INPUT} />
               </div>
             </div>
 
@@ -86,7 +86,7 @@ export default function EditarClientePage() {
               <label className={LABEL}>CPF</label>
               <input
                 type="text" name="cpf" maxLength={14}
-                defaultValue={formatarCPF(cliente.cpf)}
+                defaultValue={cliente.cpf ? formatarCPF(cliente.cpf) : ''}
                 className={INPUT}
               />
             </div>
@@ -102,7 +102,7 @@ export default function EditarClientePage() {
 
             <div className="space-y-1.5">
               <label className={LABEL}>E-mail</label>
-              <input type="email" name="email" defaultValue={cliente.email} className={INPUT} />
+              <input type="email" name="email" defaultValue={cliente.email ?? ''} className={INPUT} />
             </div>
 
             {state.error && (
