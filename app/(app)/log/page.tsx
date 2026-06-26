@@ -23,6 +23,7 @@ const CANAL_LABEL: Record<string, string> = {
 const TIPO_LABEL: Record<string, string> = {
   '5d': '5d antes', '3d': '3d antes', '2d': '2d antes', '1d': '1d antes',
   dia: 'No dia', vencido1d: 'Vencido', manual: 'Manual', boasvindas: 'Boas-vindas',
+  pagamento_confirmado: 'Pag. confirmado',
 }
 
 export default async function LogPage({

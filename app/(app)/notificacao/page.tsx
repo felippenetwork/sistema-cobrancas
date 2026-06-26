@@ -4,9 +4,9 @@ import { useActionState, useState, useEffect, useCallback, useRef } from 'react'
 import {
   Loader2, Pencil, X, MessageSquare, Mail,
   ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, Search,
+  Copy, Check, Hash,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { NOTIF_TIPOS } from '@/lib/notificacao/tipos'
 import { NOTIF_DEFAULTS } from '@/lib/notificacao/tipos'
 import { toggleCanalAction, salvarTemplateAction, seedNotificacoesAction } from './_actions/notificacao'
 
@@ -22,7 +22,6 @@ type Config = {
 
 const PER_PAGE_OPTIONS = [10, 25, 50]
 
-// Badge de cor por tipo
 const TIPO_META: Record<string, { label: string; cls: string }> = {
   '5d':                   { label: '5 dias antes',          cls: 'bg-warning/20 text-warning' },
   '3d':                   { label: '3 dias antes',          cls: 'bg-warning/20 text-warning' },
@@ -33,6 +32,93 @@ const TIPO_META: Record<string, { label: string; cls: string }> = {
   'manual':               { label: 'Cobrança manual',       cls: 'bg-primary/20 text-primary' },
   'boasvindas':           { label: 'Boas-vindas',           cls: 'bg-success/20 text-success' },
   'pagamento_confirmado': { label: 'Pagamento confirmado',  cls: 'bg-success/20 text-success' },
+}
+
+const ATALHOS = [
+  { variavel: '#NOME#',         desc: 'Primeiro nome do cliente (ex: João)' },
+  { variavel: '#NOMECOMPLETO#', desc: 'Nome e sobrenome do cliente' },
+  { variavel: '#VALOR#',        desc: 'Valor da mensalidade (ex: R$ 150,00)' },
+  { variavel: '#VENCIMENTO#',   desc: 'Data de vencimento da parcela (ex: 15/06/2025)' },
+  { variavel: '#PIX#',          desc: 'Chave Pix padrão configurada na conta' },
+  { variavel: '#SAUDACAO#',     desc: 'Saudação aleatória (ex: Olá, tudo bem?)' },
+]
+
+// ── Botão + painel flutuante de atalhos ──────────────────────────────────────
+// Inclui o trigger button dentro do wrapRef para que o click-outside
+// não feche o painel quando o próprio botão é clicado.
+function AtalhosTrigger({
+  label = 'Atalhos',
+  posClass = 'right-0 top-full mt-1',
+}: {
+  label?: string
+  posClass?: string
+}) {
+  const [open, setOpen]       = useState(false)
+  const [copiado, setCopiado] = useState<string | null>(null)
+  const wrapRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handle(e: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handle)
+    return () => document.removeEventListener('mousedown', handle)
+  }, [])
+
+  async function copiar(v: string) {
+    try { await navigator.clipboard.writeText(v) } catch {}
+    setCopiado(v)
+    setTimeout(() => setCopiado(null), 1500)
+  }
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        className="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-muted-foreground transition hover:border-primary hover:text-primary"
+      >
+        <Hash className="h-3.5 w-3.5" />
+        {label}
+      </button>
+
+      {open && (
+        <div className={`absolute z-50 w-80 rounded-lg border border-border bg-card shadow-xl ${posClass}`}>
+          <div className="flex items-center justify-between border-b border-border px-4 py-3">
+            <span className="text-sm font-semibold text-foreground">Variáveis disponíveis</span>
+            <button type="button" onClick={() => setOpen(false)}
+              className="rounded p-0.5 text-muted-foreground transition hover:text-foreground">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <ul className="max-h-56 overflow-y-auto p-2">
+            {ATALHOS.map(a => (
+              <li key={a.variavel}
+                className="flex items-center gap-3 rounded-md px-3 py-2.5 hover:bg-accent/30">
+                <div className="min-w-0 flex-1">
+                  <code className="text-xs font-semibold text-primary">{a.variavel}</code>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{a.desc}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => copiar(a.variavel)}
+                  aria-label={`Copiar ${a.variavel}`}
+                  className="shrink-0 rounded p-1.5 text-muted-foreground transition hover:bg-accent hover:text-foreground"
+                >
+                  {copiado === a.variavel
+                    ? <Check className="h-3.5 w-3.5 text-success" />
+                    : <Copy className="h-3.5 w-3.5" />}
+                </button>
+              </li>
+            ))}
+          </ul>
+          <p className="border-t border-border px-4 py-2.5 text-xs text-muted-foreground">
+            Clique para copiar e cole no template com Ctrl+V.
+          </p>
+        </div>
+      )}
+    </div>
+  )
 }
 
 // ── Formulário de edição (em Sheet) ─────────────────────────────────────────
@@ -70,19 +156,25 @@ function EditSheet({
             <input type="hidden" name="tipo" value={cfg.tipo} />
 
             <div className="space-y-1.5">
-              <label className={LABEL}>Horário de envio</label>
+              <label className={LABEL}>
+                Horário de envio
+                <span className="ml-1 font-normal normal-case tracking-normal text-muted-foreground/60">
+                  (Horário de Brasília)
+                </span>
+              </label>
               <input type="time" name="horario" defaultValue={cfg.horario} className={INPUT} />
             </div>
 
+            {/* WhatsApp template + botão atalhos */}
             <div className="space-y-1.5">
-              <label className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                <MessageSquare className="h-3.5 w-3.5" /> Template WhatsApp
-              </label>
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  <MessageSquare className="h-3.5 w-3.5" /> Template WhatsApp
+                </label>
+                <AtalhosTrigger posClass="right-0 top-full mt-1" />
+              </div>
               <textarea name="template_whatsapp" rows={5}
                 defaultValue={cfg.template_whatsapp ?? ''} className={TEXTAREA} />
-              <p className="text-xs text-muted-foreground">
-                Variáveis: #NOME# #NOMECOMPLETO# #VALOR# #VENCIMENTO# #PIX# #SAUDACAO#
-              </p>
             </div>
 
             <div className="space-y-1.5">
@@ -93,16 +185,20 @@ function EditSheet({
                 defaultValue={cfg.assunto_email ?? ''} className={INPUT} />
             </div>
 
+            {/* E-mail body + botão atalhos */}
             <div className="space-y-1.5">
-              <label className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                <Mail className="h-3.5 w-3.5" /> Corpo do e-mail
-              </label>
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  <Mail className="h-3.5 w-3.5" /> Corpo do e-mail
+                </label>
+                <AtalhosTrigger posClass="right-0 top-full mt-1" />
+              </div>
               <textarea name="template_email" rows={5}
                 defaultValue={cfg.template_email ?? ''} className={TEXTAREA} />
             </div>
 
             {state.error && (
-              <p className="rounded-md bg-destructive-bg px-3 py-2 text-sm text-destructive">{state.error}</p>
+              <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{state.error}</p>
             )}
           </form>
         </div>
@@ -125,14 +221,14 @@ function EditSheet({
 
 // ── Página principal ─────────────────────────────────────────────────────────
 export default function NotificacaoPage() {
-  const [configs, setConfigs]     = useState<Config[]>([])
-  const [loading, setLoading]     = useState(true)
-  const [editando, setEditando]   = useState<Config | null>(null)
-  const [toggling, setToggling]   = useState<string | null>(null)
+  const [configs, setConfigs]       = useState<Config[]>([])
+  const [loading, setLoading]       = useState(true)
+  const [editando, setEditando]     = useState<Config | null>(null)
+  const [toggling, setToggling]     = useState<string | null>(null)
   const [buscaInput, setBuscaInput] = useState('')
-  const [busca, setBusca]         = useState('')
-  const [perPage, setPerPage]     = useState(10)
-  const [page, setPage]           = useState(1)
+  const [busca, setBusca]           = useState('')
+  const [perPage, setPerPage]       = useState(10)
+  const [page, setPage]             = useState(1)
 
   const fetchConfigs = useCallback(async () => {
     const sb = createClient()
@@ -144,7 +240,6 @@ export default function NotificacaoPage() {
     let { data } = await sb.from('notificacoes_config')
       .select('*').eq('conta_id', (conta as any).id).order('created_at')
 
-    // Seed se não existir nenhum config, ou se faltar algum tipo (novo tipo adicionado)
     if (!data?.length || data.length < NOTIF_DEFAULTS.length) {
       await seedNotificacoesAction()
       const { data: seeded } = await sb.from('notificacoes_config')
@@ -164,11 +259,9 @@ export default function NotificacaoPage() {
     setToggling(null)
   }
 
-  // Filtro + paginação client-side
-  const filtrados = configs.filter(c => {
+  const filtrados  = configs.filter(c => {
     if (!busca) return true
-    const meta = TIPO_META[c.tipo]
-    return meta?.label.toLowerCase().includes(busca.toLowerCase())
+    return TIPO_META[c.tipo]?.label.toLowerCase().includes(busca.toLowerCase())
   })
   const totalPages = Math.ceil(filtrados.length / perPage)
   const inicio     = filtrados.length === 0 ? 0 : (page - 1) * perPage + 1
@@ -190,7 +283,13 @@ export default function NotificacaoPage() {
   return (
     <div className="p-8">
 
-      {/* Linha 1 — por página + busca */}
+      {/* Cabeçalho */}
+      <div className="mb-6 flex items-center justify-between">
+        <h1 className="text-xl font-semibold text-foreground">Notificações</h1>
+        <AtalhosTrigger label="Atalhos de variáveis" posClass="right-0 top-full mt-2" />
+      </div>
+
+      {/* Linha — por página + busca */}
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           Exibir
@@ -242,7 +341,8 @@ export default function NotificacaoPage() {
               pagina.map((cfg, i) => {
                 const meta    = TIPO_META[cfg.tipo]
                 const isAtivo = cfg.ativo_whatsapp
-                const preview = cfg.template_whatsapp?.replace(/#\w+#/g, m => m) ?? '—'
+                // Substitui #VARIAVEL# por [VARIAVEL] para preview legível
+                const preview = cfg.template_whatsapp?.replace(/#(\w+)#/g, '[$1]') ?? '—'
 
                 return (
                   <tr key={cfg.tipo} className="bg-card transition-colors hover:bg-accent/20">
