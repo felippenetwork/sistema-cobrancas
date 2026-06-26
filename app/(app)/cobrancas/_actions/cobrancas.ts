@@ -163,7 +163,7 @@ export async function criarCobrancaRapidaAction(
           tipo: 'boasvindas', canal: 'whatsapp', status: 'fila', agendado_para: agora },
         { conta_id: contaId, cobranca_id: cob.id, cliente_id: clienteId,
           tipo: 'boasvindas', canal: 'email',    status: 'fila', agendado_para: agora },
-      ])
+      ]).throwOnError()
     }
 
   } catch (e: unknown) {
@@ -172,7 +172,7 @@ export async function criarCobrancaRapidaAction(
 
   revalidatePath('/cobrancas')
   revalidatePath('/clientes')
-  return { error: null, success: true }
+  redirect('/cobrancas')
 }
 
 // ── Cancelar cobrança ────────────────────────────────────────────────────────
