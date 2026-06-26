@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { Loader2, CheckCircle } from 'lucide-react'
 import { atualizarClienteAction, excluirClienteAction } from '../_actions/clientes'
 import { formatarCPF } from '@/lib/validations/cpf'
-import { formatarCelular } from '@/lib/validations/celular'
+import { mascararCelular } from '@/lib/validations/celular'
 import { createClient } from '@/lib/supabase/client'
 import { useParams } from 'next/navigation'
 
@@ -22,6 +22,7 @@ export default function EditarClientePage() {
   const { id } = useParams<{ id: string }>()
   const [cliente, setCliente] = useState<Cliente | null>(null)
   const [loading, setLoading] = useState(true)
+  const [celularInput, setCelularInput] = useState('')
   const [state, formAction, isPending] = useActionState(atualizarClienteAction, { error: null })
 
   useEffect(() => {
@@ -31,7 +32,11 @@ export default function EditarClientePage() {
       .select('id, nome, sobrenome, celular, cpf, email')
       .eq('id', id)
       .single()
-      .then(({ data }) => { setCliente(data as Cliente); setLoading(false) })
+      .then(({ data }) => {
+        setCliente(data as Cliente)
+        if (data?.celular) setCelularInput(mascararCelular(data.celular))
+        setLoading(false)
+      })
   }, [id])
 
   if (loading) {
@@ -95,7 +100,8 @@ export default function EditarClientePage() {
               <label className={LABEL}>Celular *</label>
               <input
                 type="text" name="celular" required
-                defaultValue={formatarCelular(cliente.celular)}
+                value={celularInput}
+                onChange={e => setCelularInput(mascararCelular(e.target.value))}
                 className={INPUT}
               />
             </div>

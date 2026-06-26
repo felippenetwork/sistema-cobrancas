@@ -9,13 +9,15 @@ import { createClient } from '@/lib/supabase/client'
 const INPUT = 'w-full rounded-md border border-border bg-input px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary focus:ring-offset-1 focus:ring-offset-card'
 const LABEL = 'block text-xs font-medium uppercase tracking-wide text-muted-foreground'
 
-type Cliente = { id: string; nome: string; sobrenome: string }
+type Cliente = { id: string; nome: string; sobrenome: string | null }
 
-// Próximo mês no formato "YYYY-MM"
+// Próximo mês no fuso SP (America/Sao_Paulo) → "YYYY-MM"
 function proximoMes() {
-  const d = new Date()
-  d.setMonth(d.getMonth() + 1)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  const sp  = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' })
+  const [ano, mes] = sp.split('-').map(Number)
+  return mes === 12
+    ? `${ano + 1}-01`
+    : `${ano}-${String(mes + 1).padStart(2, '0')}`
 }
 
 export default function NovaCobrancaPage() {
@@ -52,7 +54,7 @@ export default function NovaCobrancaPage() {
             <select name="cliente_id" required className={INPUT}>
               <option value="">Selecione...</option>
               {clientes.map(c => (
-                <option key={c.id} value={c.id}>{c.nome} {c.sobrenome}</option>
+                <option key={c.id} value={c.id}>{c.nome}{c.sobrenome ? ' ' + c.sobrenome : ''}</option>
               ))}
             </select>
           </div>

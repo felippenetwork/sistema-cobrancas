@@ -40,8 +40,10 @@ function extrairCampos(formData: FormData) {
   }
 }
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
+
 function validarCampos(campos: ReturnType<typeof extrairCampos>) {
-  const { nome, cpfRaw, celRaw } = campos
+  const { nome, cpfRaw, celRaw, email } = campos
   if (!nome || !celRaw) {
     return { error: 'Preencha nome e celular.' }
   }
@@ -52,6 +54,9 @@ function validarCampos(campos: ReturnType<typeof extrairCampos>) {
   const celular = normalizarCelular(celRaw)
   if (!celular) {
     return { error: 'Celular inválido. Use o formato (DDD) número, ex.: 11 99999-9999.' }
+  }
+  if (email && !EMAIL_REGEX.test(email)) {
+    return { error: 'E-mail inválido. Verifique o endereço informado.' }
   }
   return { cpf, celular }
 }

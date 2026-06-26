@@ -1,10 +1,11 @@
 'use client'
 
-import { useActionState, useEffect } from 'react'
+import { useActionState, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Loader2 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { criarClienteAction } from '../_actions/clientes'
+import { mascararCelular } from '@/lib/validations/celular'
 
 const INPUT = 'w-full rounded-md border border-border bg-input px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary focus:ring-offset-1 focus:ring-offset-card'
 const LABEL = 'block text-xs font-medium uppercase tracking-wide text-muted-foreground'
@@ -12,6 +13,7 @@ const LABEL = 'block text-xs font-medium uppercase tracking-wide text-muted-fore
 export default function NovoClientePage() {
   const router = useRouter()
   const [state, formAction, isPending] = useActionState(criarClienteAction, { error: null })
+  const [celularInput, setCelularInput] = useState('')
 
   useEffect(() => {
     if (state.success) router.push('/clientes')
@@ -55,12 +57,11 @@ export default function NovoClientePage() {
             <label className={LABEL}>Celular *</label>
             <input
               type="text" name="celular" required
-              placeholder="(11) 99999-9999"
+              value={celularInput}
+              onChange={e => setCelularInput(mascararCelular(e.target.value))}
+              placeholder="+55 (11) 99999-9999"
               className={INPUT}
             />
-            <p className="text-xs text-muted-foreground">
-              Inclua o DDD. Número normalizado automaticamente para o WhatsApp.
-            </p>
           </div>
 
           <div className="space-y-1.5">

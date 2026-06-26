@@ -7,7 +7,7 @@ import {
   ChevronsLeft, ChevronsRight, X, Loader2, MessageCircle, Pencil, Trash2,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { formatarCelular } from '@/lib/validations/celular'
+import { formatarCelular, mascararCelular } from '@/lib/validations/celular'
 import { formatBRL } from '@/lib/utils/format'
 import { criarClienteAction } from './_actions/clientes'
 import { criarCobrancaRapidaAction } from '../cobrancas/_actions/cobrancas'
@@ -39,15 +39,6 @@ const INPUT =
   'w-full rounded-md border border-border bg-input px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary'
 const LABEL = 'block text-xs font-medium uppercase tracking-wide text-muted-foreground'
 
-function mascararCelular(raw: string): string {
-  let d = raw.replace(/\D/g, '')
-  if (d.startsWith('55') && d.length > 2) d = d.slice(2)
-  d = d.slice(0, 11)
-  if (d.length === 0)  return ''
-  if (d.length <= 2)   return `+55 (${d}`
-  if (d.length <= 7)   return `+55 (${d.slice(0, 2)}) ${d.slice(2)}`
-  return `+55 (${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`
-}
 
 export default function ClientesPage() {
   const [state,    formAction,    isPending]    = useActionState(criarClienteAction,        { error: null })
@@ -109,6 +100,23 @@ export default function ClientesPage() {
         query = query.or(
           `nome.ilike.%${busca}%,sobrenome.ilike.%${busca}%,email.ilike.%${busca}%,celular.ilike.%${busca}%`,
         )
+      }
+
+      // Filtro ativos/inativos — busca IDs com cobranças ativas e aplica no query
+      if (filtro !== 'todos') {
+        const { data: rows } = await sb
+          .from('cobrancas').select('cliente_id').eq('status', 'ativa')
+        const idsAtivos = [...new Set((rows ?? []).map((r: any) => r.cliente_id as string))]
+
+        if (filtro === 'ativos') {
+          if (idsAtivos.length === 0) {
+            if (!cancelled) { setClientes([]); setTotal(0); setLoading(false) }
+            return
+          }
+          query = query.in('id', idsAtivos)
+        } else if (filtro === 'inativos' && idsAtivos.length > 0) {
+          query = query.not('id', 'in', `(${idsAtivos.join(',')})`)
+        }
       }
 
       const { data, count } = await query
@@ -316,7 +324,7 @@ export default function ClientesPage() {
                     {/* Celular — abre WhatsApp */}
                     <td className="px-4 py-3">
                       <a
-                        href={`https://wa.me/55${c.celular.replace(/\D/g, '')}`}
+                        href={`https://wa.me/${c.celular.replace(/\D/g, '')}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         title="Abrir no WhatsApp"
