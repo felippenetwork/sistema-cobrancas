@@ -62,7 +62,7 @@ export async function salvarTemplateAction(
   try {
     const { supabase, contaId } = await getConta()
 
-    const horario          = (formData.get('horario')           as string).trim()
+    const horario          = (formData.get('horario') as string).trim().slice(0, 5)
     if (!/^\d{2}:\d{2}$/.test(horario)) return { error: 'Horário inválido. Use o formato HH:MM.' }
 
     const templateWhatsapp = (formData.get('template_whatsapp') as string).trim()
