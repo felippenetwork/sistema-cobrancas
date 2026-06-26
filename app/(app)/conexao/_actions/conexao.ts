@@ -49,14 +49,25 @@ export async function desconectarAction() {
   revalidatePath('/conexao')
 }
 
-/** Solicita ao worker que reinicie e gere novo QR sem derrubar o servidor. */
+/** Solicita ao worker que sincronize o estado. Não muda status se já conectado (evita flash de QR). */
 export async function reiniciarAction() {
   const { supabase, contaId } = await getConta()
 
-  await supabase.from('conexoes').upsert(
-    { conta_id: contaId, status: 'conectando', comando: 'reconectar', qr_code: null },
-    { onConflict: 'conta_id' },
-  )
+  const { data: atual } = await supabase
+    .from('conexoes').select('status').eq('conta_id', contaId).maybeSingle()
+
+  if ((atual as any)?.status === 'conectado') {
+    // Já conectado — apenas envia comando sem mudar status (o worker confirma/sincroniza)
+    await supabase.from('conexoes')
+      .update({ comando: 'reconectar', qr_code: null })
+      .eq('conta_id', contaId)
+  } else {
+    // Desconectado ou conectando — mudar para 'conectando' para dar feedback visual
+    await supabase.from('conexoes').upsert(
+      { conta_id: contaId, status: 'conectando', comando: 'reconectar', qr_code: null },
+      { onConflict: 'conta_id' },
+    )
+  }
 
   revalidatePath('/conexao')
 }
