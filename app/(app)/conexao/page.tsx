@@ -150,16 +150,36 @@ export default function ConexaoPage() {
           </div>
         )}
 
-        {/* Desconectado: instruções */}
+        {/* Desconectado: mostrar último número conectado se disponível */}
         {status === 'desconectado' && (
-          <div className="rounded-lg border border-border bg-card p-4">
-            <div className="flex items-center gap-2 text-muted-foreground mb-2">
+          <div className={`rounded-lg border bg-card p-4 ${conexao?.numero_conectado ? 'border-destructive/40' : 'border-border'}`}>
+            <div className={`flex items-center gap-2 mb-2 ${conexao?.numero_conectado ? 'text-destructive' : 'text-muted-foreground'}`}>
               <WifiOff className="h-4 w-4" />
-              <span className="text-sm">Nenhum número conectado</span>
+              <span className="text-sm font-medium">
+                {conexao?.numero_conectado ? 'Conexão encerrada' : 'Nenhum número conectado'}
+              </span>
             </div>
-            <p className="text-sm text-muted-foreground">
-              Clique em <strong className="text-foreground">Conectar</strong> para gerar o QR Code e parear seu WhatsApp.
-            </p>
+            {conexao?.numero_conectado ? (
+              <div className="space-y-1">
+                <p className="text-sm text-foreground">
+                  <span className="text-muted-foreground">Número:</span>{' '}
+                  +{conexao.numero_conectado}
+                </p>
+                {conexao.device_name && (
+                  <p className="text-sm text-foreground">
+                    <span className="text-muted-foreground">Dispositivo:</span>{' '}
+                    {conexao.device_name}
+                  </p>
+                )}
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Clique em <strong className="text-foreground">Reconectar</strong> para restaurar a conexão.
+                </p>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Clique em <strong className="text-foreground">Conectar</strong> para gerar o QR Code e parear seu WhatsApp.
+              </p>
+            )}
           </div>
         )}
 
@@ -172,7 +192,7 @@ export default function ConexaoPage() {
               className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
             >
               {actionPending && <Loader2 className="h-4 w-4 animate-spin" />}
-              Conectar
+              {conexao?.numero_conectado ? 'Reconectar' : 'Conectar'}
             </button>
           )}
 
