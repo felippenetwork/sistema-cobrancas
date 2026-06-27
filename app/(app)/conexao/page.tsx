@@ -3,9 +3,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Loader2, Wifi, WifiOff, RefreshCw, LogOut, Smartphone, QrCode } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { conectarAction, desconectarAction, reiniciarAction } from './_actions/conexao'
 
 type Conexao = {
@@ -79,35 +76,36 @@ export default function ConexaoPage() {
       <h1 className="mb-6 text-xl font-semibold text-foreground">Conexão WhatsApp</h1>
 
       <div className="max-w-sm">
-        <Card>
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between gap-2">
-              <CardTitle className="text-sm font-semibold">WhatsApp</CardTitle>
+        <div className="rounded-lg border border-border bg-card">
 
-              {status === 'conectado' && (
-                <Badge className="bg-success/15 text-success border-success/25 gap-1.5">
-                  <span className="h-1.5 w-1.5 rounded-full bg-success" />
-                  Conectado
-                </Badge>
-              )}
-              {status === 'conectando' && (
-                <Badge className="bg-warning/15 text-warning border-warning/25 gap-1.5 animate-pulse">
-                  <span className="h-1.5 w-1.5 rounded-full bg-warning" />
-                  Conectando…
-                </Badge>
-              )}
-              {status === 'desconectado' && (
-                <Badge variant="outline" className="text-muted-foreground gap-1.5">
-                  <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50" />
-                  Desconectado
-                </Badge>
-              )}
-            </div>
-          </CardHeader>
+          {/* ── Header ── */}
+          <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
+            <span className="text-sm font-semibold text-foreground">WhatsApp</span>
 
-          <CardContent className="space-y-4">
+            {status === 'conectado' && (
+              <span className="flex items-center gap-1.5 rounded-full border border-success/25 bg-success/10 px-2.5 py-0.5 text-[11px] font-medium text-success">
+                <span className="h-1.5 w-1.5 rounded-full bg-success" />
+                Conectado
+              </span>
+            )}
+            {status === 'conectando' && (
+              <span className="flex animate-pulse items-center gap-1.5 rounded-full border border-warning/25 bg-warning/10 px-2.5 py-0.5 text-[11px] font-medium text-warning">
+                <span className="h-1.5 w-1.5 rounded-full bg-warning" />
+                Conectando…
+              </span>
+            )}
+            {status === 'desconectado' && (
+              <span className="flex items-center gap-1.5 rounded-full border border-border px-2.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+                <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40" />
+                Desconectado
+              </span>
+            )}
+          </div>
 
-            {/* ── Conectado ── */}
+          {/* ── Conteúdo ── */}
+          <div className="space-y-4 p-4">
+
+            {/* Conectado */}
             {status === 'conectado' && (
               <>
                 <div className="flex items-center gap-3 rounded-md border border-success/20 bg-success/5 px-3 py-2.5">
@@ -119,30 +117,24 @@ export default function ConexaoPage() {
                     </p>
                   </div>
                 </div>
-
                 {conexao?.device_name && (
-                  <p className="text-center text-xs text-muted-foreground">
-                    {conexao.device_name}
-                  </p>
+                  <p className="text-center text-xs text-muted-foreground">{conexao.device_name}</p>
                 )}
               </>
             )}
 
-            {/* ── Conectando — QR Code ── */}
+            {/* Conectando — QR Code */}
             {status === 'conectando' && (
               conexao?.qr_code ? (
                 <div className="flex flex-col items-center gap-3">
-                  <div className="rounded-lg bg-white p-2.5 shadow-sm">
-                    <img
-                      src={conexao.qr_code}
-                      alt="QR Code WhatsApp"
-                      width={190}
-                      height={190}
-                    />
+                  <div className="rounded-lg bg-white p-2.5">
+                    <img src={conexao.qr_code} alt="QR Code WhatsApp" width={190} height={190} />
                   </div>
                   <p className="text-center text-xs text-muted-foreground">
                     WhatsApp{' '}
-                    <span className="text-foreground font-medium">→ Aparelhos conectados → Conectar aparelho</span>
+                    <span className="font-medium text-foreground">
+                      → Aparelhos conectados → Conectar aparelho
+                    </span>
                   </p>
                   <p className="text-center text-[11px] text-muted-foreground/60">
                     O QR atualiza automaticamente caso expire.
@@ -156,7 +148,7 @@ export default function ConexaoPage() {
               )
             )}
 
-            {/* ── Desconectado ── */}
+            {/* Desconectado */}
             {status === 'desconectado' && (
               <div className="flex flex-col items-center gap-2 py-6">
                 {conexao?.numero_conectado ? (
@@ -167,7 +159,9 @@ export default function ConexaoPage() {
                     <p className="text-sm font-medium text-foreground">Conexão encerrada</p>
                     <p className="text-xs text-muted-foreground">+{conexao.numero_conectado}</p>
                     <p className="mt-1 text-center text-xs text-muted-foreground">
-                      Clique em <span className="font-medium text-foreground">Reconectar</span> para restaurar.
+                      Clique em{' '}
+                      <span className="font-medium text-foreground">Reconectar</span>{' '}
+                      para restaurar.
                     </p>
                   </>
                 ) : (
@@ -175,57 +169,54 @@ export default function ConexaoPage() {
                     <QrCode className="h-10 w-10 text-muted-foreground/30" />
                     <p className="text-sm font-medium text-foreground">Nenhum número conectado</p>
                     <p className="text-center text-xs text-muted-foreground">
-                      Clique em <span className="font-medium text-foreground">Conectar</span> para gerar o QR Code.
+                      Clique em{' '}
+                      <span className="font-medium text-foreground">Conectar</span>{' '}
+                      para gerar o QR Code e parear seu WhatsApp.
                     </p>
                   </>
                 )}
               </div>
             )}
 
-            {/* ── Botões ── */}
+            {/* Botões */}
             <div className="flex gap-2 pt-1">
               {status === 'desconectado' ? (
-                <Button
-                  size="sm"
-                  className="flex-1 gap-1.5"
+                <button
                   disabled={actionPending}
                   onClick={() => runAction(conectarAction)}
+                  className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
                 >
                   {actionPending
                     ? <Loader2 className="h-4 w-4 animate-spin" />
                     : <Wifi className="h-4 w-4" />}
                   {conexao?.numero_conectado ? 'Reconectar' : 'Conectar'}
-                </Button>
+                </button>
               ) : (
                 <>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="flex-1 gap-1.5"
+                  <button
                     disabled={actionPending}
                     onClick={() => runAction(reiniciarAction)}
+                    className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-border bg-transparent px-4 py-2 text-sm text-foreground transition hover:bg-accent disabled:opacity-50"
                   >
                     <RefreshCw className="h-3.5 w-3.5" />
                     Atualizar
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    className="gap-1.5"
+                  </button>
+                  <button
                     disabled={actionPending}
                     onClick={() => runAction(desconectarAction)}
+                    className="flex items-center justify-center gap-1.5 rounded-md border border-destructive/40 px-4 py-2 text-sm font-medium text-destructive transition hover:bg-destructive/10 disabled:opacity-50"
                   >
                     {actionPending
                       ? <Loader2 className="h-4 w-4 animate-spin" />
                       : <LogOut className="h-4 w-4" />}
                     Desconectar
-                  </Button>
+                  </button>
                 </>
               )}
             </div>
 
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </div>
     </div>
   )
