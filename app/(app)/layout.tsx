@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { AppSidebar } from './_components/app-sidebar'
+import { AppShell } from './_components/app-shell'
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient()
@@ -27,11 +27,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (isBlocked) redirect('/plano-expirado')
 
   return (
-    <div className="flex min-h-screen bg-background">
-      <AppSidebar nomeEmpresa={(conta as any).nome_empresa ?? ''} />
-      <main className="flex-1 overflow-auto">
-        {children}
-      </main>
-    </div>
+    <AppShell nomeEmpresa={(conta as any).nome_empresa ?? ''}>
+      {children}
+    </AppShell>
   )
 }

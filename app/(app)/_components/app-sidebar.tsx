@@ -2,28 +2,36 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Users, FileText, Wallet, Smartphone, Bell, CreditCard, ScrollText, Settings } from 'lucide-react'
+import { LayoutDashboard, Users, FileText, Wallet, Smartphone, Bell, CreditCard, ScrollText, Settings, X } from 'lucide-react'
 import { signOutAction } from '../_actions/auth'
 import { SairButton } from '@/app/_components/sair-button'
 
 type NavItem = { href: string; label: string; icon: React.ReactNode }
 
 const NAV: NavItem[] = [
-  { href: '/dashboard', label: 'Dashboard',  icon: <LayoutDashboard className="h-4 w-4" /> },
+  { href: '/dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-4 w-4" /> },
 ]
 
 const NAV_COBRANCAS: NavItem[] = [
-  { href: '/clientes',  label: 'Clientes',  icon: <Users       className="h-4 w-4" /> },
-  { href: '/cobrancas', label: 'Cobranças', icon: <FileText    className="h-4 w-4" /> },
-  { href: '/caixa',     label: 'Caixa',     icon: <Wallet      className="h-4 w-4" /> },
-  { href: '/notificacao',    label: 'Notificação',   icon: <Bell        className="h-4 w-4" /> },
-  { href: '/tipo-pagamento', label: 'Tipo Pag.',    icon: <CreditCard  className="h-4 w-4" /> },
-  { href: '/log',            label: 'Log',           icon: <ScrollText  className="h-4 w-4" /> },
-  { href: '/conexao',        label: 'Conexão WA',   icon: <Smartphone  className="h-4 w-4" /> },
-  { href: '/configuracoes',  label: 'Configurações', icon: <Settings    className="h-4 w-4" /> },
+  { href: '/clientes',       label: 'Clientes',      icon: <Users      className="h-4 w-4" /> },
+  { href: '/cobrancas',      label: 'Cobranças',     icon: <FileText   className="h-4 w-4" /> },
+  { href: '/caixa',          label: 'Caixa',         icon: <Wallet     className="h-4 w-4" /> },
+  { href: '/notificacao',    label: 'Notificação',   icon: <Bell       className="h-4 w-4" /> },
+  { href: '/tipo-pagamento', label: 'Tipo Pag.',     icon: <CreditCard className="h-4 w-4" /> },
+  { href: '/log',            label: 'Log',           icon: <ScrollText className="h-4 w-4" /> },
+  { href: '/conexao',        label: 'Conexão WA',   icon: <Smartphone className="h-4 w-4" /> },
+  { href: '/configuracoes',  label: 'Configurações', icon: <Settings   className="h-4 w-4" /> },
 ]
 
-export function AppSidebar({ nomeEmpresa }: { nomeEmpresa: string }) {
+export function AppSidebar({
+  nomeEmpresa,
+  isOpen = false,
+  onClose,
+}: {
+  nomeEmpresa: string
+  isOpen?: boolean
+  onClose?: () => void
+}) {
   const pathname = usePathname()
 
   function cls(href: string) {
@@ -37,22 +45,38 @@ export function AppSidebar({ nomeEmpresa }: { nomeEmpresa: string }) {
   }
 
   return (
-    <aside className="flex w-56 shrink-0 flex-col border-r border-border bg-card">
-
-      {/* Marca */}
-      <div className="border-b border-border px-5 py-5">
-        <p className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">Cobranx</p>
-        <p className="mt-0.5 truncate text-sm font-semibold text-foreground">{nomeEmpresa}</p>
+    <aside
+      className={[
+        // Mobile: painel fixo deslizante que entra pela esquerda
+        'fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-border bg-card',
+        'transition-transform duration-300 ease-in-out',
+        // Desktop (md+): retorna ao fluxo normal e sempre visível
+        'md:relative md:inset-auto md:z-auto md:w-56 md:shrink-0 md:translate-x-0',
+        isOpen ? 'translate-x-0' : '-translate-x-full',
+      ].join(' ')}
+    >
+      {/* Marca + botão fechar (X visível só no mobile) */}
+      <div className="flex items-start justify-between border-b border-border px-5 py-5">
+        <div className="min-w-0">
+          <p className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">Cobranx</p>
+          <p className="mt-0.5 truncate text-sm font-semibold text-foreground">{nomeEmpresa}</p>
+        </div>
+        <button
+          onClick={onClose}
+          className="ml-2 shrink-0 rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground md:hidden"
+          aria-label="Fechar menu"
+        >
+          <X className="h-5 w-5" />
+        </button>
       </div>
 
       {/* Navegação */}
-      <nav className="flex-1 space-y-0.5 px-3 py-4">
-
+      <nav className="flex-1 space-y-0.5 overflow-y-auto px-3 py-4">
         <p className="mb-1 px-2 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
           Geral
         </p>
         {NAV.map(item => (
-          <Link key={item.href} href={item.href} className={cls(item.href)}>
+          <Link key={item.href} href={item.href} className={cls(item.href)} onClick={onClose}>
             {item.icon}
             {item.label}
           </Link>
@@ -62,19 +86,17 @@ export function AppSidebar({ nomeEmpresa }: { nomeEmpresa: string }) {
           Cobranças
         </p>
         {NAV_COBRANCAS.map(item => (
-          <Link key={item.href} href={item.href} className={cls(item.href)}>
+          <Link key={item.href} href={item.href} className={cls(item.href)} onClick={onClose}>
             {item.icon}
             {item.label}
           </Link>
         ))}
-
       </nav>
 
-      {/* Sair com confirmação (PRD §6.11) */}
+      {/* Sair com confirmação */}
       <div className="border-t border-border px-3 py-3">
         <SairButton signOutAction={signOutAction} />
       </div>
-
     </aside>
   )
 }
