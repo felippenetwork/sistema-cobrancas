@@ -87,8 +87,8 @@ export default async function LogPage({
           <p className="text-sm text-muted-foreground">Nenhuma notificação neste período.</p>
         </div>
       ) : (
-        <div className="overflow-hidden rounded-lg border border-border">
-          <table className="w-full text-sm">
+        <div className="overflow-x-auto rounded-lg border border-border">
+          <table className="min-w-[700px] w-full text-sm">
             <thead className="border-b border-border bg-muted/30">
               <tr>
                 {['Cliente', 'Tipo', 'Canal', 'Status', 'Data', 'Agendado', 'Enviado'].map(h => (
