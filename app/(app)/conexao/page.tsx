@@ -82,24 +82,21 @@ export default function ConexaoPage() {
           <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
             <span className="text-sm font-semibold text-foreground">WhatsApp</span>
 
-            {status === 'conectado' && (
-              <span className="flex items-center gap-1.5 rounded-full border border-success/25 bg-success/10 px-2.5 py-0.5 text-[11px] font-medium text-success">
-                <span className="h-1.5 w-1.5 rounded-full bg-success" />
-                Conectado
+            <div className="flex shrink-0 items-center gap-1.5">
+              {status === 'conectado' && (
+                <span className="h-2 w-2 rounded-full bg-green-500" />
+              )}
+              {status === 'conectando' && (
+                <span className="h-2 w-2 animate-pulse rounded-full bg-yellow-500" />
+              )}
+              {status === 'desconectado' && (
+                <span className="h-2 w-2 rounded-full bg-zinc-500" />
+              )}
+              <span className="text-[11px] text-muted-foreground">
+                {status === 'conectado'    ? 'Conectado'   :
+                 status === 'conectando'   ? 'Conectando…' : 'Desconectado'}
               </span>
-            )}
-            {status === 'conectando' && (
-              <span className="flex animate-pulse items-center gap-1.5 rounded-full border border-warning/25 bg-warning/10 px-2.5 py-0.5 text-[11px] font-medium text-warning">
-                <span className="h-1.5 w-1.5 rounded-full bg-warning" />
-                Conectando…
-              </span>
-            )}
-            {status === 'desconectado' && (
-              <span className="flex items-center gap-1.5 rounded-full border border-border px-2.5 py-0.5 text-[11px] font-medium text-muted-foreground">
-                <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40" />
-                Desconectado
-              </span>
-            )}
+            </div>
           </div>
 
           {/* ── Conteúdo ── */}
@@ -108,11 +105,11 @@ export default function ConexaoPage() {
             {/* Conectado */}
             {status === 'conectado' && (
               <>
-                <div className="flex items-center gap-3 rounded-md border border-success/20 bg-success/5 px-3 py-2.5">
-                  <Smartphone className="h-4 w-4 shrink-0 text-success" />
+                <div className="flex items-center gap-2 rounded-md border border-green-500/20 bg-green-500/10 px-3 py-2">
+                  <Smartphone className="h-4 w-4 shrink-0 text-green-600 dark:text-green-400" />
                   <div className="min-w-0 flex-1">
                     <p className="text-[11px] text-muted-foreground">Número conectado</p>
-                    <p className="truncate text-sm font-semibold tabular-nums text-success">
+                    <p className="truncate text-sm font-semibold tabular-nums text-green-700 dark:text-green-400">
                       +{conexao?.numero_conectado}
                     </p>
                   </div>
