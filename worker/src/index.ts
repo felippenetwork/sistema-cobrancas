@@ -6,7 +6,7 @@ import 'dotenv/config'
 import { createServer } from 'http'
 import pino from 'pino'
 import { createAdminClient } from './supabase.js'
-import { BaileysManager } from './baileys-manager.js'
+import { UazapiManager } from './uazapi-manager.js'
 import { runScheduler } from './scheduler.js'
 import { processarFilaWhatsApp, processarFilaImediata } from './workers/whatsapp-worker.js'
 import { processarFilaEmail } from './workers/email-worker.js'
@@ -15,29 +15,30 @@ import { sleep } from './format.js'
 const logger = pino({ level: process.env.LOG_LEVEL ?? 'warn' })
 
 // Intervalos de polling
-const SCHEDULER_INTERVAL_MS  = 60 * 60 * 1000   // 1h entre execuções do scheduler
-const WA_POLL_INTERVAL_MS    = 15_000            // 15s entre ciclos do worker WA
+const SCHEDULER_INTERVAL_MS   = 60 * 60 * 1000  // 1h entre execuções do scheduler
+const SYNC_CONEXOES_INTERVAL_MS = 5 * 60 * 1000 // 5min — varredura global de estado uazapi
+const WA_POLL_INTERVAL_MS     = 15_000           // 15s entre ciclos do worker WA
 const WA_IMEDIATO_INTERVAL_MS = 3_000            // 3s — pagamento_confirmado e boasvindas
-const EMAIL_POLL_INTERVAL_MS = 15_000            // 15s entre ciclos do worker e-mail
-const CMD_POLL_INTERVAL_MS   = 10_000            // 10s entre verificações de comandos pendentes
+const EMAIL_POLL_INTERVAL_MS  = 15_000           // 15s entre ciclos do worker e-mail
+const CMD_POLL_INTERVAL_MS    = 10_000           // 10s entre verificações de comandos pendentes
 
 async function main() {
   logger.info('Cobranx Worker iniciando...')
 
   const supabase = createAdminClient()
-  const manager  = new BaileysManager(supabase)
 
-  // ── Startup: limpar estados inconsistentes ─────────────────────────────────
-  // 'conectando' sem sessão real → desconectado; comandos stale → limpar
-  await supabase.from('conexoes')
-    .update({ status: 'desconectado', qr_code: null, comando: null })
-    .eq('status', 'conectando')
+  const manager = new UazapiManager(supabase)
+
+  logger.info('WhatsApp provider: uazapi')
+
+  // ── Startup: limpar comandos stale ────────────────────────────────────────
+  // Não resetar 'conectando' → restaurarSessoes() verifica o estado real no uazapi
   await supabase.from('conexoes')
     .update({ comando: null })
     .not('comando', 'is', null)
 
-  // ── Baileys: restaurar sessões ──────────────────────────────────────────────
-  logger.info('Restaurando sessões Baileys...')
+  // ── Restaurar sessões uazapi ───────────────────────────────────────────────
+  logger.info('Restaurando sessões uazapi...')
   await manager.restaurarSessoes()
 
   // ── Realtime: receber comandos de conexão ───────────────────────────────────
@@ -123,10 +124,22 @@ async function main() {
     }
   }
 
+  // ── Sincronização periódica de conexões: varredura global a cada 5 min ────────
+  // Detecta contas cujo loop de polling parou (circuit breaker) ou nunca iniciou,
+  // compara o estado real do uazapi com o banco e corrige inconsistências.
+  const loopSyncConexoes = async () => {
+    while (true) {
+      await sleep(SYNC_CONEXOES_INTERVAL_MS)
+      try { await manager.sincronizarConexoes() }
+      catch (err) { logger.error({ err }, 'Sync conexões: erro') }
+    }
+  }
+
   loopComandos()
   loopWhatsApp()
   loopImediato()
   loopEmail()
+  loopSyncConexoes()
 
   // ── Health check HTTP ───────────────────────────────────────────────────────
   const healthPort = parseInt(process.env.HEALTH_PORT ?? '3001')

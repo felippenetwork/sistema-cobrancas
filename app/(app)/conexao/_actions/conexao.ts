@@ -2,8 +2,7 @@
 
 // Ações de conexão WhatsApp.
 // O frontend grava um "comando" na tabela conexoes;
-// o worker (VPS) lê via Realtime, executa e limpa o campo.
-// Nunca há socket Baileys aqui — tudo no worker.
+// o worker (VPS) lê via Realtime + polling, executa e limpa o campo.
 
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
@@ -30,7 +29,7 @@ export async function conectarAction() {
   revalidatePath('/conexao')
 }
 
-/** Solicita ao worker que encerre a conexão (logout). */
+/** Solicita ao worker que encerre a conexão. */
 export async function desconectarAction() {
   const { supabase, contaId } = await getConta()
 
@@ -49,7 +48,7 @@ export async function desconectarAction() {
   revalidatePath('/conexao')
 }
 
-/** Solicita ao worker que sincronize o estado. Não muda status se já conectado (evita flash de QR). */
+/** Solicita ao worker que sincronize o estado. */
 export async function reiniciarAction() {
   const { supabase, contaId } = await getConta()
 
@@ -57,12 +56,10 @@ export async function reiniciarAction() {
     .from('conexoes').select('status').eq('conta_id', contaId).maybeSingle()
 
   if ((atual as any)?.status === 'conectado') {
-    // Já conectado — apenas envia comando sem mudar status (o worker confirma/sincroniza)
     await supabase.from('conexoes')
       .update({ comando: 'reconectar', qr_code: null })
       .eq('conta_id', contaId)
   } else {
-    // Desconectado ou conectando — mudar para 'conectando' para dar feedback visual
     await supabase.from('conexoes').upsert(
       { conta_id: contaId, status: 'conectando', comando: 'reconectar', qr_code: null },
       { onConflict: 'conta_id' },
@@ -70,4 +67,8 @@ export async function reiniciarAction() {
   }
 
   revalidatePath('/conexao')
+}
+
+export async function refreshStatusAction() {
+  // Não é mais necessário — o worker faz polling ativo e atualiza o banco automaticamente.
 }
