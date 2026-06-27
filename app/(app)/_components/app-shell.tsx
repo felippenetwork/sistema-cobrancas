@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Image from 'next/image'
 import { Menu } from 'lucide-react'
 import { AppSidebar } from './app-sidebar'
 
@@ -39,7 +40,7 @@ export function AppShell({
           >
             <Menu className="h-5 w-5" />
           </button>
-          <span className="ml-3 text-sm font-semibold text-foreground">Cobranx</span>
+          <Image src="/logo.png" alt="Cobranx" width={100} height={32} className="ml-3 h-8 w-auto object-contain" />
         </div>
 
         <main className="flex-1 overflow-auto">

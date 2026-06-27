@@ -1,5 +1,6 @@
 'use client'
 
+import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { LayoutDashboard, Users, FileText, Wallet, Smartphone, Bell, CreditCard, ScrollText, Settings, X } from 'lucide-react'
@@ -56,11 +57,15 @@ export function AppSidebar({
       ].join(' ')}
     >
       {/* Marca + botão fechar (X visível só no mobile) */}
-      <div className="flex items-start justify-between border-b border-border px-5 py-5">
-        <div className="min-w-0">
-          <p className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">Cobranx</p>
-          <p className="mt-0.5 truncate text-sm font-semibold text-foreground">{nomeEmpresa}</p>
-        </div>
+      <div className="flex items-center justify-between border-b border-border px-4 py-3">
+        <Image
+          src="/logo.png"
+          alt="Cobranx"
+          width={130}
+          height={40}
+          className="h-10 w-auto object-contain"
+          priority
+        />
         <button
           onClick={onClose}
           className="ml-2 shrink-0 rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground md:hidden"
