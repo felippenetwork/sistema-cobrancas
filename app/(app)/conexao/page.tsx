@@ -106,10 +106,10 @@ export default function ConexaoPage() {
             {status === 'conectado' && (
               <>
                 <div className="flex items-center gap-2 rounded-md border border-green-500/20 bg-green-500/10 px-3 py-2">
-                  <Smartphone className="h-4 w-4 shrink-0 text-green-600 dark:text-green-400" />
+                  <Smartphone className="h-4 w-4 shrink-0 text-green-400" />
                   <div className="min-w-0 flex-1">
                     <p className="text-[11px] text-muted-foreground">Número conectado</p>
-                    <p className="truncate text-sm font-semibold tabular-nums text-green-700 dark:text-green-400">
+                    <p className="truncate text-sm font-semibold tabular-nums text-green-400">
                       +{conexao?.numero_conectado}
                     </p>
                   </div>
