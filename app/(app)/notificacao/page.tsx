@@ -317,8 +317,8 @@ export default function NotificacaoPage() {
       </div>
 
       {/* Tabela */}
-      <div className="overflow-hidden rounded-lg border border-border">
-        <table className="w-full text-sm">
+      <div className="overflow-x-auto rounded-lg border border-border">
+        <table className="min-w-[700px] w-full text-sm">
           <thead className="border-b border-border bg-muted/40">
             <tr>
               <th className="w-12 px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">#</th>

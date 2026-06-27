@@ -142,8 +142,8 @@ export default function CobrancaDetailPage() {
       </div>
 
       {/* Parcelas */}
-      <div className="overflow-hidden rounded-lg border border-border">
-        <table className="w-full text-sm">
+      <div className="overflow-x-auto rounded-lg border border-border">
+        <table className="min-w-[550px] w-full text-sm">
           <thead className="border-b border-border bg-muted/30">
             <tr>
               {['#', 'Vencimento', 'Pago em', 'Valor', 'Status', ''].map(h => (

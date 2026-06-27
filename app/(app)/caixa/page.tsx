@@ -68,8 +68,8 @@ export default async function CaixaPage({
           <p className="text-sm text-muted-foreground">Nenhum lançamento neste mês.</p>
         </div>
       ) : (
-        <div className="overflow-hidden rounded-lg border border-border">
-          <table className="w-full text-sm">
+        <div className="overflow-x-auto rounded-lg border border-border">
+          <table className="min-w-[480px] w-full text-sm">
             <thead className="border-b border-border bg-muted/30">
               <tr>
                 {['Data', 'Descrição', 'Tipo', 'Valor', ''].map(h => (
