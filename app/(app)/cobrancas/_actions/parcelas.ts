@@ -104,18 +104,33 @@ export async function baixarParcelaAction(formData: FormData) {
     .eq('id', parcela.cobranca_id)
     .single()
 
-  // Enfileirar confirmação de pagamento via WhatsApp (imediato)
+  // Enfileirar confirmação de pagamento (respeita ativo_whatsapp / ativo_email da config)
   const clienteId = (cob as any)?.cliente_id as string | null
   if (clienteId) {
-    await supabase.from('notificacoes_enviadas').insert({
+    const { data: cfgPag } = await supabase
+      .from('notificacoes_config')
+      .select('ativo_whatsapp, ativo_email')
+      .eq('conta_id', parcela.conta_id)
+      .eq('tipo', 'pagamento_confirmado')
+      .maybeSingle()
+
+    const agora     = new Date().toISOString()
+    const baseNotif = {
       conta_id:      parcela.conta_id,
       parcela_id:    parcela.id,
+      cobranca_id:   parcela.cobranca_id,
       cliente_id:    clienteId,
       tipo:          'pagamento_confirmado',
-      canal:         'whatsapp',
       status:        'fila',
-      agendado_para: new Date().toISOString(),
-    })
+      agendado_para: agora,
+    }
+
+    if ((cfgPag as any)?.ativo_whatsapp) {
+      await supabase.from('notificacoes_enviadas').insert({ ...baseNotif, canal: 'whatsapp' })
+    }
+    if ((cfgPag as any)?.ativo_email) {
+      await supabase.from('notificacoes_enviadas').insert({ ...baseNotif, canal: 'email' })
+    }
   }
 
   // 5. Fechar cobrança não-recorrente quando todas as parcelas estão pagas (A6)
