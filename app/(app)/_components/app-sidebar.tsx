@@ -3,7 +3,7 @@
 import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Users, FileText, Wallet, Smartphone, Bell, CreditCard, ScrollText, Settings, X } from 'lucide-react'
+import { LayoutDashboard, Users, FileText, Wallet, Smartphone, Bell, CreditCard, ScrollText, Settings, X, CalendarClock } from 'lucide-react'
 import { signOutAction } from '../_actions/auth'
 import { SairButton } from '@/app/_components/sair-button'
 
@@ -17,7 +17,8 @@ const NAV_COBRANCAS: NavItem[] = [
   { href: '/clientes',       label: 'Clientes',      icon: <Users      className="h-4 w-4" /> },
   { href: '/cobrancas',      label: 'Cobranças',     icon: <FileText   className="h-4 w-4" /> },
   { href: '/caixa',          label: 'Caixa',         icon: <Wallet     className="h-4 w-4" /> },
-  { href: '/notificacao',    label: 'Notificação',   icon: <Bell       className="h-4 w-4" /> },
+  { href: '/notificacao',    label: 'Notificação',   icon: <Bell          className="h-4 w-4" /> },
+  { href: '/agendamentos',   label: 'Agendamentos',  icon: <CalendarClock className="h-4 w-4" /> },
   { href: '/tipo-pagamento', label: 'Tipo Pag.',     icon: <CreditCard className="h-4 w-4" /> },
   { href: '/log',            label: 'Log',           icon: <ScrollText className="h-4 w-4" /> },
   { href: '/conexao',        label: 'Conexão WA',   icon: <Smartphone className="h-4 w-4" /> },
@@ -61,9 +62,9 @@ export function AppSidebar({
         <Image
           src="/logo.png"
           alt="Cobranx"
-          width={130}
-          height={40}
-          className="h-10 w-auto object-contain"
+          width={180}
+          height={56}
+          className="h-14 w-auto object-contain"
           priority
         />
         <button

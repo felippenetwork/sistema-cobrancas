@@ -8,7 +8,7 @@
 import pino from 'pino'
 import { Resend } from 'resend'
 import { dentroDaJanela, sleep, hojeEmSP, addDias } from '../format.js'
-import { resolverVariaveis } from '../variaveis.js'
+import { resolverVariaveis, resolverVariaveisLeves } from '../variaveis.js'
 import type { SupabaseAdmin } from '../supabase.js'
 
 const logger = pino({ level: process.env.LOG_LEVEL ?? 'warn' })
@@ -27,7 +27,7 @@ export async function processarFilaEmail(supabase: SupabaseAdmin) {
 
   const { data: pendentes } = await supabase
     .from('notificacoes_enviadas')
-    .select('id, conta_id, parcela_id, cobranca_id, cliente_id, tipo')
+    .select('id, conta_id, parcela_id, cobranca_id, cliente_id, tipo, assunto, mensagem_final')
     .eq('canal', 'email')
     .eq('status', 'fila')
     .lte('agendado_para', agora)
@@ -42,9 +42,15 @@ export async function processarFilaEmail(supabase: SupabaseAdmin) {
 
 async function processarUmEmail(
   supabase: SupabaseAdmin,
-  notif: { id: string; conta_id: string; parcela_id: string | null; cobranca_id: string | null; cliente_id: string; tipo: string },
+  notif: { id: string; conta_id: string; parcela_id: string | null; cobranca_id: string | null; cliente_id: string; tipo: string; assunto?: string | null; mensagem_final?: string | null },
 ) {
   const contaId = notif.conta_id
+
+  // ── Desvio isolado: e-mail agendado avulso (sem template/parcela) ───────
+  if (notif.tipo === 'agendada') {
+    await processarEmailAgendado(supabase, contaId, notif)
+    return
+  }
 
   // Verificar optout_email
   const { data: cliente } = await supabase
@@ -149,6 +155,98 @@ async function processarUmEmail(
     logger.info({ notifId: notif.id, resendId: resendData?.id }, 'Email: enviado')
   } catch (err) {
     logger.error({ notifId: notif.id, err }, 'Email: erro ao enviar')
+    if (!dentroDaJanela()) {
+      const amanha = addDias(hojeEmSP(), 1)
+      await supabase.from('notificacoes_enviadas')
+        .update({ agendado_para: new Date(`${amanha}T09:00:00-03:00`).toISOString() })
+        .eq('id', notif.id)
+    } else {
+      await supabase.from('notificacoes_enviadas').update({ status: 'falhou' }).eq('id', notif.id)
+    }
+  }
+}
+
+// ── E-mail agendado avulso (sem parcela — caminho isolado) ───────────────────
+
+async function processarEmailAgendado(
+  supabase: SupabaseAdmin,
+  contaId: string,
+  notif: { id: string; cliente_id: string; assunto?: string | null; mensagem_final?: string | null },
+) {
+  const { data: cliente } = await supabase
+    .from('clientes')
+    .select('nome, sobrenome, email, optout_email, deleted_at')
+    .eq('id', notif.cliente_id)
+    .maybeSingle()
+
+  if (!cliente || (cliente as any).deleted_at) {
+    await supabase.from('notificacoes_enviadas').update({ status: 'cancelado' }).eq('id', notif.id)
+    return
+  }
+  if ((cliente as any).optout_email) {
+    await supabase.from('notificacoes_enviadas').update({ status: 'cancelado' }).eq('id', notif.id)
+    return
+  }
+
+  const toAddress = (cliente as any).email as string | null
+  if (!toAddress) {
+    await supabase.from('notificacoes_enviadas').update({ status: 'falhou' }).eq('id', notif.id)
+    return
+  }
+
+  const assunto = notif.assunto?.trim()
+  const corpo   = notif.mensagem_final?.trim()
+  if (!assunto || !corpo) {
+    await supabase.from('notificacoes_enviadas').update({ status: 'falhou' }).eq('id', notif.id)
+    return
+  }
+
+  // Buscar remetente (igual ao fluxo principal)
+  const [{ data: remConfig }, { data: platConfig }] = await Promise.all([
+    supabase.from('email_remetente').select('local_part, from_name').eq('conta_id', contaId).maybeSingle(),
+    supabase.from('plataforma_config').select('dominio_email_operador').single(),
+  ])
+
+  const localPart = (remConfig as any)?.local_part
+  const dominio   = (platConfig as any)?.dominio_email_operador
+  if (!localPart || !dominio) {
+    await supabase.from('notificacoes_enviadas').update({ status: 'falhou' }).eq('id', notif.id)
+    return
+  }
+
+  const fromName    = (remConfig as any)?.from_name ?? localPart
+  const fromAddress = `${fromName} <${localPart}@${dominio}>`
+  const unsubUrl    = `${SITE_URL}/descadastrar/${notif.cliente_id}`
+
+  // Resolver variáveis no assunto e no corpo
+  const [assuntoFinal, conteudoFinal] = await Promise.all([
+    resolverVariaveisLeves(supabase, { contaId, clienteId: notif.cliente_id, template: assunto }),
+    resolverVariaveisLeves(supabase, { contaId, clienteId: notif.cliente_id, template: corpo }),
+  ])
+
+  const html = gerarHTMLEmail({ assunto: assuntoFinal, conteudo: conteudoFinal, fromName, unsubscribeUrl: unsubUrl })
+
+  try {
+    const { data: resendData, error: resendErr } = await resend!.emails.send({
+      from:    fromAddress,
+      to:      toAddress,
+      subject: assuntoFinal,
+      html,
+      headers: { 'List-Unsubscribe': `<${unsubUrl}>` },
+    })
+
+    if (resendErr) throw resendErr
+
+    await supabase.from('notificacoes_enviadas').update({
+      status:            'enviado',
+      mensagem_final:    conteudoFinal,
+      enviado_em:        new Date().toISOString(),
+      resend_message_id: resendData?.id ?? null,
+    }).eq('id', notif.id)
+
+    logger.info({ notifId: notif.id, resendId: resendData?.id }, 'Email agendado: enviado')
+  } catch (err) {
+    logger.error({ notifId: notif.id, err }, 'Email agendado: erro ao enviar')
     if (!dentroDaJanela()) {
       const amanha = addDias(hojeEmSP(), 1)
       await supabase.from('notificacoes_enviadas')

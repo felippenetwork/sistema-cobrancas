@@ -21,6 +21,7 @@ import {
 import { resolverVariaveis } from '../variaveis.js'
 import type { SupabaseAdmin } from '../supabase.js'
 import type { UazapiManager } from '../uazapi-manager.js'
+import { resolverVariaveisLeves } from '../variaveis.js'
 
 const logger = pino({ level: process.env.LOG_LEVEL ?? 'warn' })
 
@@ -30,6 +31,7 @@ const RETRY_DELAY_MS = 5_000   // pausa entre tentativas (ms)
 type Notif = {
   id: string; conta_id: string
   parcela_id: string | null; cobranca_id: string | null; cliente_id: string; tipo: string
+  mensagem_final: string | null
 }
 
 // ── Ponto de entrada — chamado a cada ciclo de 15s ───────────────────────────
@@ -45,7 +47,7 @@ export async function processarFilaWhatsApp(
   // Carrega candidatos: fila pendente, excluindo tipos imediatos (têm loop próprio)
   const { data: pendentes } = await supabase
     .from('notificacoes_enviadas')
-    .select('id, conta_id, parcela_id, cobranca_id, cliente_id, tipo')
+    .select('id, conta_id, parcela_id, cobranca_id, cliente_id, tipo, mensagem_final')
     .eq('canal', 'whatsapp')
     .eq('status', 'fila')
     .not('tipo', 'in', '("pagamento_confirmado","boasvindas")')
@@ -86,6 +88,12 @@ async function processarUmaNotificacao(
   notif: Notif,
   semDigitacao = false,
 ) {
+  // ── Desvio isolado: mensagem agendada avulsa (sem parcela/template) ──────
+  if (notif.tipo === 'agendada') {
+    await processarAgendada(supabase, manager, contaId, notif, semDigitacao)
+    return
+  }
+
   // ── 1. Buscar template ────────────────────────────────────────────────────
   const { data: cfg } = await supabase
     .from('notificacoes_config')
@@ -221,7 +229,7 @@ export async function processarFilaImediata(
 
   const { data: pendentes } = await supabase
     .from('notificacoes_enviadas')
-    .select('id, conta_id, parcela_id, cobranca_id, cliente_id, tipo')
+    .select('id, conta_id, parcela_id, cobranca_id, cliente_id, tipo, mensagem_final')
     .eq('canal', 'whatsapp')
     .eq('status', 'fila')
     .in('tipo', ['pagamento_confirmado', 'boasvindas'])
@@ -244,6 +252,62 @@ export async function processarFilaImediata(
   for (const [contaId, notif] of porConta) {
     await processarUmaNotificacao(supabase, manager, contaId, notif, true)
   }
+}
+
+// ── Mensagem agendada avulsa (sem parcela — caminho isolado) ─────────────────
+
+async function processarAgendada(
+  supabase: SupabaseAdmin,
+  manager: UazapiManager,
+  contaId: string,
+  notif: Notif,
+  semDigitacao: boolean,
+) {
+  const template = notif.mensagem_final?.trim()
+  if (!template) {
+    await marcarFalhou(supabase, notif.id)
+    return
+  }
+
+  const { data: cliente } = await supabase
+    .from('clientes')
+    .select('celular, deleted_at')
+    .eq('id', notif.cliente_id)
+    .maybeSingle()
+
+  if (!cliente) { await cancelarNotif(supabase, notif.id); return }
+  if ((cliente as any).deleted_at) { await cancelarNotif(supabase, notif.id); return }
+
+  const celular = (cliente as any).celular as string | null
+  if (!celular) { await marcarFalhou(supabase, notif.id); return }
+
+  const mensagem = await resolverVariaveisLeves(supabase, {
+    contaId, clienteId: notif.cliente_id, template,
+  })
+
+  let ultimoErro: unknown
+  for (let tentativa = 1; tentativa <= MAX_RETRIES; tentativa++) {
+    if (!manager.hasSocket(contaId, semDigitacao)) {
+      await reagendar(supabase, notif.id)
+      return
+    }
+    try {
+      await manager.enviarMensagem(contaId, celular, mensagem, semDigitacao)
+      await supabase.from('notificacoes_enviadas').update({
+        status:         'enviado',
+        mensagem_final: mensagem,
+        enviado_em:     new Date().toISOString(),
+      }).eq('id', notif.id)
+      return
+    } catch (err) {
+      ultimoErro = err
+      if (tentativa < MAX_RETRIES) await sleep(RETRY_DELAY_MS)
+    }
+  }
+
+  logger.error({ contaId, notifId: notif.id, ultimoErro }, 'Agendada WA: todas as tentativas falharam')
+  if (!dentroDaJanela()) await reagendar(supabase, notif.id)
+  else await marcarFalhou(supabase, notif.id)
 }
 
 // ── Helpers de estado ────────────────────────────────────────────────────────

@@ -17,6 +17,28 @@ export function substituirVariaveis(
     .replace(/#VENCIMENTO#/g,    vars.vencimento)
 }
 
+// Resolve apenas variáveis que NÃO dependem de parcela (uso: mensagens agendadas).
+// Substitui #NOME#, #NOMECOMPLETO#, #SAUDACAO#. Demais tokens ficam literais.
+export async function resolverVariaveisLeves(
+  supabase: SupabaseAdmin,
+  { contaId, clienteId, template }: { contaId: string; clienteId: string; template: string },
+): Promise<string> {
+  const [{ data: cliente }, { data: saudacoes }] = await Promise.all([
+    supabase.from('clientes').select('nome, sobrenome').eq('id', clienteId).single(),
+    supabase.from('saudacoes').select('texto').eq('conta_id', contaId),
+  ])
+
+  const textos   = (saudacoes ?? []).map((s: any) => s.texto as string)
+  const saudacao = textos.length ? textos[Math.floor(Math.random() * textos.length)] : 'Olá!'
+  const nome     = (cliente as any)?.nome ?? ''
+  const sobrenome = (cliente as any)?.sobrenome ?? ''
+
+  return template
+    .replace(/#NOMECOMPLETO#/g, `${nome} ${sobrenome}`.trim())
+    .replace(/#NOME#/g,         nome)
+    .replace(/#SAUDACAO#/g,     saudacao)
+}
+
 export async function resolverVariaveis(
   supabase: SupabaseAdmin,
   { contaId, parcelaId, clienteId, template }: {
