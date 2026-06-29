@@ -277,14 +277,31 @@ export class UazapiManager {
     if (!token) return 'disconnected'
     try {
       const data = await instanceApi(token, 'GET', '/instance/status')
-      if (data?.status?.connected === true) return 'connected'
-      const s = (data?.instance?.status as string) ?? 'disconnected'
-      if (s === 'connected')  return 'connected'
-      if (s === 'connecting') return 'connecting'
+      logger.debug({ contaId, data }, 'uazapi: /instance/status raw response')
+
+      // Tenta múltiplos caminhos — a uazapi v2 pode variar a estrutura do response
+      const connected =
+        data?.connected === true ||
+        data?.status?.connected === true ||
+        data?.instance?.connected === true
+
+      if (connected) return 'connected'
+
+      // Status como string (open = conectado no protocolo WA; connected = alias uazapi)
+      const s = (
+        data?.instance?.status ||
+        data?.status?.state   ||
+        data?.status?.status  ||
+        data?.state           ||
+        ''
+      ).toLowerCase()
+
+      if (s === 'connected' || s === 'open')      return 'connected'
+      if (s === 'connecting' || s === 'opening')  return 'connecting'
+
       return 'disconnected'
     } catch (err: any) {
-      // 404 = instância deletada no uazapi → limpar token stale e retornar desconectado
-      // (não lançar — o loop de polling detecta 'disconnected' e chama marcarDesconectado())
+      // 404 = instância deletada no uazapi → limpar token stale
       if (/404/.test(String(err?.message ?? ''))) {
         this.instanceTokens.delete(contaId)
         return 'disconnected'
