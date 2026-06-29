@@ -42,7 +42,7 @@ type CobrancaRow = {
   parcelas: Parcela[]
 }
 
-const PER_PAGE_OPTIONS = [10, 25, 50]
+const PER_PAGE_OPTIONS = [10, 15, 25, 50]
 
 export function CobrancasTable({ cobrancas }: { cobrancas: CobrancaRow[] }) {
   const [cancelandoId, setCancelandoId] = useState<string | null>(null)
