@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { MonthSelector } from '@/app/(app)/_components/month-selector'
 import { parseMes, getMesBounds } from '@/lib/utils/mes'
 import { formatData, formatHora } from '@/lib/utils/format'
+import { AcoesLog } from './_components/acoes-log'
 
 export const metadata = { title: 'Log de Notificações' }
 
@@ -91,8 +92,8 @@ export default async function LogPage({
           <table className="min-w-[700px] w-full text-sm">
             <thead className="border-b border-border bg-muted/30">
               <tr>
-                {['Cliente', 'Tipo', 'Canal', 'Status', 'Data', 'Agendado', 'Enviado'].map(h => (
-                  <th key={h} className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">{h}</th>
+                {['Cliente', 'Tipo', 'Canal', 'Status', 'Data', 'Agendado', 'Enviado', ''].map((h, i) => (
+                  <th key={i} className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">{h}</th>
                 ))}
               </tr>
             </thead>
@@ -112,6 +113,9 @@ export default async function LogPage({
                     <td className="monetary px-4 py-3 text-muted-foreground">{formatData(l.created_at)}</td>
                     <td className="monetary px-4 py-3 text-muted-foreground">{formatHora(l.agendado_para)}</td>
                     <td className="monetary px-4 py-3 text-muted-foreground">{formatHora(l.enviado_em)}</td>
+                    <td className="px-2 py-3">
+                      <AcoesLog id={l.id} status={l.status} />
+                    </td>
                   </tr>
                 )
               })}
