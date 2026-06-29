@@ -33,6 +33,7 @@ export async function criarCobrancaAction(
     const recorrente         = formData.get('recorrente') === 'true'
     const observacao         = (formData.get('observacao') as string)?.trim() || null
     const enviarBoasVindas   = formData.get('enviar_boas_vindas') === 'true'
+    const meioPagamentoId    = (formData.get('meio_pagamento_id') as string)?.trim() || null
 
     // Validações
     if (!clienteId)                       return { error: 'Selecione um cliente.' }
@@ -63,6 +64,7 @@ export async function criarCobrancaAction(
         mes_ano_inicio:        `${mesAnoStr}-01`,
         observacao,
         enviar_boas_vindas:    enviarBoasVindas,
+        meio_pagamento_id:     meioPagamentoId,
         status:                'ativa',
       })
       .select('id')

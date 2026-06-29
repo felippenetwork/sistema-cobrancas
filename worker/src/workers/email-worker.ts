@@ -122,8 +122,9 @@ async function processarUmEmail(
     conteudoFinal = await resolverVariaveis(supabase, {
       contaId,
       parcelaId,
-      clienteId: notif.cliente_id,
+      clienteId:  notif.cliente_id,
       template,
+      cobrancaId: notif.cobranca_id,
     })
   } catch (err) {
     logger.error({ notifId: notif.id, err }, 'Email: erro ao resolver variáveis')

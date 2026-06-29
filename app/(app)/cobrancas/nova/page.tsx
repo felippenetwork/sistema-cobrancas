@@ -10,6 +10,7 @@ const INPUT = 'w-full rounded-md border border-border bg-input px-3 py-2 text-sm
 const LABEL = 'block text-xs font-medium uppercase tracking-wide text-muted-foreground'
 
 type Cliente = { id: string; nome: string; sobrenome: string | null }
+type Meio    = { id: string; nome: string; is_padrao: boolean }
 
 // Próximo mês no fuso SP (America/Sao_Paulo) → "YYYY-MM"
 function proximoMes() {
@@ -22,16 +23,19 @@ function proximoMes() {
 
 export default function NovaCobrancaPage() {
   const [state, formAction, isPending] = useActionState(criarCobrancaAction, { error: null })
-  const [clientes, setClientes]   = useState<Cliente[]>([])
+  const [clientes, setClientes]     = useState<Cliente[]>([])
+  const [meios, setMeios]           = useState<Meio[]>([])
   const [recorrente, setRecorrente] = useState(false)
 
   useEffect(() => {
     const sb = createClient()
-    sb.from('clientes')
-      .select('id, nome, sobrenome')
-      .is('deleted_at', null)
-      .order('nome')
-      .then(({ data }) => setClientes((data as Cliente[]) ?? []))
+    Promise.all([
+      sb.from('clientes').select('id, nome, sobrenome').is('deleted_at', null).order('nome'),
+      sb.from('meios_pagamento').select('id, nome, is_padrao').order('created_at'),
+    ]).then(([{ data: c }, { data: m }]) => {
+      setClientes((c as Cliente[]) ?? [])
+      setMeios((m as Meio[]) ?? [])
+    })
   }, [])
 
   return (
@@ -98,6 +102,21 @@ export default function NovaCobrancaPage() {
               <input type="month" name="mes_ano_inicio" required defaultValue={proximoMes()} className={INPUT} />
             </div>
           </div>
+
+          {/* Meio de pagamento */}
+          {meios.length > 0 && (
+            <div className="space-y-1.5">
+              <label className={LABEL}>Forma de pagamento</label>
+              <select name="meio_pagamento_id" className={INPUT}>
+                <option value="">Usar padrão da conta</option>
+                {meios.map(m => (
+                  <option key={m.id} value={m.id}>
+                    {m.nome}{m.is_padrao ? ' (padrão)' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Observação */}
           <div className="space-y-1.5">

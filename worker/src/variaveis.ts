@@ -41,20 +41,38 @@ export async function resolverVariaveisLeves(
 
 export async function resolverVariaveis(
   supabase: SupabaseAdmin,
-  { contaId, parcelaId, clienteId, template }: {
-    contaId: string; parcelaId: string; clienteId: string; template: string
+  { contaId, parcelaId, clienteId, template, cobrancaId }: {
+    contaId: string; parcelaId: string; clienteId: string; template: string; cobrancaId?: string | null
   },
 ): Promise<string> {
+  // Busca o meio de pagamento: específico da cobrança (se informado) ou o padrão da conta
+  async function buscarPix() {
+    if (cobrancaId) {
+      const { data: cob } = await supabase
+        .from('cobrancas').select('meio_pagamento_id').eq('id', cobrancaId).maybeSingle()
+      const meioid = (cob as any)?.meio_pagamento_id
+      if (meioid) {
+        const { data: meio } = await supabase
+          .from('meios_pagamento').select('mensagem').eq('id', meioid).maybeSingle()
+        if ((meio as any)?.mensagem) return meio
+      }
+    }
+    // fallback: padrão da conta
+    const { data } = await supabase
+      .from('meios_pagamento').select('mensagem').eq('conta_id', contaId).eq('is_padrao', true).maybeSingle()
+    return data
+  }
+
   const [
     { data: parcela },
     { data: cliente },
-    { data: pix },
     { data: saudacoes },
+    pix,
   ] = await Promise.all([
     supabase.from('parcelas').select('valor, data_vencimento').eq('id', parcelaId).single(),
     supabase.from('clientes').select('nome, sobrenome').eq('id', clienteId).single(),
-    supabase.from('meios_pagamento').select('mensagem').eq('conta_id', contaId).eq('is_padrao', true).maybeSingle(),
     supabase.from('saudacoes').select('texto').eq('conta_id', contaId),
+    buscarPix(),
   ])
 
   const textos   = (saudacoes ?? []).map((s: any) => s.texto as string)
