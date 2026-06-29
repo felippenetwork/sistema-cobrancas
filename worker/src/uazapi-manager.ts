@@ -15,12 +15,10 @@ function instName(contaId: string): string {
   return `quita${contaId.replace(/-/g, '').slice(0, 10)}`
 }
 
-// Extrai o número de telefone do response do /instance/status.
-// A uazapi v2 pode retornar o número em vários caminhos — tentamos todos.
 function extrairNumero(data: any): string | null {
   const tentativas = [
-    data?.status?.jid?.user,
     data?.instance?.owner,
+    data?.status?.jid?.user,
     data?.status?.owner,
     data?.status?.phone,
     data?.instance?.phone,
@@ -33,6 +31,37 @@ function extrairNumero(data: any): string | null {
     if (v && typeof v === 'number') return String(v)
   }
   return null
+}
+
+type InstanciaInfo = {
+  state:  'connected' | 'disconnected' | 'connecting'
+  phone:  string | null
+  qr:     string | null
+  nome:   string | null
+}
+
+// Usa POST /instance/connect — mesmo endpoint do ERP-RIFAS.
+// Retorna connected:true + instance.owner (telefone) quando já pareado.
+async function checarInstancia(token: string): Promise<InstanciaInfo> {
+  try {
+    const data = await instanceApi(token, 'POST', '/instance/connect')
+    const inst = data?.instance ?? {}
+
+    if (data?.connected === true) {
+      return {
+        state: 'connected',
+        phone: extrairNumero(data),
+        nome:  inst?.profileName ?? inst?.name ?? null,
+        qr:    null,
+      }
+    }
+    if (inst?.qrcode) {
+      return { state: 'connecting', phone: null, nome: null, qr: inst.qrcode }
+    }
+    return { state: 'connecting', phone: null, nome: null, qr: null }
+  } catch {
+    return { state: 'disconnected', phone: null, nome: null, qr: null }
+  }
 }
 
 // Operações admin — requerem header admintoken
@@ -276,32 +305,9 @@ export class UazapiManager {
     const token = this.instanceTokens.get(contaId)
     if (!token) return 'disconnected'
     try {
-      const data = await instanceApi(token, 'GET', '/instance/status')
-      logger.debug({ contaId, data }, 'uazapi: /instance/status raw response')
-
-      // Tenta múltiplos caminhos — a uazapi v2 pode variar a estrutura do response
-      const connected =
-        data?.connected === true ||
-        data?.status?.connected === true ||
-        data?.instance?.connected === true
-
-      if (connected) return 'connected'
-
-      // Status como string (open = conectado no protocolo WA; connected = alias uazapi)
-      const s = (
-        data?.instance?.status ||
-        data?.status?.state   ||
-        data?.status?.status  ||
-        data?.state           ||
-        ''
-      ).toLowerCase()
-
-      if (s === 'connected' || s === 'open')      return 'connected'
-      if (s === 'connecting' || s === 'opening')  return 'connecting'
-
-      return 'disconnected'
+      const info = await checarInstancia(token)
+      return info.state
     } catch (err: any) {
-      // 404 = instância deletada no uazapi → limpar token stale
       if (/404/.test(String(err?.message ?? ''))) {
         this.instanceTokens.delete(contaId)
         return 'disconnected'
@@ -314,11 +320,10 @@ export class UazapiManager {
     const token = this.instanceTokens.get(contaId)
     if (!token) return
     try {
-      const data = await instanceApi(token, 'GET', '/instance/status')
-      const qr   = data?.instance?.qrcode ?? null
-      if (qr) {
+      const info = await checarInstancia(token)
+      if (info.qr) {
         await this.supabase.from('conexoes').upsert(
-          { conta_id: contaId, qr_code: qr, status: 'conectando' },
+          { conta_id: contaId, qr_code: info.qr, status: 'conectando' },
           { onConflict: 'conta_id' },
         )
         logger.info({ contaId }, 'uazapi: QR gravado no banco')
@@ -496,20 +501,18 @@ export class UazapiManager {
       while (this.polling.has(contaId)) {
         await sleep(10_000)
         try {
-          const state = await this.pegarEstado(contaId)
+          const tok  = this.instanceTokens.get(contaId)
+          const info = tok ? await checarInstancia(tok) : { state: 'disconnected' as const, phone: null, nome: null, qr: null }
+          const state = info.state
           erros = 0  // reset no sucesso
 
           if (state === 'connected' && !this.connected.has(contaId)) {
             this.connected.add(contaId)
-            logger.info({ contaId }, 'uazapi: conectado!')
+            logger.info({ contaId, phone: info.phone }, 'uazapi: conectado!')
             try {
-              const tok  = this.instanceTokens.get(contaId)!
-              const data = await instanceApi(tok, 'GET', '/instance/status')
-              const numero = extrairNumero(data)
-              const nome   = data?.instance?.profileName ?? null
               await this.supabase.from('conexoes').upsert(
                 { conta_id: contaId, status: 'conectado', qr_code: null, comando: null,
-                  numero_conectado: numero, device_name: nome,
+                  numero_conectado: info.phone, device_name: info.nome,
                   ultima_conexao: new Date().toISOString() },
                 { onConflict: 'conta_id' },
               )
