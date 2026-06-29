@@ -110,7 +110,7 @@ export default function ConexaoPage() {
                   <div className="min-w-0 flex-1">
                     <p className="text-[11px] text-muted-foreground">Número conectado</p>
                     <p className="truncate text-sm font-semibold tabular-nums text-green-400">
-                      +{conexao?.numero_conectado}
+                      {conexao?.numero_conectado ? `+${conexao.numero_conectado}` : '—'}
                     </p>
                   </div>
                 </div>

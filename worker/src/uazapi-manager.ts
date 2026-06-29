@@ -15,6 +15,26 @@ function instName(contaId: string): string {
   return `quita${contaId.replace(/-/g, '').slice(0, 10)}`
 }
 
+// Extrai o número de telefone do response do /instance/status.
+// A uazapi v2 pode retornar o número em vários caminhos — tentamos todos.
+function extrairNumero(data: any): string | null {
+  const tentativas = [
+    data?.status?.jid?.user,
+    data?.instance?.owner,
+    data?.status?.owner,
+    data?.status?.phone,
+    data?.instance?.phone,
+    data?.jid?.user,
+  ]
+  for (const v of tentativas) {
+    if (v && typeof v === 'string') {
+      return v.replace('@s.whatsapp.net', '').replace(/\D/g, '') || null
+    }
+    if (v && typeof v === 'number') return String(v)
+  }
+  return null
+}
+
 // Operações admin — requerem header admintoken
 async function adminApi(method: string, path: string, body?: object): Promise<any> {
   const res = await fetch(`${BASE_URL}${path}`, {
@@ -81,7 +101,7 @@ export class UazapiManager {
         // Sincronizar DB — pode estar em 'conectando' se o worker reiniciou durante conexão
         try {
           const data   = await instanceApi(inst.token as string, 'GET', '/instance/status')
-          const numero = (data?.status?.jid?.user as string) ?? null
+          const numero = extrairNumero(data)
           const nome   = (data?.instance?.profileName as string) ?? null
           await this.supabase.from('conexoes').upsert(
             { conta_id: contaId, status: 'conectado', qr_code: null, comando: null,
@@ -193,7 +213,7 @@ export class UazapiManager {
       if (token) {
         try {
           const data   = await instanceApi(token, 'GET', '/instance/status')
-          const numero = (data?.status?.jid?.user as string) ?? null
+          const numero = extrairNumero(data)
           const nome   = (data?.instance?.profileName as string) ?? null
           await this.supabase.from('conexoes').upsert(
             { conta_id: contaId, status: 'conectado', qr_code: null, comando: null,
@@ -341,7 +361,7 @@ export class UazapiManager {
         this.connected.add(contaId)
         try {
           const data   = await instanceApi(inst.token as string, 'GET', '/instance/status')
-          const numero = (data?.status?.jid?.user as string) ?? null
+          const numero = extrairNumero(data)
           const nome   = (data?.instance?.profileName as string) ?? null
           await this.supabase.from('conexoes').upsert(
             { conta_id: contaId, status: 'conectado', qr_code: null, comando: null,
@@ -411,7 +431,7 @@ export class UazapiManager {
         this.connected.add(contaId)
         try {
           const data   = await instanceApi(token, 'GET', '/instance/status')
-          const numero = (data?.status?.jid?.user as string) ?? null
+          const numero = extrairNumero(data)
           const nome   = (data?.instance?.profileName as string) ?? null
           await this.supabase.from('conexoes').upsert(
             { conta_id: contaId, status: 'conectado', qr_code: null, comando: null,
@@ -468,8 +488,7 @@ export class UazapiManager {
             try {
               const tok  = this.instanceTokens.get(contaId)!
               const data = await instanceApi(tok, 'GET', '/instance/status')
-              const jid    = data?.status?.jid
-              const numero = jid?.user ?? null
+              const numero = extrairNumero(data)
               const nome   = data?.instance?.profileName ?? null
               await this.supabase.from('conexoes').upsert(
                 { conta_id: contaId, status: 'conectado', qr_code: null, comando: null,
