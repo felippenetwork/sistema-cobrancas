@@ -42,8 +42,12 @@ type CobrancaRow = {
   parcelas: Parcela[]
 }
 
+const PER_PAGE_OPTIONS = [10, 25, 50]
+
 export function CobrancasTable({ cobrancas }: { cobrancas: CobrancaRow[] }) {
   const [cancelandoId, setCancelandoId] = useState<string | null>(null)
+  const [pagina, setPagina]     = useState(1)
+  const [perPage, setPerPage]   = useState(10)
 
   const ordenadas = [...cobrancas].sort((a, b) => {
     const pA = [...a.parcelas].filter(p => p.status === 'aberta').sort((x, y) => x.data_vencimento.localeCompare(y.data_vencimento))[0]
@@ -54,20 +58,31 @@ export function CobrancasTable({ cobrancas }: { cobrancas: CobrancaRow[] }) {
     return pA.data_vencimento.localeCompare(pB.data_vencimento)
   })
 
+  const totalPaginas = Math.max(1, Math.ceil(ordenadas.length / perPage))
+  const paginaAtual  = Math.min(pagina, totalPaginas)
+  const inicio       = (paginaAtual - 1) * perPage
+  const visiveis     = ordenadas.slice(inicio, inicio + perPage)
+
+  function mudarPerPage(novo: number) {
+    setPerPage(novo)
+    setPagina(1)
+  }
+
   return (
-    <div className="overflow-x-auto rounded-lg border border-border">
-      <table className="w-full min-w-[860px] text-sm">
-        <thead className="border-b border-border bg-muted/30">
-          <tr>
-            {['Nome', 'Celular', 'Tipo', 'Mensalidade', 'Início', 'Próx. Venc.', 'Status', ''].map(h => (
-              <th key={h} className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-border">
-          {ordenadas.map((c) => {
+    <div className="space-y-3">
+      <div className="overflow-x-auto rounded-lg border border-border">
+        <table className="w-full min-w-[860px] text-sm">
+          <thead className="border-b border-border bg-muted/30">
+            <tr>
+              {['Nome', 'Celular', 'Tipo', 'Mensalidade', 'Início', 'Próx. Venc.', 'Status', ''].map(h => (
+                <th key={h} className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+          {visiveis.map((c) => {
             const abertas = [...c.parcelas]
               .filter(p => p.status === 'aberta')
               .sort((a, b) => a.data_vencimento.localeCompare(b.data_vencimento))
@@ -172,8 +187,89 @@ export function CobrancasTable({ cobrancas }: { cobrancas: CobrancaRow[] }) {
               </tr>
             )
           })}
-        </tbody>
-      </table>
+          </tbody>
+        </table>
+      </div>
+
+      {/* Rodapé: paginação + seletor de itens por página */}
+      <div className="flex flex-wrap items-center justify-between gap-3 px-1">
+
+        {/* Info + seletor por página */}
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span>
+            {inicio + 1}–{Math.min(inicio + perPage, ordenadas.length)} de {ordenadas.length}
+          </span>
+          <span className="text-border">|</span>
+          <span>Por página:</span>
+          <select
+            value={perPage}
+            onChange={e => mudarPerPage(Number(e.target.value))}
+            className="rounded border border-border bg-card px-2 py-0.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+          >
+            {PER_PAGE_OPTIONS.map(n => (
+              <option key={n} value={n}>{n}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Botões de página */}
+        {totalPaginas > 1 && (
+          <div className="flex items-center gap-1">
+            <button
+              disabled={paginaAtual === 1}
+              onClick={() => setPagina(1)}
+              className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent disabled:opacity-30"
+            >
+              «
+            </button>
+            <button
+              disabled={paginaAtual === 1}
+              onClick={() => setPagina(p => p - 1)}
+              className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent disabled:opacity-30"
+            >
+              ‹
+            </button>
+            {Array.from({ length: totalPaginas }, (_, i) => i + 1)
+              .filter(n => n === 1 || n === totalPaginas || Math.abs(n - paginaAtual) <= 1)
+              .reduce<(number | '…')[]>((acc, n, i, arr) => {
+                if (i > 0 && (n as number) - (arr[i - 1] as number) > 1) acc.push('…')
+                acc.push(n)
+                return acc
+              }, [])
+              .map((n, i) =>
+                n === '…' ? (
+                  <span key={`e${i}`} className="px-1 text-xs text-muted-foreground">…</span>
+                ) : (
+                  <button
+                    key={n}
+                    onClick={() => setPagina(n as number)}
+                    className={`min-w-[28px] rounded px-2 py-1 text-xs transition ${
+                      paginaAtual === n
+                        ? 'bg-primary text-primary-foreground'
+                        : 'text-muted-foreground hover:bg-accent'
+                    }`}
+                  >
+                    {n}
+                  </button>
+                )
+              )}
+            <button
+              disabled={paginaAtual === totalPaginas}
+              onClick={() => setPagina(p => p + 1)}
+              className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent disabled:opacity-30"
+            >
+              ›
+            </button>
+            <button
+              disabled={paginaAtual === totalPaginas}
+              onClick={() => setPagina(totalPaginas)}
+              className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent disabled:opacity-30"
+            >
+              »
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
