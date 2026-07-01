@@ -224,7 +224,8 @@ export async function processarFilaImediata(
   supabase: SupabaseAdmin,
   manager: UazapiManager,
 ) {
-  if (!dentroDaJanela()) return
+  // Mensagens transacionais (confirmação de pagamento, boas-vindas) enviam a qualquer hora.
+  // Não aplica janela 09-20h — o socket precisa estar disponível mas não há restrição de horário.
 
   const agora = new Date().toISOString()
 

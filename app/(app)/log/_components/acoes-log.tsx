@@ -42,7 +42,7 @@ export function AcoesLog({ id, status }: { id: string; status: string }) {
     )
   }
 
-  if (status === 'falhou') {
+  if (status === 'falhou' || status === 'cancelado') {
     return (
       <button
         disabled={isPending}

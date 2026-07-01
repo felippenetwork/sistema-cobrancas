@@ -121,14 +121,16 @@ async function processarConta(supabase: SupabaseAdmin, contaId: string, hoje: st
 
     const dataAlvo = addDias(hoje, offset)
 
-    // Parcelas com esse vencimento, abertas
-    // parcelas não tem cliente_id — buscar via cobrancas (join)
+    // Parcelas com esse vencimento, abertas e cuja cobrança ainda está ativa.
+    // Sem o filtro cobrancas.status o scheduler continuaria gerando notificações
+    // para parcelas de cobranças canceladas (parcelas abertas não são apagadas pelo cancelamento).
     const { data: parcelas } = await supabase
       .from('parcelas')
       .select('id, cobranca_id, cobrancas!inner(cliente_id)')
       .eq('conta_id', contaId)
       .eq('data_vencimento', dataAlvo)
       .eq('status', 'aberta')
+      .eq('cobrancas.status', 'ativa')
 
     for (const parcela of parcelas ?? []) {
       const clienteId = (parcela.cobrancas as any)?.cliente_id as string

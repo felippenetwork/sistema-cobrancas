@@ -43,7 +43,7 @@ export async function reenviarNotificacaoAction(id: string) {
     })
     .eq('id', id)
     .eq('conta_id', contaId)
-    .eq('status', 'falhou')
+    .in('status', ['falhou', 'cancelado'])
 
   revalidatePath('/log')
 }
