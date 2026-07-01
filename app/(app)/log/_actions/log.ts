@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { formatBRL, formatData } from '@/lib/utils/format'
 import { revalidatePath } from 'next/cache'
 
 async function getContaId() {
@@ -46,4 +47,190 @@ export async function reenviarNotificacaoAction(id: string) {
     .in('status', ['falhou', 'cancelado'])
 
   revalidatePath('/log')
+}
+
+// Força o envio imediato chamando o uazapi diretamente, sem passar pelo worker.
+// Requer UAZAPI_URL e UAZAPI_GLOBAL_TOKEN no ambiente do Next.js.
+export async function forcarEnvioAction(id: string): Promise<{ error?: string }> {
+  const { contaId } = await getContaId()
+  const admin = createAdminClient()
+
+  // ── 1. Buscar notificação ────────────────────────────────────────────────
+  const { data: notif } = await admin
+    .from('notificacoes_enviadas')
+    .select('id, conta_id, parcela_id, cobranca_id, cliente_id, tipo, mensagem_final')
+    .eq('id', id)
+    .eq('conta_id', contaId)
+    .eq('canal', 'whatsapp')
+    .in('status', ['fila', 'cancelado'])
+    .maybeSingle()
+
+  if (!notif) return { error: 'Notificação não encontrada.' }
+
+  // ── 2. Buscar cliente ────────────────────────────────────────────────────
+  const { data: cliente } = await admin
+    .from('clientes')
+    .select('celular, nome, sobrenome, deleted_at')
+    .eq('id', notif.cliente_id as string)
+    .maybeSingle()
+
+  if (!cliente || (cliente as any).deleted_at) return { error: 'Cliente não encontrado ou excluído.' }
+  const celular = (cliente as any).celular as string | null
+  if (!celular) return { error: 'Cliente sem celular cadastrado.' }
+
+  // ── 3. Resolver mensagem ─────────────────────────────────────────────────
+  let mensagem: string
+
+  if ((notif.tipo as string) === 'agendada') {
+    const corpo = ((notif.mensagem_final as string) ?? '').trim()
+    if (!corpo) return { error: 'Mensagem não configurada.' }
+    mensagem = await resolverVarsLeves(admin, {
+      contaId,
+      clienteId: notif.cliente_id as string,
+      template:  corpo,
+    })
+  } else {
+    const { data: cfg } = await admin
+      .from('notificacoes_config')
+      .select('template_whatsapp')
+      .eq('conta_id', contaId)
+      .eq('tipo', notif.tipo as string)
+      .maybeSingle()
+
+    const template = ((cfg as any)?.template_whatsapp as string | null)?.trim()
+    if (!template) return { error: 'Template WhatsApp não configurado para este tipo.' }
+
+    let parcelaId = notif.parcela_id as string | null
+    if (!parcelaId && notif.cobranca_id) {
+      const { data: p } = await admin
+        .from('parcelas')
+        .select('id')
+        .eq('cobranca_id', notif.cobranca_id as string)
+        .order('numero', { ascending: true })
+        .limit(1)
+        .maybeSingle()
+      parcelaId = (p as any)?.id ?? null
+    }
+    if (!parcelaId) return { error: 'Parcela não encontrada para montar a mensagem.' }
+
+    mensagem = await resolverVars(admin, {
+      contaId,
+      parcelaId,
+      clienteId:  notif.cliente_id as string,
+      template,
+      cobrancaId: notif.cobranca_id as string | null,
+    })
+  }
+
+  // ── 4. Chamar uazapi diretamente ─────────────────────────────────────────
+  const uazapiUrl   = (process.env.UAZAPI_URL ?? '').replace(/\/$/, '')
+  const globalToken = process.env.UAZAPI_GLOBAL_TOKEN ?? ''
+
+  if (!uazapiUrl || !globalToken) {
+    return { error: 'UAZAPI_URL / UAZAPI_GLOBAL_TOKEN não configurados no servidor.' }
+  }
+
+  const instName = `quita${(contaId).replace(/-/g, '').slice(0, 10)}`
+
+  let instanceToken: string | null = null
+  try {
+    const resp = await fetch(`${uazapiUrl}/instance/all`, {
+      headers: { admintoken: globalToken },
+    })
+    if (resp.ok) {
+      const all = (await resp.json()) as any[]
+      const inst = all.find((i: any) => i.name === instName)
+      if (inst?.status === 'connected') instanceToken = inst.token as string
+    }
+  } catch {
+    return { error: 'Erro ao conectar ao servidor WhatsApp.' }
+  }
+
+  if (!instanceToken) {
+    return { error: 'WhatsApp desconectado. Reconecte em Conexão WA e tente novamente.' }
+  }
+
+  try {
+    const resp = await fetch(`${uazapiUrl}/send/text`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', token: instanceToken },
+      body:    JSON.stringify({ number: celular, text: mensagem }),
+    })
+    if (!resp.ok) {
+      const txt = await resp.text()
+      return { error: `Falha ao enviar: ${txt}` }
+    }
+  } catch {
+    return { error: 'Erro de rede ao enviar a mensagem.' }
+  }
+
+  // ── 5. Marcar como enviado ───────────────────────────────────────────────
+  await admin
+    .from('notificacoes_enviadas')
+    .update({ status: 'enviado', mensagem_final: mensagem, enviado_em: new Date().toISOString() })
+    .eq('id', id)
+
+  revalidatePath('/log')
+  return {}
+}
+
+// ── Helpers de resolução de variáveis (espelho de worker/src/variaveis.ts) ──
+
+async function resolverVarsLeves(
+  admin: ReturnType<typeof createAdminClient>,
+  { contaId, clienteId, template }: { contaId: string; clienteId: string; template: string },
+): Promise<string> {
+  const [{ data: cliente }, { data: saudacoes }] = await Promise.all([
+    admin.from('clientes').select('nome, sobrenome').eq('id', clienteId).single(),
+    admin.from('saudacoes').select('texto').eq('conta_id', contaId),
+  ])
+  const textos   = ((saudacoes ?? []) as any[]).map((s: any) => s.texto as string)
+  const saudacao = textos.length ? textos[Math.floor(Math.random() * textos.length)] : 'Olá!'
+  const nome     = (cliente as any)?.nome ?? ''
+  const sobrenome = (cliente as any)?.sobrenome ?? ''
+  return template
+    .replace(/#NOMECOMPLETO#/g, `${nome} ${sobrenome}`.trim())
+    .replace(/#NOME#/g,         nome)
+    .replace(/#SAUDACAO#/g,     saudacao)
+}
+
+async function resolverVars(
+  admin: ReturnType<typeof createAdminClient>,
+  { contaId, parcelaId, clienteId, template, cobrancaId }: {
+    contaId: string; parcelaId: string; clienteId: string; template: string; cobrancaId?: string | null
+  },
+): Promise<string> {
+  async function buscarPix() {
+    if (cobrancaId) {
+      const { data: cob } = await admin
+        .from('cobrancas').select('meio_pagamento_id').eq('id', cobrancaId).maybeSingle()
+      const meioid = (cob as any)?.meio_pagamento_id
+      if (meioid) {
+        const { data: meio } = await admin
+          .from('meios_pagamento').select('mensagem').eq('id', meioid).maybeSingle()
+        if ((meio as any)?.mensagem) return meio
+      }
+    }
+    const { data } = await admin
+      .from('meios_pagamento').select('mensagem').eq('conta_id', contaId).eq('is_padrao', true).maybeSingle()
+    return data
+  }
+
+  const [{ data: parcela }, { data: cliente }, { data: saudacoes }, pix] = await Promise.all([
+    admin.from('parcelas').select('valor, data_vencimento').eq('id', parcelaId).single(),
+    admin.from('clientes').select('nome, sobrenome').eq('id', clienteId).single(),
+    admin.from('saudacoes').select('texto').eq('conta_id', contaId),
+    buscarPix(),
+  ])
+
+  const textos   = ((saudacoes ?? []) as any[]).map((s: any) => s.texto as string)
+  const saudacao = textos.length ? textos[Math.floor(Math.random() * textos.length)] : 'Olá!'
+
+  return template
+    .replace(/#VALOR#/g,        formatBRL(parseFloat((parcela as any)?.valor ?? '0')))
+    .replace(/#NOMECOMPLETO#/g, `${(cliente as any)?.nome ?? ''} ${(cliente as any)?.sobrenome ?? ''}`.trim())
+    .replace(/#NOME#/g,         (cliente as any)?.nome ?? '')
+    .replace(/#PIX#/g,          (pix as any)?.mensagem ?? '(Pix não configurado)')
+    .replace(/#SAUDACAO#/g,     saudacao)
+    .replace(/#VENCIMENTO#/g,   formatData((parcela as any)?.data_vencimento))
 }

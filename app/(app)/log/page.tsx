@@ -114,7 +114,7 @@ export default async function LogPage({
                     <td className="monetary px-4 py-3 text-muted-foreground">{formatHora(l.agendado_para)}</td>
                     <td className="monetary px-4 py-3 text-muted-foreground">{formatHora(l.enviado_em)}</td>
                     <td className="px-2 py-3">
-                      <AcoesLog id={l.id} status={l.status} />
+                      <AcoesLog id={l.id} status={l.status} canal={l.canal} />
                     </td>
                   </tr>
                 )
