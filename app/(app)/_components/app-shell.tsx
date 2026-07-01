@@ -40,7 +40,7 @@ export function AppShell({
           >
             <Menu className="h-5 w-5" />
           </button>
-          <Image src="/logo.png" alt="Cobranx" width={100} height={32} className="ml-3 h-8 w-auto object-contain" />
+          <Image src="/logo.png" alt="Cobranx" width={140} height={44} className="ml-3 h-11 w-auto object-contain" />
         </div>
 
         <main className="flex-1 overflow-auto">
