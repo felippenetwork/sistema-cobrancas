@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { Check, Eye, Trash2 } from 'lucide-react'
+import { Check, Eye, Trash2, Search, X } from 'lucide-react'
 import { baixarParcelaAction } from '../_actions/parcelas'
 import { cancelarCobrancaAction } from '../_actions/cobrancas'
 import { formatBRL, formatData } from '@/lib/utils/format'
@@ -48,8 +48,17 @@ export function CobrancasTable({ cobrancas }: { cobrancas: CobrancaRow[] }) {
   const [cancelandoId, setCancelandoId] = useState<string | null>(null)
   const [pagina, setPagina]     = useState(1)
   const [perPage, setPerPage]   = useState(10)
+  const [busca, setBusca]       = useState('')
 
-  const ordenadas = [...cobrancas].sort((a, b) => {
+  const filtradas = busca.trim()
+    ? cobrancas.filter(c => {
+        const termo = busca.toLowerCase()
+        const nome  = `${c.clientes.nome} ${c.clientes.sobrenome}`.toLowerCase()
+        return nome.includes(termo)
+      })
+    : cobrancas
+
+  const ordenadas = [...filtradas].sort((a, b) => {
     const pA = [...a.parcelas].filter(p => p.status === 'aberta').sort((x, y) => x.data_vencimento.localeCompare(y.data_vencimento))[0]
     const pB = [...b.parcelas].filter(p => p.status === 'aberta').sort((x, y) => x.data_vencimento.localeCompare(y.data_vencimento))[0]
     if (!pA && !pB) return 0
@@ -68,8 +77,34 @@ export function CobrancasTable({ cobrancas }: { cobrancas: CobrancaRow[] }) {
     setPagina(1)
   }
 
+  function handleBusca(valor: string) {
+    setBusca(valor)
+    setPagina(1)
+  }
+
   return (
     <div className="space-y-3">
+
+      {/* Barra de busca */}
+      <div className="relative w-full max-w-sm">
+        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <input
+          type="text"
+          value={busca}
+          onChange={e => handleBusca(e.target.value)}
+          placeholder="Buscar por nome..."
+          className="w-full rounded-md border border-border bg-input py-2 pl-9 pr-8 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary"
+        />
+        {busca && (
+          <button
+            onClick={() => handleBusca('')}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
+
       <div className="overflow-x-auto rounded-lg border border-border">
         <table className="w-full min-w-[860px] text-sm">
           <thead className="border-b border-border bg-muted/30">
