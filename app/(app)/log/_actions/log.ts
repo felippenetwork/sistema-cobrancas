@@ -55,14 +55,18 @@ export async function forcarEnvioAction(id: string): Promise<{ error?: string }>
   const { contaId } = await getContaId()
   const admin = createAdminClient()
 
-  // ── 1. Buscar notificação ────────────────────────────────────────────────
+  // ── 1. Claim atômico ─────────────────────────────────────────────────────
+  // UPDATE retorna a linha somente se o status ainda era fila|cancelado.
+  // Muda para 'cancelado' para o worker não pegar a mesma linha concorrentemente.
+  // Em caso de sucesso o status é atualizado para 'enviado' no passo 5.
   const { data: notif } = await admin
     .from('notificacoes_enviadas')
-    .select('id, conta_id, parcela_id, cobranca_id, cliente_id, tipo, mensagem_final')
+    .update({ status: 'cancelado' })
     .eq('id', id)
     .eq('conta_id', contaId)
     .eq('canal', 'whatsapp')
     .in('status', ['fila', 'cancelado'])
+    .select('id, parcela_id, cobranca_id, cliente_id, tipo, mensagem_final')
     .maybeSingle()
 
   if (!notif) return { error: 'Notificação não encontrada.' }
@@ -138,9 +142,11 @@ export async function forcarEnvioAction(id: string): Promise<{ error?: string }>
       headers: { admintoken: globalToken },
     })
     if (resp.ok) {
-      const all = (await resp.json()) as any[]
-      const inst = all.find((i: any) => i.name === instName)
-      if (inst?.status === 'connected') instanceToken = inst.token as string
+      const all = await resp.json()
+      if (Array.isArray(all)) {
+        const inst = all.find((i: any) => i.name === instName)
+        if (inst?.status === 'connected') instanceToken = inst.token as string
+      }
     }
   } catch {
     return { error: 'Erro ao conectar ao servidor WhatsApp.' }
@@ -169,12 +175,15 @@ export async function forcarEnvioAction(id: string): Promise<{ error?: string }>
     .from('notificacoes_enviadas')
     .update({ status: 'enviado', mensagem_final: mensagem, enviado_em: new Date().toISOString() })
     .eq('id', id)
+    .eq('status', 'cancelado')
 
   revalidatePath('/log')
   return {}
 }
 
-// ── Helpers de resolução de variáveis (espelho de worker/src/variaveis.ts) ──
+// ── Helpers de resolução de variáveis ───────────────────────────────────────
+// Espelham worker/src/variaveis.ts. Ao adicionar nova variável de template,
+// atualizar ambos os arquivos para manter consistência entre envio automático e Forçar.
 
 async function resolverVarsLeves(
   admin: ReturnType<typeof createAdminClient>,

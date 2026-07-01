@@ -189,7 +189,7 @@ async function processarUmaNotificacao(
         status:         'enviado',
         mensagem_final: mensagem,
         enviado_em:     new Date().toISOString(),
-      }).eq('id', notif.id)
+      }).eq('id', notif.id).eq('status', 'fila')
 
       logger.info({ contaId, notifId: notif.id, tentativa }, 'WhatsApp: enviado com sucesso')
       return  // ← sucesso, saída do loop
@@ -251,7 +251,9 @@ export async function processarFilaImediata(
 
   if (!porConta.size) return
 
+  let i = 0
   for (const [contaId, notif] of porConta) {
+    if (i++ > 0) await sleep(5_000)  // anti-ban: 5s entre contas (sem janela horária)
     await processarUmaNotificacao(supabase, manager, contaId, notif, true)
   }
 }
@@ -299,7 +301,7 @@ async function processarAgendada(
         status:         'enviado',
         mensagem_final: mensagem,
         enviado_em:     new Date().toISOString(),
-      }).eq('id', notif.id)
+      }).eq('id', notif.id).eq('status', 'fila')
       return
     } catch (err) {
       ultimoErro = err

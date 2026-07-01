@@ -1,6 +1,6 @@
 // UazapiManager — uazapi v2 REST API (supercloudstore.uazapi.com).
 // Mesma interface pública do BaileysManager: o resto do worker não muda.
-// Env: UAZAPI_URL, UAZAPI_GLOBAL_TOKEN
+// Env: UAZAPI_URL, UAZAPI_ADMIN_TOKEN
 
 import pino from 'pino'
 import { sleep } from './format.js'
@@ -9,7 +9,7 @@ import type { SupabaseAdmin } from './supabase.js'
 const logger = pino({ level: process.env.LOG_LEVEL ?? 'warn' })
 
 const BASE_URL     = (process.env.UAZAPI_URL          ?? '').replace(/\/$/, '')
-const GLOBAL_TOKEN = process.env.UAZAPI_GLOBAL_TOKEN ?? process.env.UAZAPI_ADMIN_TOKEN ?? ''
+const GLOBAL_TOKEN = process.env.UAZAPI_ADMIN_TOKEN ?? process.env.UAZAPI_GLOBAL_TOKEN ?? ''
 
 function instName(contaId: string): string {
   return `quita${contaId.replace(/-/g, '').slice(0, 10)}`
