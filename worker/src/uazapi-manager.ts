@@ -9,7 +9,7 @@ import type { SupabaseAdmin } from './supabase.js'
 const logger = pino({ level: process.env.LOG_LEVEL ?? 'warn' })
 
 const BASE_URL     = (process.env.UAZAPI_URL          ?? '').replace(/\/$/, '')
-const GLOBAL_TOKEN = process.env.UAZAPI_GLOBAL_TOKEN ?? ''
+const GLOBAL_TOKEN = process.env.UAZAPI_GLOBAL_TOKEN ?? process.env.UAZAPI_ADMIN_TOKEN ?? ''
 
 function instName(contaId: string): string {
   return `quita${contaId.replace(/-/g, '').slice(0, 10)}`
