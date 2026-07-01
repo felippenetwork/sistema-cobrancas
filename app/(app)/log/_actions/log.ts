@@ -124,10 +124,10 @@ export async function forcarEnvioAction(id: string): Promise<{ error?: string }>
 
   // ── 4. Chamar uazapi diretamente ─────────────────────────────────────────
   const uazapiUrl   = (process.env.UAZAPI_URL ?? '').replace(/\/$/, '')
-  const globalToken = process.env.UAZAPI_GLOBAL_TOKEN ?? ''
+  const globalToken = process.env.UAZAPI_ADMIN_TOKEN ?? process.env.UAZAPI_GLOBAL_TOKEN ?? ''
 
   if (!uazapiUrl || !globalToken) {
-    return { error: 'UAZAPI_URL / UAZAPI_GLOBAL_TOKEN não configurados no servidor.' }
+    return { error: 'UAZAPI_URL / UAZAPI_ADMIN_TOKEN não configurados no servidor.' }
   }
 
   const instName = `quita${(contaId).replace(/-/g, '').slice(0, 10)}`
