@@ -157,7 +157,8 @@ export class UazapiManager {
           await this.supabase.from('conexoes').upsert(
             { conta_id: contaId, status: 'conectado', qr_code: null, comando: null,
               numero_conectado: numero, device_name: nome,
-              ultima_conexao: new Date().toISOString() },
+              ultima_conexao: new Date().toISOString(),
+              uazapi_instance_token: inst.token as string },
             { onConflict: 'conta_id' },
           )
         } catch {}
@@ -197,7 +198,8 @@ export class UazapiManager {
     }
 
     await this.supabase.from('conexoes').upsert(
-      { conta_id: contaId, status: 'conectando', qr_code: null, comando: null },
+      { conta_id: contaId, status: 'conectando', qr_code: null, comando: null,
+        uazapi_instance_token: token },
       { onConflict: 'conta_id' },
     )
 

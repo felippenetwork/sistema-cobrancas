@@ -12,6 +12,7 @@ export const NOTIF_TIPOS = [
   { tipo: 'manual',              label: 'Cobrança manual',       desc: 'Disparado pelo botão WhatsApp na parcela' },
   { tipo: 'boasvindas',          label: 'Boas-vindas',           desc: 'Enviado ao cadastrar nova cobrança (opcional)' },
   { tipo: 'pagamento_confirmado', label: 'Pagamento confirmado', desc: 'Enviado ao dar baixa numa parcela' },
+  { tipo: 'agendada',            label: 'Mensagem avulsa',      desc: 'Mensagem personalizada agendada pelo usuário' },
 ] as const
 
 export type NotifTipo = (typeof NOTIF_TIPOS)[number]['tipo']

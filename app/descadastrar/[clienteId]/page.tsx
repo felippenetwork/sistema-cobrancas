@@ -1,6 +1,6 @@
 // Página de descadastro de e-mail (unsubscribe).
 // Acessível sem autenticação (link enviado por e-mail).
-// Usa service role para atualizar clientes.optout_email = true.
+// O token HMAC impede opt-out em massa por adivinhação de UUID.
 
 import { notFound } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/admin'
@@ -10,10 +10,13 @@ export const metadata = { title: 'Descadastro de e-mail' }
 
 export default async function DescadastrarPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ clienteId: string }>
+  searchParams: Promise<{ token?: string }>
 }) {
   const { clienteId } = await params
+  const { token = '' } = await searchParams
   const admin = createAdminClient()
 
   const { data: cliente } = await admin
@@ -42,7 +45,7 @@ export default async function DescadastrarPage({
               Deseja parar de receber e-mails de cobrança de{' '}
               <strong className="text-foreground">{(cliente as any).nome}</strong>?
             </p>
-            <DescadastrarForm clienteId={clienteId} />
+            <DescadastrarForm clienteId={clienteId} token={token} />
           </>
         )}
       </div>

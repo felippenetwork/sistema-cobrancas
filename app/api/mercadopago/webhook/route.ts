@@ -11,28 +11,31 @@ export async function POST(request: NextRequest) {
   const rawBody = await request.text()
   const secret  = process.env.MP_WEBHOOK_SECRET
 
-  // Validar assinatura se o secret estiver configurado
-  if (secret) {
-    const xSignature = request.headers.get('x-signature') ?? ''
-    const xRequestId = request.headers.get('x-request-id') ?? ''
+  if (!secret) {
+    console.error('[mp-webhook] MP_WEBHOOK_SECRET não configurado — recusando requisição.')
+    return NextResponse.json({ error: 'not_configured' }, { status: 500 })
+  }
 
-    // Formato: ts={ts},v1={hash}
-    const tsMatch   = xSignature.match(/ts=(\d+)/)
-    const hashMatch = xSignature.match(/v1=([a-f0-9]+)/)
+  // Validar assinatura (obrigatório)
+  const xSignature = request.headers.get('x-signature') ?? ''
+  const xRequestId = request.headers.get('x-request-id') ?? ''
 
-    if (!tsMatch || !hashMatch) {
-      return NextResponse.json({ error: 'missing_signature' }, { status: 401 })
-    }
+  // Formato: ts={ts},v1={hash}
+  const tsMatch   = xSignature.match(/ts=(\d+)/)
+  const hashMatch = xSignature.match(/v1=([a-f0-9]+)/)
 
-    const ts       = tsMatch[1]
-    const expected = createHmac('sha256', secret)
-      .update(`id:;request-id:${xRequestId};ts:${ts}`)  // MP signing template
-      .digest('hex')
+  if (!tsMatch || !hashMatch) {
+    return NextResponse.json({ error: 'missing_signature' }, { status: 401 })
+  }
 
-    if (expected !== hashMatch[1]) {
-      console.warn('[mp-webhook] Assinatura HMAC inválida — possível tentativa não autorizada.')
-      return NextResponse.json({ error: 'invalid_signature' }, { status: 401 })
-    }
+  const ts       = tsMatch[1]
+  const expected = createHmac('sha256', secret)
+    .update(`id:;request-id:${xRequestId};ts:${ts}`)  // MP signing template
+    .digest('hex')
+
+  if (expected !== hashMatch[1]) {
+    console.warn('[mp-webhook] Assinatura HMAC inválida — possível tentativa não autorizada.')
+    return NextResponse.json({ error: 'invalid_signature' }, { status: 401 })
   }
 
   let body: { type?: string; action?: string; data?: { id?: string }; id?: string | number }

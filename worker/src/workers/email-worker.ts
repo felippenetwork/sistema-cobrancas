@@ -5,6 +5,7 @@
 //   • Todo e-mail DEVE ter link de unsubscribe no rodapé (§2, §8).
 //   • Não enviar para clientes com optout_email = true.
 
+import { createHmac } from 'crypto'
 import pino from 'pino'
 import { Resend } from 'resend'
 import { dentroDaJanela, sleep, hojeEmSP, addDias } from '../format.js'
@@ -14,7 +15,13 @@ import type { SupabaseAdmin } from '../supabase.js'
 const logger = pino({ level: process.env.LOG_LEVEL ?? 'warn' })
 const resend  = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null
 
-const SITE_URL = process.env.SITE_URL ?? process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000'
+const SITE_URL     = process.env.SITE_URL ?? 'http://localhost:3000'
+const UNSUB_SECRET = process.env.UNSUB_SECRET ?? ''
+
+function gerarTokenDescadastro(clienteId: string): string {
+  if (!UNSUB_SECRET) return ''
+  return createHmac('sha256', UNSUB_SECRET).update(clienteId).digest('hex')
+}
 
 export async function processarFilaEmail(supabase: SupabaseAdmin) {
   if (!resend) {
@@ -217,7 +224,10 @@ async function processarEmailAgendado(
 
   const fromName    = (remConfig as any)?.from_name ?? localPart
   const fromAddress = `${fromName} <${localPart}@${dominio}>`
-  const unsubUrl    = `${SITE_URL}/descadastrar/${notif.cliente_id}`
+  const unsubToken  = gerarTokenDescadastro(notif.cliente_id)
+  const unsubUrl    = unsubToken
+    ? `${SITE_URL}/descadastrar/${notif.cliente_id}?token=${unsubToken}`
+    : `${SITE_URL}/descadastrar/${notif.cliente_id}`
 
   // Resolver variáveis no assunto e no corpo
   const [assuntoFinal, conteudoFinal] = await Promise.all([
