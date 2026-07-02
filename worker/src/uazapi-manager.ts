@@ -40,8 +40,30 @@ type InstanciaInfo = {
   nome:   string | null
 }
 
-// Usa POST /instance/connect — mesmo endpoint do ERP-RIFAS.
-// Retorna connected:true + instance.owner (telefone) quando já pareado.
+// Verifica estado via GET /instance/status — leve, sem reconexão ao WhatsApp.
+// Usar apenas no loop de polling (steady-state). Não aciona /instance/connect.
+async function verificarEstado(token: string): Promise<InstanciaInfo> {
+  try {
+    const data = await instanceApi(token, 'GET', '/instance/status')
+    const phone = extrairNumero(data)
+    if (phone) {
+      return {
+        state: 'connected',
+        phone,
+        nome: (data?.instance?.profileName as string) ?? (data?.instance?.name as string) ?? null,
+        qr:   null,
+      }
+    }
+    const qr = (data?.instance?.qrcode as string) ?? null
+    return { state: qr ? 'connecting' : 'disconnected', phone: null, nome: null, qr }
+  } catch (err: any) {
+    if (/404/.test(String(err?.message ?? ''))) return { state: 'disconnected', phone: null, nome: null, qr: null }
+    throw err
+  }
+}
+
+// Inicia conexão via POST /instance/connect — usar apenas ao conectar/reconectar,
+// NUNCA no loop de polling pois gera "reconnect loop" detectado pelo WhatsApp como bot.
 async function checarInstancia(token: string): Promise<InstanciaInfo> {
   try {
     const data = await instanceApi(token, 'POST', '/instance/connect')
@@ -489,7 +511,9 @@ export class UazapiManager {
     return 'falhou'
   }
 
-  // Polling de estado a cada 10s — circuit breaker após 10 erros consecutivos
+  // Polling de estado a cada 60s — usa GET /instance/status (sem reconexão).
+  // Intervalo longo é intencional: POST /instance/connect a cada 10s causava
+  // "reconnect loop" detectado pelo WhatsApp como bot e resultava em ban.
   private iniciarPolling(contaId: string) {
     if (this.polling.has(contaId)) return
     this.polling.add(contaId)
@@ -499,10 +523,10 @@ export class UazapiManager {
 
     const loop = async () => {
       while (this.polling.has(contaId)) {
-        await sleep(10_000)
+        await sleep(60_000)
         try {
           const tok  = this.instanceTokens.get(contaId)
-          const info = tok ? await checarInstancia(tok) : { state: 'disconnected' as const, phone: null, nome: null, qr: null }
+          const info = tok ? await verificarEstado(tok) : { state: 'disconnected' as const, phone: null, nome: null, qr: null }
           const state = info.state
           erros = 0  // reset no sucesso
 
