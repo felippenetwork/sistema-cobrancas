@@ -39,8 +39,10 @@ export default function ConexaoPage() {
 
       const fetchConexao = async () => {
         const { data } = await sb
-          .from('conexoes').select('*').eq('conta_id', conta.id).maybeSingle()
-        if (data) setConexao(data as Conexao)
+          .from('conexoes')
+          .select('id, status, numero_conectado, device_name, qr_code, ultima_conexao')
+          .eq('conta_id', conta.id).maybeSingle()
+        if (data) setConexao(data)
       }
 
       await fetchConexao()

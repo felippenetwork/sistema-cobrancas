@@ -30,7 +30,7 @@ export async function cobrarManualAction(formData: FormData) {
     .single()
   if (!parcela) throw new Error('Parcela não encontrada.')
 
-  const clienteId = (parcela.cobrancas as any).cliente_id as string
+  const clienteId = parcela.cobrancas.cliente_id
 
   await supabase.from('notificacoes_enviadas').insert({
     conta_id:      parcela.conta_id,
@@ -119,12 +119,12 @@ export async function baixarParcelaAction(formData: FormData) {
       agendado_para: agora,
     }
 
-    if ((cfgPag as any)?.ativo_whatsapp) {
+    if (cfgPag?.ativo_whatsapp) {
       const { error: confWaErr } = await supabase
         .from('notificacoes_enviadas').insert({ ...baseNotif, canal: 'whatsapp' as const })
       if (confWaErr) console.error('[baixarParcela] pagamento_confirmado.whatsapp', confWaErr)
     }
-    if ((cfgPag as any)?.ativo_email) {
+    if (cfgPag?.ativo_email) {
       const { error: confEmErr } = await supabase
         .from('notificacoes_enviadas').insert({ ...baseNotif, canal: 'email' as const })
       if (confEmErr) console.error('[baixarParcela] pagamento_confirmado.email', confEmErr)
@@ -161,7 +161,7 @@ export async function baixarParcelaAction(formData: FormData) {
         const ultima = ultimaArr[0]
         const proximoVencimento = calcularVencimento(
           new Date((ultima.data_vencimento as string) + 'T12:00:00'),
-          (cob as any).dia_pagamento as number,
+          cob.dia_pagamento,
           1,
         ).toISOString().slice(0, 10)
 
@@ -169,7 +169,7 @@ export async function baixarParcelaAction(formData: FormData) {
           conta_id:        contaIdDaParcela,
           cobranca_id:     cobrancaId,
           numero:          (ultima.numero as number) + 1,
-          valor:           (cob as any).valor_mensalidade,
+          valor:           cob.valor_mensalidade,
           data_vencimento: proximoVencimento,
           status:          'aberta',
         })

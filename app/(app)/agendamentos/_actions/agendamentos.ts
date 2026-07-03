@@ -53,10 +53,10 @@ export async function criarAgendamentoAction(
       .eq('conta_id', contaId)
       .maybeSingle()
 
-    if (!cliente || (cliente as any).deleted_at) return { error: 'Cliente não encontrado.' }
-    if (querWhatsApp && !(cliente as any).celular)
+    if (!cliente || cliente.deleted_at) return { error: 'Cliente não encontrado.' }
+    if (querWhatsApp && !cliente.celular)
       return { error: 'Este cliente não tem celular cadastrado para envio por WhatsApp.' }
-    if (querEmail && !(cliente as any).email)
+    if (querEmail && !cliente.email)
       return { error: 'Este cliente não tem e-mail cadastrado para envio por e-mail.' }
 
     const base = {
@@ -96,7 +96,7 @@ export async function cancelarAgendamentoAction(formData: FormData) {
   if (!conta) return
 
   const id      = formData.get('id') as string
-  const contaId = (conta as any).id as string
+  const contaId = conta.id
 
   const admin = createAdminClient()
   await admin

@@ -95,8 +95,8 @@ export async function criarCobrancaAction(
       const baseNotif  = { conta_id: contaId, cobranca_id: cob.id, cliente_id: clienteId,
                            tipo: 'boasvindas' as const, status: 'fila' as const, agendado_para: agora }
       const inserts    = []
-      if ((cfgBv as any)?.ativo_whatsapp) inserts.push({ ...baseNotif, canal: 'whatsapp' as const })
-      if ((cfgBv as any)?.ativo_email)    inserts.push({ ...baseNotif, canal: 'email' as const })
+      if (cfgBv?.ativo_whatsapp) inserts.push({ ...baseNotif, canal: 'whatsapp' as const })
+      if (cfgBv?.ativo_email)    inserts.push({ ...baseNotif, canal: 'email' as const })
       if (inserts.length) {
         await supabase.from('notificacoes_enviadas').insert(inserts).throwOnError()
       }
@@ -178,8 +178,8 @@ export async function criarCobrancaRapidaAction(
       const baseNotif = { conta_id: contaId, cobranca_id: cob.id, cliente_id: clienteId,
                           tipo: 'boasvindas' as const, status: 'fila' as const, agendado_para: agora }
       const inserts   = []
-      if ((cfgBv as any)?.ativo_whatsapp) inserts.push({ ...baseNotif, canal: 'whatsapp' as const })
-      if ((cfgBv as any)?.ativo_email)    inserts.push({ ...baseNotif, canal: 'email' as const })
+      if (cfgBv?.ativo_whatsapp) inserts.push({ ...baseNotif, canal: 'whatsapp' as const })
+      if (cfgBv?.ativo_email)    inserts.push({ ...baseNotif, canal: 'email' as const })
       if (inserts.length) {
         await supabase.from('notificacoes_enviadas').insert(inserts).throwOnError()
       }
@@ -211,7 +211,7 @@ export async function cancelarCobrancaAction(formData: FormData) {
   // Cancelar notificações em fila das parcelas dessa cobrança
   const { data: parcelas } = await supabase
     .from('parcelas').select('id').eq('cobranca_id', cobrancaId).eq('conta_id', contaId)
-  const ids = (parcelas ?? []).map((p: any) => p.id)
+  const ids = (parcelas ?? []).map(p => p.id)
   if (ids.length > 0) {
     const { error: nErr } = await supabase
       .from('notificacoes_enviadas')

@@ -16,8 +16,8 @@ export default function PlataformaPage() {
     const sb = createClient()
     sb.from('plataforma_config').select('dominio_email_operador').single()
       .then(({ data }) => {
-        if ((data as any)?.dominio_email_operador) {
-          setDominio((data as any).dominio_email_operador)
+        if (data?.dominio_email_operador) {
+          setDominio(data.dominio_email_operador)
         }
       })
   }, [])

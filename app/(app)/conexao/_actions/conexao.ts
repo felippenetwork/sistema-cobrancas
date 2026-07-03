@@ -55,7 +55,7 @@ export async function reiniciarAction() {
   const { data: atual } = await supabase
     .from('conexoes').select('status').eq('conta_id', contaId).maybeSingle()
 
-  if ((atual as any)?.status === 'conectado') {
+  if (atual?.status === 'conectado') {
     await supabase.from('conexoes')
       .update({ comando: 'reconectar', qr_code: null })
       .eq('conta_id', contaId)

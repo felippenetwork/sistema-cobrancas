@@ -36,7 +36,7 @@ export default async function ImpersonarPage({
       .eq('conta_id', contaId).maybeSingle(),
   ])
 
-  const waConectado = (conexao as any)?.status === 'conectado'
+  const waConectado = conexao?.status === 'conectado'
 
   return (
     <div className="p-8">
@@ -74,9 +74,9 @@ export default async function ImpersonarPage({
           <p className={`mt-2 text-sm font-semibold ${waConectado ? 'text-success' : 'text-destructive'}`}>
             {waConectado ? 'Conectado' : 'Desconectado'}
           </p>
-          {waConectado && (conexao as any)?.numero_conectado && (
+          {waConectado && conexao?.numero_conectado && (
             <p className="monetary mt-0.5 text-xs text-muted-foreground">
-              {(conexao as any).numero_conectado}
+              {conexao.numero_conectado}
             </p>
           )}
         </div>

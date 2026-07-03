@@ -10,8 +10,8 @@ const INPUT = 'w-full rounded-md border border-border bg-input px-3 py-2 text-sm
 const LABEL = 'block text-xs font-medium uppercase tracking-wide text-muted-foreground'
 
 type Data = {
-  cfg:    Record<string, string | null>
-  rem:    Record<string, string | null> | null
+  cfg:    { contato?: string | null; cpf_cnpj?: string | null; endereco?: string | null; nome_comercial?: string | null } | null
+  rem:    { local_part?: string | null; from_name?: string | null } | null
   domain: string | null
 }
 
@@ -35,16 +35,16 @@ export default function ConfiguracoesPage() {
     if (!conta) return
 
     const [{ data: cfg }, { data: rem }] = await Promise.all([
-      sb.from('configuracoes').select('*').eq('conta_id', conta.id).maybeSingle(),
-      sb.from('email_remetente').select('*').eq('conta_id', conta.id).maybeSingle(),
+      sb.from('configuracoes').select('contato, cpf_cnpj, endereco, nome_comercial').eq('conta_id', conta.id).maybeSingle(),
+      sb.from('email_remetente').select('local_part, from_name').eq('conta_id', conta.id).maybeSingle(),
     ])
 
     setData({
-      cfg:    (cfg as unknown as Record<string, string | null>) ?? {},
-      rem:    rem as Record<string, string | null> | null,
-      domain: (plat as any)?.dominio_email_operador ?? null,
+      cfg,
+      rem,
+      domain: plat?.dominio_email_operador ?? null,
     })
-    setLocalPart((rem as any)?.local_part ?? '')
+    setLocalPart(rem?.local_part ?? '')
     setLoading(false)
   }
 

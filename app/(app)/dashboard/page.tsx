@@ -47,19 +47,19 @@ export default async function DashboardPage({
   ])
 
   // ── KPIs financeiros (§6 regras-financeiras) ─────────────────────────────
-  const recebidos = somarValores((lancamentosDoMes ?? []).filter((l: any) => l.tipo === 'entrada'))
-  const saidas    = somarValores((lancamentosDoMes ?? []).filter((l: any) => l.tipo === 'saida'))
+  const recebidos = somarValores((lancamentosDoMes ?? []).filter(l => l.tipo === 'entrada'))
+  const saidas    = somarValores((lancamentosDoMes ?? []).filter(l => l.tipo === 'saida'))
   const saldo     = recebidos - saidas
 
   // ── Indicadores de contagem ───────────────────────────────────────────────
-  const cobAtivasCount = (cobrancasAtivas ?? []).filter((c: any) =>
-    (c.parcelas as any[]).some((p: any) => p.status === 'aberta'),
+  const cobAtivasCount = (cobrancasAtivas ?? []).filter(c =>
+    c.parcelas?.some(p => p.status === 'aberta'),
   ).length
 
-  const emAberto = (parcelasDoMes ?? []).filter((p: any) => p.status === 'aberta').length
-  const pagas    = (parcelasDoMes ?? []).filter((p: any) => p.status === 'paga').length
+  const emAberto = (parcelasDoMes ?? []).filter(p => p.status === 'aberta').length
+  const pagas    = (parcelasDoMes ?? []).filter(p => p.status === 'paga').length
 
-  const waStatus = (conexao as any)?.status ?? null
+  const waStatus = conexao?.status ?? null
   const waOff    = !waStatus || waStatus !== 'conectado'
 
   return (
