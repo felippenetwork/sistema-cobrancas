@@ -93,9 +93,9 @@ export function calcularStatusVisual(dataVencimento: string): StatusVisual {
 }
 
 export const STATUS_VISUAL_CFG = {
-  em_dia:     { label: 'Em dia',     cls: 'bg-success-bg text-success' },
-  vence_hoje: { label: 'Vence hoje', cls: 'bg-warning-bg text-warning' },
-  vencido:    { label: 'Vencido',    cls: 'bg-destructive-bg text-destructive' },
+  em_dia:     { label: 'Em dia',     cls: 'bg-success-bg text-success border border-success-border' },
+  vence_hoje: { label: 'Vence hoje', cls: 'bg-warning-bg text-warning border border-warning-border' },
+  vencido:    { label: 'Vencido',    cls: 'bg-destructive-bg text-destructive border border-destructive-border' },
 } as const
 
 /**

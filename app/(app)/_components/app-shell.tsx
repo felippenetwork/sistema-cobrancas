@@ -35,7 +35,7 @@ export function AppShell({
         <div className="flex items-center border-b border-border bg-card px-4 py-3 md:hidden">
           <button
             onClick={() => setSidebarOpen(true)}
-            className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+            className="rounded-md p-1 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900"
             aria-label="Abrir menu"
           >
             <Menu className="h-5 w-5" />

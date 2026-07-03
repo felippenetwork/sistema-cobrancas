@@ -41,8 +41,8 @@ export function AppSidebar({
     return [
       'flex items-center gap-2.5 rounded-md px-2 py-2 text-sm transition-colors',
       active
-        ? 'bg-accent font-medium text-foreground'
-        : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+        ? 'bg-blue-50 font-medium text-blue-700'
+        : 'text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900',
     ].join(' ')
   }
 
@@ -69,7 +69,7 @@ export function AppSidebar({
         />
         <button
           onClick={onClose}
-          className="ml-2 shrink-0 rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground md:hidden"
+          className="ml-2 shrink-0 rounded-md p-1 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 md:hidden"
           aria-label="Fechar menu"
         >
           <X className="h-5 w-5" />
