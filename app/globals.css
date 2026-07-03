@@ -2,36 +2,33 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Tokens do design-system Cobranx — light fintech profissional.
+/* Tokens do design-system Quita — dark fintech.
    REGRA: toda cor no JSX/TSX referencia estes tokens via classe Tailwind,
    nunca hex direto no código. */
 :root {
-  /* Fundo e superfícies */
-  --bg:            #FAFAFA;
-  --surface:       #FFFFFF;
-  --surface-2:     #F4F4F5;
-  --border:        #E4E4E7;
+  /* Fundo e superfícies (camadas de profundidade) */
+  --bg:            #0B0F17;
+  --surface:       #121826;
+  --surface-2:     #1A2233;
+  --border:        #243047;
 
   /* Texto */
-  --text:          #18181B;
-  --text-muted:    #71717A;
-  --text-subtle:   #A1A1AA;
+  --text:          #E6EAF2;
+  --text-muted:    #9AA6BD;
+  --text-subtle:   #64718C;
 
   /* Primária — azul confiança (ações, foco, links) */
-  --primary:       #1D4ED8;
-  --primary-hover: #1E40AF;
+  --primary:       #3B82F6;
+  --primary-hover: #2F73E0;
   --primary-fg:    #FFFFFF;
 
   /* Status financeiro — EXCLUSIVO para pago/a vencer/vencido */
-  --success:          #15803D;
-  --warning:          #B45309;
-  --danger:           #B91C1C;
-  --success-bg:       #F0FDF4;
-  --warning-bg:       #FFFBEB;
-  --danger-bg:        #FEF2F2;
-  --success-border:   #BBF7D0;
-  --warning-border:   #FDE68A;
-  --danger-border:    #FECACA;
+  --success:       #10B981;
+  --warning:       #F59E0B;
+  --danger:        #EF4444;
+  --success-bg:    rgba(16, 185, 129, 0.13);
+  --warning-bg:    rgba(245, 158, 11, 0.13);
+  --danger-bg:     rgba(239, 68, 68, 0.13);
 }
 
 @layer base {
