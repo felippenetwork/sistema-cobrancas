@@ -42,7 +42,7 @@ export function gerarParcelasFixas(
     data_vencimento: calcularVencimento(mesAnoInicio, diaPagamento, i)
       .toISOString()
       .slice(0, 10),
-    status: 'aberta',
+    status: 'aberta' as const,
   }))
 }
 

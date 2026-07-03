@@ -2,6 +2,7 @@ import { createHmac } from 'crypto'
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import type { Enums } from '@/types/database'
 
 // POST /api/mercadopago/webhook
 // Recebe eventos do MP e atualiza assinaturas + validade do plano.
@@ -121,7 +122,7 @@ async function sincronizarPreapproval(admin: ReturnType<typeof createAdminClient
   const pp     = await res.json()
   const status = pp.status  // authorized | paused | cancelled
 
-  const statusMap: Record<string, string> = {
+  const statusMap: Record<string, Enums<'assinatura_status'>> = {
     authorized: 'ativa',
     paused:     'inadimplente',
     cancelled:  'cancelada',

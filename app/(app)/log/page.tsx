@@ -50,7 +50,7 @@ export default async function LogPage({
     .limit(200)
 
   if (canal && ['whatsapp', 'email'].includes(canal)) {
-    query = query.eq('canal', canal)
+    query = query.eq('canal', canal as 'whatsapp' | 'email')
   }
 
   const { data: logs } = await query

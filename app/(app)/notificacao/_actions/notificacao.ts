@@ -1,7 +1,7 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
-import { NOTIF_DEFAULTS, SAUDACOES_PADRAO } from '@/lib/notificacao/tipos'
+import { NOTIF_DEFAULTS, SAUDACOES_PADRAO, type NotifTipo } from '@/lib/notificacao/tipos'
 import { revalidatePath } from 'next/cache'
 
 export type ActionState = { error: string | null; success?: boolean }
@@ -42,12 +42,12 @@ export async function toggleCanalAction(
   ativo: boolean,
 ) {
   const { supabase, contaId } = await getConta()
-  const campo = canal === 'whatsapp' ? 'ativo_whatsapp' : 'ativo_email'
+  const updateObj = canal === 'whatsapp' ? { ativo_whatsapp: ativo } : { ativo_email: ativo }
 
   const { error } = await supabase.from('notificacoes_config')
-    .update({ [campo]: ativo })
+    .update(updateObj)
     .eq('conta_id', contaId)
-    .eq('tipo', tipo)
+    .eq('tipo', tipo as NotifTipo)
   if (error) console.error('[toggleCanal]', error, { tipo, canal, ativo, contaId })
 
   revalidatePath('/notificacao')
@@ -73,7 +73,7 @@ export async function salvarTemplateAction(
     const { error } = await supabase.from('notificacoes_config').update({
       horario, template_whatsapp: templateWhatsapp,
       assunto_email: assuntoEmail, template_email: templateEmail,
-    }).eq('conta_id', contaId).eq('tipo', tipo)
+    }).eq('conta_id', contaId).eq('tipo', tipo as NotifTipo)
 
     if (error) return { error: error.message }
   } catch (e: unknown) {

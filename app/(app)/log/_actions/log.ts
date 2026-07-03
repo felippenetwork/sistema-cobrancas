@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { formatBRL, formatData } from '@/lib/utils/format'
+import { substituirVariaveis } from '@/lib/utils/variaveis'
 import { revalidatePath } from 'next/cache'
 
 async function getContaId() {
@@ -87,7 +88,7 @@ export async function forcarEnvioAction(id: string): Promise<{ error?: string }>
   // ── 3. Resolver mensagem ─────────────────────────────────────────────────
   let mensagem: string
 
-  if ((notif.tipo as string) === 'agendada') {
+  if (notif.tipo === 'agendada') {
     const corpo = ((notif.mensagem_final as string) ?? '').trim()
     if (!corpo) return { error: 'Mensagem não configurada.' }
     mensagem = await resolverVarsLeves(admin, {
@@ -100,7 +101,7 @@ export async function forcarEnvioAction(id: string): Promise<{ error?: string }>
       .from('notificacoes_config')
       .select('template_whatsapp')
       .eq('conta_id', contaId)
-      .eq('tipo', notif.tipo as string)
+      .eq('tipo', notif.tipo)
       .maybeSingle()
 
     const template = ((cfg as any)?.template_whatsapp as string | null)?.trim()
@@ -184,8 +185,9 @@ export async function forcarEnvioAction(id: string): Promise<{ error?: string }>
 }
 
 // ── Helpers de resolução de variáveis ───────────────────────────────────────
-// Espelham worker/src/variaveis.ts. Ao adicionar nova variável de template,
-// atualizar ambos os arquivos para manter consistência entre envio automático e Forçar.
+// A substituição pura (substituirVariaveis) vive em lib/utils/variaveis.ts.
+// O worker mantém cópia própria em worker/src/variaveis.ts — processos separados.
+// Ao adicionar nova variável de template, atualizar ambos os arquivos.
 
 async function resolverVarsLeves(
   admin: ReturnType<typeof createAdminClient>,
@@ -237,11 +239,12 @@ async function resolverVars(
   const textos   = ((saudacoes ?? []) as any[]).map((s: any) => s.texto as string)
   const saudacao = textos.length ? textos[Math.floor(Math.random() * textos.length)] : 'Olá!'
 
-  return template
-    .replace(/#VALOR#/g,        formatBRL(parseFloat((parcela as any)?.valor ?? '0')))
-    .replace(/#NOMECOMPLETO#/g, `${(cliente as any)?.nome ?? ''} ${(cliente as any)?.sobrenome ?? ''}`.trim())
-    .replace(/#NOME#/g,         (cliente as any)?.nome ?? '')
-    .replace(/#PIX#/g,          (pix as any)?.mensagem ?? '(Pix não configurado)')
-    .replace(/#SAUDACAO#/g,     saudacao)
-    .replace(/#VENCIMENTO#/g,   formatData((parcela as any)?.data_vencimento))
+  return substituirVariaveis(template, {
+    valor:        formatBRL(parseFloat((parcela as any)?.valor ?? '0')),
+    nomecompleto: `${(cliente as any)?.nome ?? ''} ${(cliente as any)?.sobrenome ?? ''}`.trim(),
+    nome:         (cliente as any)?.nome ?? '',
+    pix:          (pix as any)?.mensagem ?? '(Pix não configurado)',
+    saudacao,
+    vencimento:   formatData((parcela as any)?.data_vencimento),
+  })
 }

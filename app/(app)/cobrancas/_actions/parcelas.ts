@@ -114,19 +114,19 @@ export async function baixarParcelaAction(formData: FormData) {
       parcela_id:    parcelaId,
       cobranca_id:   cobrancaId,
       cliente_id:    clienteId,
-      tipo:          'pagamento_confirmado',
-      status:        'fila',
+      tipo:          'pagamento_confirmado' as const,
+      status:        'fila' as const,
       agendado_para: agora,
     }
 
     if ((cfgPag as any)?.ativo_whatsapp) {
       const { error: confWaErr } = await supabase
-        .from('notificacoes_enviadas').insert({ ...baseNotif, canal: 'whatsapp' })
+        .from('notificacoes_enviadas').insert({ ...baseNotif, canal: 'whatsapp' as const })
       if (confWaErr) console.error('[baixarParcela] pagamento_confirmado.whatsapp', confWaErr)
     }
     if ((cfgPag as any)?.ativo_email) {
       const { error: confEmErr } = await supabase
-        .from('notificacoes_enviadas').insert({ ...baseNotif, canal: 'email' })
+        .from('notificacoes_enviadas').insert({ ...baseNotif, canal: 'email' as const })
       if (confEmErr) console.error('[baixarParcela] pagamento_confirmado.email', confEmErr)
     }
   }

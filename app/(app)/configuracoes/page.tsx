@@ -40,7 +40,7 @@ export default function ConfiguracoesPage() {
     ])
 
     setData({
-      cfg:    (cfg as Record<string, string | null>) ?? {},
+      cfg:    (cfg as unknown as Record<string, string | null>) ?? {},
       rem:    rem as Record<string, string | null> | null,
       domain: (plat as any)?.dominio_email_operador ?? null,
     })

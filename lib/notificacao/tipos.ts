@@ -34,7 +34,7 @@ export const SAUDACOES_PADRAO = [
 // Templates padrão por tipo. Usados no seed de novas contas.
 // O operador pode editar o conteúdo; os dias são fixos.
 export const NOTIF_DEFAULTS: {
-  tipo:               string
+  tipo:               NotifTipo
   horario:            string
   template_whatsapp:  string
   assunto_email:      string

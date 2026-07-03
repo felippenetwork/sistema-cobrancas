@@ -93,10 +93,10 @@ export async function criarCobrancaAction(
 
       const agora      = new Date().toISOString()
       const baseNotif  = { conta_id: contaId, cobranca_id: cob.id, cliente_id: clienteId,
-                           tipo: 'boasvindas', status: 'fila', agendado_para: agora }
+                           tipo: 'boasvindas' as const, status: 'fila' as const, agendado_para: agora }
       const inserts    = []
-      if ((cfgBv as any)?.ativo_whatsapp) inserts.push({ ...baseNotif, canal: 'whatsapp' })
-      if ((cfgBv as any)?.ativo_email)    inserts.push({ ...baseNotif, canal: 'email' })
+      if ((cfgBv as any)?.ativo_whatsapp) inserts.push({ ...baseNotif, canal: 'whatsapp' as const })
+      if ((cfgBv as any)?.ativo_email)    inserts.push({ ...baseNotif, canal: 'email' as const })
       if (inserts.length) {
         await supabase.from('notificacoes_enviadas').insert(inserts).throwOnError()
       }
@@ -176,10 +176,10 @@ export async function criarCobrancaRapidaAction(
 
       const agora     = new Date().toISOString()
       const baseNotif = { conta_id: contaId, cobranca_id: cob.id, cliente_id: clienteId,
-                          tipo: 'boasvindas', status: 'fila', agendado_para: agora }
+                          tipo: 'boasvindas' as const, status: 'fila' as const, agendado_para: agora }
       const inserts   = []
-      if ((cfgBv as any)?.ativo_whatsapp) inserts.push({ ...baseNotif, canal: 'whatsapp' })
-      if ((cfgBv as any)?.ativo_email)    inserts.push({ ...baseNotif, canal: 'email' })
+      if ((cfgBv as any)?.ativo_whatsapp) inserts.push({ ...baseNotif, canal: 'whatsapp' as const })
+      if ((cfgBv as any)?.ativo_email)    inserts.push({ ...baseNotif, canal: 'email' as const })
       if (inserts.length) {
         await supabase.from('notificacoes_enviadas').insert(inserts).throwOnError()
       }

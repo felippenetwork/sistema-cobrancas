@@ -64,15 +64,15 @@ export async function criarAgendamentoAction(
       cliente_id:     clienteId,
       parcela_id:     null,
       cobranca_id:    null,
-      tipo:           'agendada',
-      status:         'fila',
+      tipo:           'agendada' as const,
+      status:         'fila' as const,
       mensagem_final: mensagem,
       agendado_para:  agendadoPara.toISOString(),
     }
 
-    const inserts: object[] = []
-    if (querWhatsApp) inserts.push({ ...base, canal: 'whatsapp' })
-    if (querEmail)    inserts.push({ ...base, canal: 'email', assunto })
+    const inserts = []
+    if (querWhatsApp) inserts.push({ ...base, canal: 'whatsapp' as const })
+    if (querEmail)    inserts.push({ ...base, canal: 'email' as const, assunto })
 
     const { error } = await supabase.from('notificacoes_enviadas').insert(inserts)
     if (error) return { error: error.message }
