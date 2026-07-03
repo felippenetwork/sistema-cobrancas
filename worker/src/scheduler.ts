@@ -54,6 +54,7 @@ export async function runScheduler(supabase: SupabaseAdmin) {
 }
 
 async function manterParcelasRecorrentes(supabase: SupabaseAdmin, contaId: string) {
+  // 1. Cobranças recorrentes ativas desta conta
   const { data: cobrancas } = await supabase
     .from('cobrancas')
     .select('id, dia_pagamento, valor_mensalidade')
@@ -61,30 +62,47 @@ async function manterParcelasRecorrentes(supabase: SupabaseAdmin, contaId: strin
     .eq('recorrente', true)
     .eq('status', 'ativa')
 
-  for (const cob of cobrancas ?? []) {
-    const { data: abertas } = await supabase
-      .from('parcelas')
-      .select('id')
-      .eq('conta_id', contaId)
-      .eq('cobranca_id', cob.id)
-      .eq('status', 'aberta')
-      .limit(1)
+  if (!cobrancas?.length) return
 
-    if (abertas && abertas.length > 0) continue  // já tem parcela em aberto
+  const cobIds = cobrancas.map((c: any) => c.id as string)
 
-    const { data: ultimaArr } = await supabase
-      .from('parcelas')
-      .select('numero, data_vencimento')
-      .eq('conta_id', contaId)
-      .eq('cobranca_id', cob.id)
-      .order('numero', { ascending: false })
-      .limit(1)
+  // 2. Quais têm parcela aberta (1 query — elimina N+1)
+  const { data: comAbertaRows } = await supabase
+    .from('parcelas')
+    .select('cobranca_id')
+    .eq('conta_id', contaId)
+    .in('cobranca_id', cobIds)
+    .eq('status', 'aberta')
 
-    if (!ultimaArr || ultimaArr.length === 0) continue  // cobrança sem parcelas (não deveria ocorrer)
+  const comAberta = new Set((comAbertaRows ?? []).map((p: any) => p.cobranca_id as string))
+  const semAberta = cobrancas.filter((c: any) => !comAberta.has(c.id as string))
 
-    const ultima = ultimaArr[0]
-    const proximoNumero     = (ultima.numero as number) + 1
-    const proximoVencimento = calcularProximoVencimento(ultima.data_vencimento as string, cob.dia_pagamento as number)
+  if (!semAberta.length) return
+
+  // 3. Última parcela de cada cobrança sem aberta (1 query — elimina 2° N+1)
+  const semAbertaIds = semAberta.map((c: any) => c.id as string)
+  const { data: ultimas } = await supabase
+    .from('parcelas')
+    .select('cobranca_id, numero, data_vencimento')
+    .eq('conta_id', contaId)
+    .in('cobranca_id', semAbertaIds)
+    .order('numero', { ascending: false })
+
+  // Tomar apenas a de maior número por cobrança
+  const ultimaMap = new Map<string, { numero: number; data_vencimento: string }>()
+  for (const p of ultimas ?? []) {
+    const cid = p.cobranca_id as string
+    if (!ultimaMap.has(cid)) {
+      ultimaMap.set(cid, { numero: p.numero as number, data_vencimento: p.data_vencimento as string })
+    }
+  }
+
+  for (const cob of semAberta) {
+    const ultima = ultimaMap.get(cob.id as string)
+    if (!ultima) continue  // cobrança sem parcelas (não deveria ocorrer)
+
+    const proximoNumero     = ultima.numero + 1
+    const proximoVencimento = calcularProximoVencimento(ultima.data_vencimento, cob.dia_pagamento as number)
 
     const { error } = await supabase.from('parcelas').insert({
       conta_id:        contaId,

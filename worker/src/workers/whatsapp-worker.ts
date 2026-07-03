@@ -13,6 +13,8 @@
 import pino from 'pino'
 import {
   dentroDaJanela,
+  horaStr,
+  TIPOS_SEM_JANELA,
   sleep,
   intervalAleatorio,
   hojeEmSP,
@@ -40,8 +42,6 @@ export async function processarFilaWhatsApp(
   supabase: SupabaseAdmin,
   manager: UazapiManager,
 ) {
-  if (!dentroDaJanela()) return  // fora da janela 09–20h SP
-
   const agora = new Date().toISOString()
 
   // Carrega candidatos: fila pendente, excluindo tipos imediatos (têm loop próprio)
@@ -62,20 +62,39 @@ export async function processarFilaWhatsApp(
   for (const n of pendentes) {
     const contaId = n.conta_id as string
     if (!porConta.has(contaId) && manager.hasSocket(contaId)) {
-      // hasSocket() retorna false durante warmup de 60s — mensagem fica na fila
       porConta.set(contaId, n as Notif)
     }
   }
 
-  if (!porConta.size) return  // nenhuma conta pronta ainda
+  if (!porConta.size) return
+
+  // Carregar configurações de janela/intervalo por conta (1 query)
+  const contaIds = [...porConta.keys()]
+  const { data: configs } = await supabase
+    .from('configuracoes')
+    .select('conta_id, horario_inicio, horario_fim, intervalo_min_seg, intervalo_max_seg')
+    .in('conta_id', contaIds)
+
+  const cfgMap = new Map(
+    (configs ?? []).map((c: any) => [c.conta_id as string, c]),
+  )
 
   for (const [contaId, notif] of porConta) {
+    const cfg        = cfgMap.get(contaId)
+    const hInicio    = horaStr(cfg?.horario_inicio ?? '09:00')
+    const hFim       = horaStr(cfg?.horario_fim    ?? '20:00')
+    const intMin     = ((cfg?.intervalo_min_seg ?? 45) * 1_000)
+    const intMax     = ((cfg?.intervalo_max_seg ?? 80) * 1_000)
+
+    // Verificar janela por conta (tipos transacionais/manuais são isentos)
+    if (!TIPOS_SEM_JANELA.has(notif.tipo) && !dentroDaJanela(hInicio, hFim)) {
+      continue  // fora da janela desta conta — notif fica na fila para o próximo ciclo
+    }
+
     await processarUmaNotificacao(supabase, manager, contaId, notif)
 
-    // Anti-ban: intervalo obrigatório entre contas
-    if (dentroDaJanela()) {
-      await sleep(intervalAleatorio())  // 45–80s
-    }
+    // Anti-ban: intervalo configurável entre contas
+    await sleep(intervalAleatorio(intMin, intMax))
   }
 }
 
@@ -185,11 +204,12 @@ async function processarUmaNotificacao(
     try {
       await manager.enviarMensagem(contaId, celular, mensagem, semDigitacao)
 
-      await supabase.from('notificacoes_enviadas').update({
+      const { error: updErr } = await supabase.from('notificacoes_enviadas').update({
         status:         'enviado',
         mensagem_final: mensagem,
         enviado_em:     new Date().toISOString(),
       }).eq('id', notif.id).eq('status', 'fila')
+      if (updErr) logger.error({ contaId, notifId: notif.id, updErr }, 'WhatsApp: falha ao marcar enviado')
 
       logger.info({ contaId, notifId: notif.id, tentativa }, 'WhatsApp: enviado com sucesso')
       return  // ← sucesso, saída do loop
@@ -297,11 +317,12 @@ async function processarAgendada(
     }
     try {
       await manager.enviarMensagem(contaId, celular, mensagem, semDigitacao)
-      await supabase.from('notificacoes_enviadas').update({
+      const { error: updErr } = await supabase.from('notificacoes_enviadas').update({
         status:         'enviado',
         mensagem_final: mensagem,
         enviado_em:     new Date().toISOString(),
       }).eq('id', notif.id).eq('status', 'fila')
+      if (updErr) logger.error({ contaId, notifId: notif.id, updErr }, 'Agendada WA: falha ao marcar enviado')
       return
     } catch (err) {
       ultimoErro = err
@@ -310,31 +331,33 @@ async function processarAgendada(
   }
 
   logger.error({ contaId, notifId: notif.id, ultimoErro }, 'Agendada WA: todas as tentativas falharam')
-  if (!dentroDaJanela()) await reagendar(supabase, notif.id)
-  else await marcarFalhou(supabase, notif.id)
+  await marcarFalhou(supabase, notif.id)
 }
 
 // ── Helpers de estado ────────────────────────────────────────────────────────
 
 async function reagendar(supabase: SupabaseAdmin, notifId: string) {
   const amanha = addDias(hojeEmSP(), 1)
-  await supabase
+  const { error } = await supabase
     .from('notificacoes_enviadas')
     .update({ agendado_para: new Date(`${amanha}T09:00:00-03:00`).toISOString() })
     .eq('id', notifId)
-  logger.info({ notifId }, 'Reagendado para amanhã às 09h')
+  if (error) logger.error({ notifId, error }, 'WA: falha ao reagendar')
+  else logger.info({ notifId }, 'Reagendado para amanhã às 09h')
 }
 
 async function marcarFalhou(supabase: SupabaseAdmin, notifId: string) {
-  await supabase
+  const { error } = await supabase
     .from('notificacoes_enviadas')
     .update({ status: 'falhou' })
     .eq('id', notifId)
+  if (error) logger.error({ notifId, error }, 'WA: falha ao marcar como falhou')
 }
 
 async function cancelarNotif(supabase: SupabaseAdmin, notifId: string) {
-  await supabase
+  const { error } = await supabase
     .from('notificacoes_enviadas')
     .update({ status: 'cancelado' })
     .eq('id', notifId)
+  if (error) logger.error({ notifId, error }, 'WA: falha ao cancelar notif')
 }

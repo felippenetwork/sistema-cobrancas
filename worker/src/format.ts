@@ -27,9 +27,19 @@ export function dentroDaJanela(horarioInicio = 9, horarioFim = 20): boolean {
   return hora >= horarioInicio && hora < horarioFim
 }
 
+// Extrai a hora inteira de uma string "HH:MM" vinda do banco (tipo time)
+export function horaStr(timeStr: string): number {
+  return parseInt(timeStr.split(':')[0], 10)
+}
+
 export function intervalAleatorio(min = 45_000, max = 80_000): number {
   return Math.floor(Math.random() * (max - min + 1)) + min
 }
+
+// Tipos que enviam a qualquer hora — sem restrição de janela (transacionais/manuais)
+export const TIPOS_SEM_JANELA = new Set([
+  'boasvindas', 'pagamento_confirmado', 'manual', 'agendada',
+])
 
 export function sleep(ms: number) {
   return new Promise<void>(resolve => setTimeout(resolve, ms))

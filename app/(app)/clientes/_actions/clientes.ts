@@ -1,10 +1,11 @@
 'use server'
 
+import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
 import { validarCPF, normalizarCPF } from '@/lib/validations/cpf'
 import { normalizarCelular } from '@/lib/validations/celular'
 import { revalidatePath } from 'next/cache'
-import { redirect } from 'next/navigation' // usado em excluirClienteAction
+import { redirect } from 'next/navigation'
 
 export type ActionState = {
   error: string | null
@@ -150,7 +151,9 @@ export async function atualizarClienteAction(
 
 // ── Soft delete ──────────────────────────────────────────────────────────────
 export async function excluirClienteAction(formData: FormData) {
-  const clienteId  = formData.get('cliente_id') as string
+  const parsed = z.string().uuid().safeParse(formData.get('cliente_id'))
+  if (!parsed.success) return
+  const clienteId  = parsed.data
   const redirectTo = formData.get('redirect_to') as string | null
 
   const { supabase, contaId } = await getConta()

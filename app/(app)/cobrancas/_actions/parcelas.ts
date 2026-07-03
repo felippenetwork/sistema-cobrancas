@@ -4,11 +4,14 @@
 // §3 regras-financeiras: REGRA ÚNICA, dois pontos de entrada idênticos.
 // ⚠️ NÃO gerar próxima parcela recorrente aqui — responsabilidade do scheduler (Sprint 8).
 
+import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { calcularVencimento } from '@/lib/utils/parcelas'
+
+const schemaId = z.string().uuid()
 
 // ── Cobrança manual via WhatsApp ─────────────────────────────────────────────
 // Cria notificacoes_enviadas com tipo='manual', status='fila'.
@@ -60,7 +63,9 @@ async function requireUser() {
 // Passos 5-6 (confirmação de pagamento + próxima parcela recorrente) são
 // efeitos colaterais sem risco de corrupção caso falhem isoladamente.
 export async function baixarParcelaAction(formData: FormData) {
-  const parcelaId  = formData.get('parcela_id') as string
+  const parsed = schemaId.safeParse(formData.get('parcela_id'))
+  if (!parsed.success) return
+  const parcelaId  = parsed.data
   const redirectTo = (formData.get('redirect_to') as string) || null
 
   const { supabase, contaId } = await requireUser()

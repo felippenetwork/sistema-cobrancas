@@ -1,9 +1,12 @@
 'use server'
 
+import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
 import { gerarParcelasFixas, gerarParcelasRecorrentes } from '@/lib/utils/parcelas'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
+
+const schemaId = z.string().uuid()
 
 export type ActionState = { error: string | null; success?: boolean }
 
@@ -79,18 +82,23 @@ export async function criarCobrancaAction(
     const { error: parcErr } = await supabase.from('parcelas').insert(parcelas)
     if (parcErr) return { error: parcErr.message }
 
-    // Boas-vindas: enfileira notificação (worker Sprint 8 vai processar)
+    // Boas-vindas: enfileira apenas os canais habilitados na config da conta
     if (enviarBoasVindas) {
-      const { data: cli } = await supabase
-        .from('clientes').select('id').eq('id', clienteId).single()
-      if (cli) {
-        const agora = new Date().toISOString()
-        await supabase.from('notificacoes_enviadas').insert([
-          { conta_id: contaId, cobranca_id: cob.id, cliente_id: clienteId,
-            tipo: 'boasvindas', canal: 'whatsapp', status: 'fila', agendado_para: agora },
-          { conta_id: contaId, cobranca_id: cob.id, cliente_id: clienteId,
-            tipo: 'boasvindas', canal: 'email',    status: 'fila', agendado_para: agora },
-        ]).throwOnError()
+      const { data: cfgBv } = await supabase
+        .from('notificacoes_config')
+        .select('ativo_whatsapp, ativo_email')
+        .eq('conta_id', contaId)
+        .eq('tipo', 'boasvindas')
+        .maybeSingle()
+
+      const agora      = new Date().toISOString()
+      const baseNotif  = { conta_id: contaId, cobranca_id: cob.id, cliente_id: clienteId,
+                           tipo: 'boasvindas', status: 'fila', agendado_para: agora }
+      const inserts    = []
+      if ((cfgBv as any)?.ativo_whatsapp) inserts.push({ ...baseNotif, canal: 'whatsapp' })
+      if ((cfgBv as any)?.ativo_email)    inserts.push({ ...baseNotif, canal: 'email' })
+      if (inserts.length) {
+        await supabase.from('notificacoes_enviadas').insert(inserts).throwOnError()
       }
     }
 
@@ -159,13 +167,22 @@ export async function criarCobrancaRapidaAction(
     if (parcErr) return { error: parcErr.message }
 
     if (enviarBoasVindas) {
-      const agora = new Date().toISOString()
-      await supabase.from('notificacoes_enviadas').insert([
-        { conta_id: contaId, cobranca_id: cob.id, cliente_id: clienteId,
-          tipo: 'boasvindas', canal: 'whatsapp', status: 'fila', agendado_para: agora },
-        { conta_id: contaId, cobranca_id: cob.id, cliente_id: clienteId,
-          tipo: 'boasvindas', canal: 'email',    status: 'fila', agendado_para: agora },
-      ]).throwOnError()
+      const { data: cfgBv } = await supabase
+        .from('notificacoes_config')
+        .select('ativo_whatsapp, ativo_email')
+        .eq('conta_id', contaId)
+        .eq('tipo', 'boasvindas')
+        .maybeSingle()
+
+      const agora     = new Date().toISOString()
+      const baseNotif = { conta_id: contaId, cobranca_id: cob.id, cliente_id: clienteId,
+                          tipo: 'boasvindas', status: 'fila', agendado_para: agora }
+      const inserts   = []
+      if ((cfgBv as any)?.ativo_whatsapp) inserts.push({ ...baseNotif, canal: 'whatsapp' })
+      if ((cfgBv as any)?.ativo_email)    inserts.push({ ...baseNotif, canal: 'email' })
+      if (inserts.length) {
+        await supabase.from('notificacoes_enviadas').insert(inserts).throwOnError()
+      }
     }
 
   } catch (e: unknown) {
@@ -179,7 +196,9 @@ export async function criarCobrancaRapidaAction(
 
 // ── Cancelar cobrança ────────────────────────────────────────────────────────
 export async function cancelarCobrancaAction(formData: FormData) {
-  const cobrancaId = formData.get('cobranca_id') as string
+  const parsed = schemaId.safeParse(formData.get('cobranca_id'))
+  if (!parsed.success) return
+  const cobrancaId = parsed.data
   const { supabase, contaId } = await getConta()
 
   const { error: cobErr } = await supabase
