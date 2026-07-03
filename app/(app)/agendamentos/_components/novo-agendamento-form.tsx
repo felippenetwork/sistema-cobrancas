@@ -11,7 +11,7 @@ function hojeEmSP() {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' })
 }
 
-type Cliente = { id: string; nome: string; sobrenome: string }
+type Cliente = { id: string; nome: string; sobrenome: string | null }
 
 export function NovoAgendamentoForm({ clientes }: { clientes: Cliente[] }) {
   const [aberto, setAberto] = useState(false)

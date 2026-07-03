@@ -95,7 +95,7 @@ export default async function CobrancasPage({
           </Link>
         </div>
       ) : (
-        <CobrancasTable cobrancas={cobrancas as any} />
+        <CobrancasTable cobrancas={cobrancas} />
       )}
     </div>
   )

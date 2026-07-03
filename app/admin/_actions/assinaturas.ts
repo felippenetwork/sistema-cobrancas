@@ -47,7 +47,7 @@ export async function criarAssinaturaAction(
     if (!conta) return { error: 'Conta não encontrada.' }
 
     const { data: { user: owner } } = await admin.auth.admin.getUserById(
-      (conta as any).owner_user_id,
+      conta.owner_user_id,
     )
     const email = owner?.email
     if (!email) return { error: 'E-mail do dono não encontrado.' }
@@ -60,7 +60,7 @@ export async function criarAssinaturaAction(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        reason:        descricao || `Assinatura Cobranx — ${(conta as any).nome_empresa}`,
+        reason:        descricao || `Assinatura Cobranx — ${conta.nome_empresa}`,
         auto_recurring: {
           frequency:          1,
           frequency_type:     'months',
@@ -73,8 +73,8 @@ export async function criarAssinaturaAction(
     })
 
     if (!mpRes.ok) {
-      const err = await mpRes.json().catch(() => ({}))
-      return { error: `MP: ${(err as any).message ?? mpRes.statusText}` }
+      const err = await mpRes.json().catch(() => ({})) as { message?: string }
+      return { error: `MP: ${err.message ?? mpRes.statusText}` }
     }
 
     const mpData = await mpRes.json()

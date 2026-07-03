@@ -87,7 +87,7 @@ async function processarPagamento(admin: ReturnType<typeof createAdminClient>, p
   if (!assinatura) return
 
   // Idempotência: ignorar evento já processado
-  const ultimo = (assinatura as any).ultimo_evento_mp
+  const ultimo = assinatura.ultimo_evento_mp as { payment_id?: string } | null
   if (ultimo?.payment_id === paymentId) return
 
   // Renovar validade do plano (+30 dias a partir de hoje em SP)
@@ -98,7 +98,7 @@ async function processarPagamento(admin: ReturnType<typeof createAdminClient>, p
 
   await admin.from('contas')
     .update({ status: 'ativa', validade_plano: novaValidade })
-    .eq('id', (assinatura as any).conta_id)
+    .eq('id', assinatura.conta_id)
 
   await admin.from('assinaturas')
     .update({
@@ -106,7 +106,7 @@ async function processarPagamento(admin: ReturnType<typeof createAdminClient>, p
       proximo_vencimento: novaValidade,
       ultimo_evento_mp:  { payment_id: paymentId, data: new Date().toISOString() },
     })
-    .eq('id', (assinatura as any).id)
+    .eq('id', assinatura.id)
 }
 
 // ── Sincronizar status do preapproval ───────────────────────────────────────
@@ -137,6 +137,6 @@ async function sincronizarPreapproval(admin: ReturnType<typeof createAdminClient
   // Suspender conta se assinatura cancelada ou inadimplente
   if (novoStatus === 'cancelada') {
     const { data: ass } = await admin.from('assinaturas').select('conta_id').eq('mp_preapproval_id', preapprovalId).single()
-    if (ass) await admin.from('contas').update({ status: 'suspensa' }).eq('id', (ass as any).conta_id)
+    if (ass) await admin.from('contas').update({ status: 'suspensa' }).eq('id', ass.conta_id)
   }
 }

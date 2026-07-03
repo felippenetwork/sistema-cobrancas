@@ -31,7 +31,7 @@ export default async function DescadastrarPage({
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm rounded-lg border border-border bg-card p-8 text-center">
-        {(cliente as any).optout_email ? (
+        {cliente.optout_email ? (
           <>
             <h1 className="text-base font-semibold text-foreground">Já descadastrado</h1>
             <p className="mt-2 text-sm text-muted-foreground">
@@ -43,7 +43,7 @@ export default async function DescadastrarPage({
             <h1 className="text-base font-semibold text-foreground">Descadastro de e-mail</h1>
             <p className="mt-2 text-sm text-muted-foreground">
               Deseja parar de receber e-mails de cobrança de{' '}
-              <strong className="text-foreground">{(cliente as any).nome}</strong>?
+              <strong className="text-foreground">{cliente.nome}</strong>?
             </p>
             <DescadastrarForm clienteId={clienteId} token={token} />
           </>

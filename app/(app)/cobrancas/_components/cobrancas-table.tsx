@@ -25,7 +25,7 @@ function StatusBadge({ dataVencimento }: { dataVencimento: string }) {
 type Parcela = {
   id: string
   numero: number
-  valor: string
+  valor: number
   data_vencimento: string
   data_pagamento: string | null
   status: string
@@ -33,12 +33,12 @@ type Parcela = {
 
 type CobrancaRow = {
   id: string
-  valor_mensalidade: string
+  valor_mensalidade: number
   recorrente: boolean
   qtd_parcelas: number | null
   observacao: string | null
   created_at: string
-  clientes: { id: string; nome: string; sobrenome: string; celular: string }
+  clientes: { id: string; nome: string; sobrenome: string | null; celular: string }
   parcelas: Parcela[]
 }
 
