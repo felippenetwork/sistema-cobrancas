@@ -90,12 +90,13 @@ export async function criarAssinaturaAction(
     })
     if (dbErr) return { error: dbErr.message }
 
-    await admin.from('audit_log').insert({
+    const { error: auditErr } = await admin.from('audit_log').insert({
       actor: 'admin', actor_id: (await requireAdmin()).adminUserId,
       acao: 'criar_assinatura',
       conta_id_alvo: contaId,
       detalhe: { mp_preapproval_id: preapprovalId, valor },
     })
+    if (auditErr) console.error('[criarAssinatura] audit_log', auditErr, { contaId })
 
     revalidatePath('/admin/assinaturas')
     return { error: null, initPoint, success: true }

@@ -137,6 +137,9 @@ async function sincronizarPreapproval(admin: ReturnType<typeof createAdminClient
   // Suspender conta se assinatura cancelada ou inadimplente
   if (novoStatus === 'cancelada') {
     const { data: ass } = await admin.from('assinaturas').select('conta_id').eq('mp_preapproval_id', preapprovalId).single()
-    if (ass) await admin.from('contas').update({ status: 'suspensa' }).eq('id', ass.conta_id)
+    if (ass) {
+      const { error: suspErr } = await admin.from('contas').update({ status: 'suspensa' }).eq('id', ass.conta_id)
+      if (suspErr) console.error('[mp-webhook] contas.suspender', suspErr, { contaId: ass.conta_id })
+    }
   }
 }

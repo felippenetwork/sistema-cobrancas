@@ -88,10 +88,11 @@ export async function criarContaAction(
     if (contaErr) return { error: `Erro ao criar conta: ${contaErr.message}` }
 
     // Seed configuracoes com defaults
-    await admin.from('configuracoes').insert({ conta_id: conta.id })
+    const { error: cfgSeedErr } = await admin.from('configuracoes').insert({ conta_id: conta.id })
+    if (cfgSeedErr) throw new Error(`Erro ao criar configurações: ${cfgSeedErr.message}`)
 
     // Seed 8 tipos de notificação com templates padrão (ativados = false)
-    await admin.from('notificacoes_config').upsert(
+    const { error: notifSeedErr } = await admin.from('notificacoes_config').upsert(
       NOTIF_DEFAULTS.map(n => ({
         conta_id:          conta.id,
         tipo:              n.tipo,
@@ -104,20 +105,23 @@ export async function criarContaAction(
       })),
       { onConflict: 'conta_id,tipo', ignoreDuplicates: true },
     )
+    if (notifSeedErr) throw new Error(`Erro ao criar notificações padrão: ${notifSeedErr.message}`)
 
     // Seed 10 saudações padrão (#SAUDACAO# em rodízio aleatório)
-    await admin.from('saudacoes').insert(
+    const { error: saudSeedErr } = await admin.from('saudacoes').insert(
       SAUDACOES_PADRAO.map(texto => ({ conta_id: conta.id, texto })),
     )
+    if (saudSeedErr) console.error('[criarConta] saudacoes.seed', saudSeedErr, { contaId: conta.id })
 
     // Audit log — toda ação admin é registrada
-    await admin.from('audit_log').insert({
+    const { error: auditErr } = await admin.from('audit_log').insert({
       actor:         'admin',
       actor_id:      adminUserId,
       acao:          'criar_conta',
       conta_id_alvo: conta.id,
       detalhe:       { email, nome_empresa: nomeEmpresa },
     })
+    if (auditErr) console.error('[criarConta] audit_log', auditErr, { contaId: conta.id })
   } catch (e: unknown) {
     return { error: e instanceof Error ? e.message : 'Erro desconhecido.' }
   }
@@ -154,13 +158,14 @@ export async function editarContaAction(
       .eq('id', contaId)
     if (error) return { error: error.message }
 
-    await admin.from('audit_log').insert({
+    const { error: auditErr } = await admin.from('audit_log').insert({
       actor:         'admin',
       actor_id:      adminUserId,
       acao:          'editar_conta',
       conta_id_alvo: contaId,
       detalhe:       { nome_empresa: nomeEmpresa, validade_plano: validade, limite_clientes: limite },
     })
+    if (auditErr) console.error('[editarConta] audit_log', auditErr, { contaId })
   } catch (e: unknown) {
     return { error: e instanceof Error ? e.message : 'Erro desconhecido.' }
   }
@@ -181,12 +186,13 @@ export async function alterarStatusAction(
   const { error } = await admin.from('contas').update({ status }).eq('id', contaId)
   if (error) throw new Error(error.message)
 
-  await admin.from('audit_log').insert({
+  const { error: auditErr } = await admin.from('audit_log').insert({
     actor:         'admin',
     actor_id:      adminUserId,
     acao:          `conta_${status}`,
     conta_id_alvo: contaId,
   })
+  if (auditErr) console.error('[alterarStatus] audit_log', auditErr, { contaId, status })
 
   revalidatePath('/admin/contas')
   revalidatePath(`/admin/contas/${contaId}`)
@@ -203,13 +209,14 @@ export async function renovarValidadeAction(contaId: string, novaValidade: strin
     .eq('id', contaId)
   if (error) throw new Error(error.message)
 
-  await admin.from('audit_log').insert({
+  const { error: auditErr } = await admin.from('audit_log').insert({
     actor:         'admin',
     actor_id:      adminUserId,
     acao:          'renovar_validade',
     conta_id_alvo: contaId,
     detalhe:       { nova_validade: novaValidade },
   })
+  if (auditErr) console.error('[renovarValidade] audit_log', auditErr, { contaId })
 
   revalidatePath(`/admin/contas/${contaId}`)
 }
@@ -220,13 +227,14 @@ export async function impersonarAction(contaId: string) {
   const admin = createAdminClient()
 
   // Registro obrigatório antes de qualquer visualização de dados do tenant
-  await admin.from('audit_log').insert({
+  const { error: auditErr } = await admin.from('audit_log').insert({
     actor:         'admin',
     actor_id:      adminUserId,
     acao:          'impersonar',
     conta_id_alvo: contaId,
     detalhe:       { iniciado_em: new Date().toISOString() },
   })
+  if (auditErr) console.error('[impersonar] audit_log', auditErr, { contaId })
 
   redirect(`/admin/impersonar/${contaId}`)
 }

@@ -18,7 +18,7 @@ async function getConta() {
 // Garante que os 8 tipos existem para esta conta (idempotente)
 export async function seedNotificacoesAction() {
   const { supabase, contaId } = await getConta()
-  await supabase.from('notificacoes_config').upsert(
+  const { error: notifErr } = await supabase.from('notificacoes_config').upsert(
     NOTIF_DEFAULTS.map(n => ({
       conta_id: contaId, tipo: n.tipo, horario: n.horario,
       ativo_whatsapp: false, ativo_email: false,
@@ -27,10 +27,12 @@ export async function seedNotificacoesAction() {
     })),
     { onConflict: 'conta_id,tipo', ignoreDuplicates: true },
   )
+  if (notifErr) console.error('[seedNotificacoes] notificacoes_config.upsert', notifErr, { contaId })
   // Seed saudações se ainda não existirem
   const { count } = await supabase.from('saudacoes').select('*', { count: 'exact', head: true }).eq('conta_id', contaId)
   if (!count) {
-    await supabase.from('saudacoes').insert(SAUDACOES_PADRAO.map(texto => ({ conta_id: contaId, texto })))
+    const { error: saudErr } = await supabase.from('saudacoes').insert(SAUDACOES_PADRAO.map(texto => ({ conta_id: contaId, texto })))
+    if (saudErr) console.error('[seedNotificacoes] saudacoes.insert', saudErr, { contaId })
   }
   revalidatePath('/notificacao')
 }

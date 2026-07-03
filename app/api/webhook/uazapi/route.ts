@@ -62,25 +62,28 @@ export async function POST(req: NextRequest) {
         ? owner.replace('@s.whatsapp.net', '').replace(/\D/g, '')
         : null
 
-      await supabase.from('conexoes').update({
+      const { error } = await supabase.from('conexoes').update({
         status:           'conectado',
         qr_code:          null,
         numero_conectado: phone,
         ultima_conexao:   new Date().toISOString(),
       }).eq('conta_id', contaId)
+      if (error) console.error('[webhook/uazapi] conexoes.update.conectado', error, { contaId })
 
     } else if (qrcode) {
-      await supabase.from('conexoes').update({
+      const { error } = await supabase.from('conexoes').update({
         status:  'conectando',
         qr_code: qrcode,
       }).eq('conta_id', contaId)
+      if (error) console.error('[webhook/uazapi] conexoes.update.conectando', error, { contaId })
 
     } else {
       // Desconectado sem QR
-      await supabase.from('conexoes').update({
+      const { error } = await supabase.from('conexoes').update({
         status:  'desconectado',
         qr_code: null,
       }).eq('conta_id', contaId)
+      if (error) console.error('[webhook/uazapi] conexoes.update.desconectado', error, { contaId })
     }
 
     return NextResponse.json({ ok: true })

@@ -32,7 +32,7 @@ export async function cobrarManualAction(formData: FormData) {
 
   const clienteId = parcela.cobrancas.cliente_id
 
-  await supabase.from('notificacoes_enviadas').insert({
+  const { error: notifErr } = await supabase.from('notificacoes_enviadas').insert({
     conta_id:      parcela.conta_id,
     parcela_id:    parcela.id,
     cobranca_id:   parcela.cobranca_id,
@@ -42,6 +42,7 @@ export async function cobrarManualAction(formData: FormData) {
     status:        'fila',
     agendado_para: new Date().toISOString(),
   })
+  if (notifErr) throw new Error(notifErr.message)
 
   revalidatePath(`/cobrancas/${parcela.cobranca_id}`)
 }

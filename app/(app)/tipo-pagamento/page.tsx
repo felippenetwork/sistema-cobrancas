@@ -92,7 +92,12 @@ export default function TipoPagamentoPage() {
 
   async function handleExcluir(id: string) {
     const sb = createClient()
-    await sb.from('meios_pagamento').delete().eq('id', id)
+    const { error } = await sb.from('meios_pagamento').delete().eq('id', id)
+    if (error) {
+      console.error('[handleExcluir]', error, { id })
+      setExcluindoId(null)
+      return
+    }
     setExcluindoId(null)
     setRefresh(r => r + 1)
   }
