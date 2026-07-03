@@ -18,7 +18,7 @@ export interface CreatedInstance {
 export async function createInstance(name: string): Promise<CreatedInstance> {
   const res = await fetch(`${UAZAPI_URL}/instance/create`, {
     method:  'POST',
-    headers: { AdminToken: ADMIN_TOKEN, 'Content-Type': 'application/json' },
+    headers: { admintoken: ADMIN_TOKEN, 'Content-Type': 'application/json' },
     body:    JSON.stringify({ name }),
   })
   if (!res.ok) {

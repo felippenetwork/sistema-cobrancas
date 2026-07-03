@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { formatBRL, formatData } from '@/lib/utils/format'
+import { substituirVariaveis } from '@/lib/utils/variaveis'
 import { revalidatePath } from 'next/cache'
 
 async function getContaId() {
@@ -20,12 +21,13 @@ export async function cancelarNotificacaoAction(id: string) {
   const { contaId } = await getContaId()
 
   const admin = createAdminClient()
-  await admin
+  const { error } = await admin
     .from('notificacoes_enviadas')
     .update({ status: 'cancelado' })
     .eq('id', id)
     .eq('conta_id', contaId)
     .eq('status', 'fila')
+  if (error) console.error('[cancelarNotificacao]', error, { id, contaId })
 
   revalidatePath('/log')
 }
@@ -35,7 +37,7 @@ export async function reenviarNotificacaoAction(id: string) {
   const { contaId } = await getContaId()
 
   const admin = createAdminClient()
-  await admin
+  const { error } = await admin
     .from('notificacoes_enviadas')
     .update({
       status:        'fila',
@@ -45,6 +47,7 @@ export async function reenviarNotificacaoAction(id: string) {
     .eq('id', id)
     .eq('conta_id', contaId)
     .in('status', ['falhou', 'cancelado'])
+  if (error) console.error('[reenviarNotificacao]', error, { id, contaId })
 
   revalidatePath('/log')
 }
@@ -78,14 +81,14 @@ export async function forcarEnvioAction(id: string): Promise<{ error?: string }>
     .eq('id', notif.cliente_id as string)
     .maybeSingle()
 
-  if (!cliente || (cliente as any).deleted_at) return { error: 'Cliente não encontrado ou excluído.' }
-  const celular = (cliente as any).celular as string | null
+  if (!cliente || cliente.deleted_at) return { error: 'Cliente não encontrado ou excluído.' }
+  const celular = cliente.celular
   if (!celular) return { error: 'Cliente sem celular cadastrado.' }
 
   // ── 3. Resolver mensagem ─────────────────────────────────────────────────
   let mensagem: string
 
-  if ((notif.tipo as string) === 'agendada') {
+  if (notif.tipo === 'agendada') {
     const corpo = ((notif.mensagem_final as string) ?? '').trim()
     if (!corpo) return { error: 'Mensagem não configurada.' }
     mensagem = await resolverVarsLeves(admin, {
@@ -98,10 +101,10 @@ export async function forcarEnvioAction(id: string): Promise<{ error?: string }>
       .from('notificacoes_config')
       .select('template_whatsapp')
       .eq('conta_id', contaId)
-      .eq('tipo', notif.tipo as string)
+      .eq('tipo', notif.tipo)
       .maybeSingle()
 
-    const template = ((cfg as any)?.template_whatsapp as string | null)?.trim()
+    const template = cfg?.template_whatsapp?.trim()
     if (!template) return { error: 'Template WhatsApp não configurado para este tipo.' }
 
     let parcelaId = notif.parcela_id as string | null
@@ -113,7 +116,7 @@ export async function forcarEnvioAction(id: string): Promise<{ error?: string }>
         .order('numero', { ascending: true })
         .limit(1)
         .maybeSingle()
-      parcelaId = (p as any)?.id ?? null
+      parcelaId = p?.id ?? null
     }
     if (!parcelaId) return { error: 'Parcela não encontrada para montar a mensagem.' }
 
@@ -182,8 +185,9 @@ export async function forcarEnvioAction(id: string): Promise<{ error?: string }>
 }
 
 // ── Helpers de resolução de variáveis ───────────────────────────────────────
-// Espelham worker/src/variaveis.ts. Ao adicionar nova variável de template,
-// atualizar ambos os arquivos para manter consistência entre envio automático e Forçar.
+// A substituição pura (substituirVariaveis) vive em lib/utils/variaveis.ts.
+// O worker mantém cópia própria em worker/src/variaveis.ts — processos separados.
+// Ao adicionar nova variável de template, atualizar ambos os arquivos.
 
 async function resolverVarsLeves(
   admin: ReturnType<typeof createAdminClient>,
@@ -193,10 +197,10 @@ async function resolverVarsLeves(
     admin.from('clientes').select('nome, sobrenome').eq('id', clienteId).single(),
     admin.from('saudacoes').select('texto').eq('conta_id', contaId),
   ])
-  const textos   = ((saudacoes ?? []) as any[]).map((s: any) => s.texto as string)
+  const textos   = (saudacoes ?? []).map(s => s.texto)
   const saudacao = textos.length ? textos[Math.floor(Math.random() * textos.length)] : 'Olá!'
-  const nome     = (cliente as any)?.nome ?? ''
-  const sobrenome = (cliente as any)?.sobrenome ?? ''
+  const nome     = cliente?.nome ?? ''
+  const sobrenome = cliente?.sobrenome ?? ''
   return template
     .replace(/#NOMECOMPLETO#/g, `${nome} ${sobrenome}`.trim())
     .replace(/#NOME#/g,         nome)
@@ -213,11 +217,11 @@ async function resolverVars(
     if (cobrancaId) {
       const { data: cob } = await admin
         .from('cobrancas').select('meio_pagamento_id').eq('id', cobrancaId).maybeSingle()
-      const meioid = (cob as any)?.meio_pagamento_id
+      const meioid = cob?.meio_pagamento_id
       if (meioid) {
         const { data: meio } = await admin
           .from('meios_pagamento').select('mensagem').eq('id', meioid).maybeSingle()
-        if ((meio as any)?.mensagem) return meio
+        if (meio?.mensagem) return meio
       }
     }
     const { data } = await admin
@@ -232,14 +236,15 @@ async function resolverVars(
     buscarPix(),
   ])
 
-  const textos   = ((saudacoes ?? []) as any[]).map((s: any) => s.texto as string)
+  const textos   = (saudacoes ?? []).map(s => s.texto)
   const saudacao = textos.length ? textos[Math.floor(Math.random() * textos.length)] : 'Olá!'
 
-  return template
-    .replace(/#VALOR#/g,        formatBRL(parseFloat((parcela as any)?.valor ?? '0')))
-    .replace(/#NOMECOMPLETO#/g, `${(cliente as any)?.nome ?? ''} ${(cliente as any)?.sobrenome ?? ''}`.trim())
-    .replace(/#NOME#/g,         (cliente as any)?.nome ?? '')
-    .replace(/#PIX#/g,          (pix as any)?.mensagem ?? '(Pix não configurado)')
-    .replace(/#SAUDACAO#/g,     saudacao)
-    .replace(/#VENCIMENTO#/g,   formatData((parcela as any)?.data_vencimento))
+  return substituirVariaveis(template, {
+    valor:        formatBRL(parcela?.valor ?? 0),
+    nomecompleto: `${cliente?.nome ?? ''} ${cliente?.sobrenome ?? ''}`.trim(),
+    nome:         cliente?.nome ?? '',
+    pix:          pix?.mensagem ?? '(Pix não configurado)',
+    saudacao,
+    vencimento:   formatData(parcela?.data_vencimento),
+  })
 }

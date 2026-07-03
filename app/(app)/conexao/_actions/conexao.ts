@@ -21,10 +21,11 @@ async function getConta() {
 export async function conectarAction() {
   const { supabase, contaId } = await getConta()
 
-  await supabase.from('conexoes').upsert(
+  const { error } = await supabase.from('conexoes').upsert(
     { conta_id: contaId, status: 'conectando', comando: 'reconectar', qr_code: null },
     { onConflict: 'conta_id' },
   )
+  if (error) throw new Error(error.message)
 
   revalidatePath('/conexao')
 }
@@ -33,7 +34,7 @@ export async function conectarAction() {
 export async function desconectarAction() {
   const { supabase, contaId } = await getConta()
 
-  await supabase.from('conexoes').upsert(
+  const { error } = await supabase.from('conexoes').upsert(
     {
       conta_id:         contaId,
       status:           'desconectado',
@@ -44,6 +45,7 @@ export async function desconectarAction() {
     },
     { onConflict: 'conta_id' },
   )
+  if (error) throw new Error(error.message)
 
   revalidatePath('/conexao')
 }
@@ -55,15 +57,17 @@ export async function reiniciarAction() {
   const { data: atual } = await supabase
     .from('conexoes').select('status').eq('conta_id', contaId).maybeSingle()
 
-  if ((atual as any)?.status === 'conectado') {
-    await supabase.from('conexoes')
+  if (atual?.status === 'conectado') {
+    const { error } = await supabase.from('conexoes')
       .update({ comando: 'reconectar', qr_code: null })
       .eq('conta_id', contaId)
+    if (error) throw new Error(error.message)
   } else {
-    await supabase.from('conexoes').upsert(
+    const { error } = await supabase.from('conexoes').upsert(
       { conta_id: contaId, status: 'conectando', comando: 'reconectar', qr_code: null },
       { onConflict: 'conta_id' },
     )
+    if (error) throw new Error(error.message)
   }
 
   revalidatePath('/conexao')

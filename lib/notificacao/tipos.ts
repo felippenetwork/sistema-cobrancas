@@ -12,6 +12,7 @@ export const NOTIF_TIPOS = [
   { tipo: 'manual',              label: 'Cobrança manual',       desc: 'Disparado pelo botão WhatsApp na parcela' },
   { tipo: 'boasvindas',          label: 'Boas-vindas',           desc: 'Enviado ao cadastrar nova cobrança (opcional)' },
   { tipo: 'pagamento_confirmado', label: 'Pagamento confirmado', desc: 'Enviado ao dar baixa numa parcela' },
+  { tipo: 'agendada',            label: 'Mensagem avulsa',      desc: 'Mensagem personalizada agendada pelo usuário' },
 ] as const
 
 export type NotifTipo = (typeof NOTIF_TIPOS)[number]['tipo']
@@ -33,7 +34,7 @@ export const SAUDACOES_PADRAO = [
 // Templates padrão por tipo. Usados no seed de novas contas.
 // O operador pode editar o conteúdo; os dias são fixos.
 export const NOTIF_DEFAULTS: {
-  tipo:               string
+  tipo:               NotifTipo
   horario:            string
   template_whatsapp:  string
   assunto_email:      string

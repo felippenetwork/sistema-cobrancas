@@ -4,10 +4,14 @@
 // §3 regras-financeiras: REGRA ÚNICA, dois pontos de entrada idênticos.
 // ⚠️ NÃO gerar próxima parcela recorrente aqui — responsabilidade do scheduler (Sprint 8).
 
+import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { calcularVencimento } from '@/lib/utils/parcelas'
+
+const schemaId = z.string().uuid()
 
 // ── Cobrança manual via WhatsApp ─────────────────────────────────────────────
 // Cria notificacoes_enviadas com tipo='manual', status='fila'.
@@ -26,9 +30,9 @@ export async function cobrarManualAction(formData: FormData) {
     .single()
   if (!parcela) throw new Error('Parcela não encontrada.')
 
-  const clienteId = (parcela.cobrancas as any).cliente_id as string
+  const clienteId = parcela.cobrancas.cliente_id
 
-  await supabase.from('notificacoes_enviadas').insert({
+  const { error: notifErr } = await supabase.from('notificacoes_enviadas').insert({
     conta_id:      parcela.conta_id,
     parcela_id:    parcela.id,
     cobranca_id:   parcela.cobranca_id,
@@ -38,6 +42,7 @@ export async function cobrarManualAction(formData: FormData) {
     status:        'fila',
     agendado_para: new Date().toISOString(),
   })
+  if (notifErr) throw new Error(notifErr.message)
 
   revalidatePath(`/cobrancas/${parcela.cobranca_id}`)
 }
@@ -48,120 +53,108 @@ async function requireUser() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('Não autenticado.')
-  return { supabase, userId: user.id }
+  const { data: conta } = await supabase
+    .from('contas').select('id').eq('owner_user_id', user.id).single()
+  if (!conta) throw new Error('Conta não encontrada.')
+  return { supabase, contaId: conta.id as string }
 }
 
 // ── Dar baixa numa parcela ───────────────────────────────────────────────────
-// Efeitos atômicos (§3):
-//   1. parcela.status = paga, data_pagamento = hoje
-//   2. Cria lancamento de entrada
-//   3. Cancela notificações em fila
-//   4. Se não-recorrente: fecha cobrança quando todas as parcelas estão pagas
+// Passos 1-4 rodam via RPC Postgres (transação real — migration 0013).
+// Passos 5-6 (confirmação de pagamento + próxima parcela recorrente) são
+// efeitos colaterais sem risco de corrupção caso falhem isoladamente.
 export async function baixarParcelaAction(formData: FormData) {
-  const parcelaId  = formData.get('parcela_id') as string
+  const parsed = schemaId.safeParse(formData.get('parcela_id'))
+  if (!parsed.success) return
+  const parcelaId  = parsed.data
   const redirectTo = (formData.get('redirect_to') as string) || null
 
-  const { supabase } = await requireUser()
+  const { supabase, contaId } = await requireUser()
   const hoje = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }) // YYYY-MM-DD
 
-  // 1. Marcar como paga (RLS garante que só altera parcela da própria conta)
-  const { data: parcela, error: updErr } = await supabase
-    .from('parcelas')
-    .update({ status: 'paga', data_pagamento: hoje })
-    .eq('id', parcelaId)
-    .eq('status', 'aberta')  // idempotência: não baixar parcela já paga
-    .select('id, valor, conta_id, cobranca_id')
-    .single()
+  // Passos 1-4: parcela paga + lancamento + cancelar notifs + fechar cobrança — ATÔMICO
+  const admin = createAdminClient()
+  const { data: rpcData, error: rpcErr } = await admin.rpc('baixar_parcela', {
+    p_parcela_id: parcelaId,
+    p_conta_id:   contaId,
+    p_hoje:       hoje,
+  })
 
-  if (updErr || !parcela) {
+  if (rpcErr) {
+    console.error('[baixarParcela] rpc.error', rpcErr, { parcelaId, contaId })
+    revalidatePath('/cobrancas')
+    if (redirectTo) redirect(redirectTo)
+    return
+  }
+
+  const result = rpcData as { ok: boolean; erro?: string; cobranca_id?: string; conta_id?: string; recorrente?: boolean; cliente_id?: string }
+
+  if (!result?.ok) {
     // Já paga ou não encontrada — silencia (idempotência)
     revalidatePath('/cobrancas')
     if (redirectTo) redirect(redirectTo)
     return
   }
 
-  // 2. Lançamento de entrada (alimenta Dashboard)
-  await supabase.from('lancamentos').insert({
-    conta_id:   parcela.conta_id,
-    tipo:       'entrada',
-    origem:     'parcela',
-    parcela_id: parcela.id,
-    valor:      parcela.valor,
-    data:       hoje,
-  })
+  const cobrancaId = result.cobranca_id as string
+  const contaIdDaParcela = result.conta_id as string
 
-  // 3. Cancelar notificações em fila desta parcela (ambos os canais)
-  await supabase
-    .from('notificacoes_enviadas')
-    .update({ status: 'cancelado' })
-    .eq('parcela_id', parcelaId)
-    .eq('status', 'fila')
-
-  // 4. Buscar cobrança (recorrente + dados para geração de próxima parcela)
-  const { data: cob } = await supabase
-    .from('cobrancas')
-    .select('recorrente, cliente_id, dia_pagamento, valor_mensalidade')
-    .eq('id', parcela.cobranca_id)
-    .single()
-
-  // Enfileirar confirmação de pagamento (respeita ativo_whatsapp / ativo_email da config)
-  const clienteId = (cob as any)?.cliente_id as string | null
+  // Passo 5: enfileirar confirmação de pagamento
+  const clienteId = result.cliente_id as string | null
   if (clienteId) {
     const { data: cfgPag } = await supabase
       .from('notificacoes_config')
       .select('ativo_whatsapp, ativo_email')
-      .eq('conta_id', parcela.conta_id)
+      .eq('conta_id', contaIdDaParcela)
       .eq('tipo', 'pagamento_confirmado')
       .maybeSingle()
 
     const agora     = new Date().toISOString()
     const baseNotif = {
-      conta_id:      parcela.conta_id,
-      parcela_id:    parcela.id,
-      cobranca_id:   parcela.cobranca_id,
+      conta_id:      contaIdDaParcela,
+      parcela_id:    parcelaId,
+      cobranca_id:   cobrancaId,
       cliente_id:    clienteId,
-      tipo:          'pagamento_confirmado',
-      status:        'fila',
+      tipo:          'pagamento_confirmado' as const,
+      status:        'fila' as const,
       agendado_para: agora,
     }
 
-    if ((cfgPag as any)?.ativo_whatsapp) {
-      await supabase.from('notificacoes_enviadas').insert({ ...baseNotif, canal: 'whatsapp' })
+    if (cfgPag?.ativo_whatsapp) {
+      const { error: confWaErr } = await supabase
+        .from('notificacoes_enviadas').insert({ ...baseNotif, canal: 'whatsapp' as const })
+      if (confWaErr) console.error('[baixarParcela] pagamento_confirmado.whatsapp', confWaErr)
     }
-    if ((cfgPag as any)?.ativo_email) {
-      await supabase.from('notificacoes_enviadas').insert({ ...baseNotif, canal: 'email' })
+    if (cfgPag?.ativo_email) {
+      const { error: confEmErr } = await supabase
+        .from('notificacoes_enviadas').insert({ ...baseNotif, canal: 'email' as const })
+      if (confEmErr) console.error('[baixarParcela] pagamento_confirmado.email', confEmErr)
     }
   }
 
-  // 5. Fechar cobrança não-recorrente quando todas as parcelas estão pagas (A6)
-  if (cob && !(cob as any).recorrente) {
-    const { count } = await supabase
-      .from('parcelas')
-      .select('*', { count: 'exact', head: true })
-      .eq('cobranca_id', parcela.cobranca_id)
-      .neq('status', 'paga')
+  // Passo 6: recorrente → gerar próxima parcela imediatamente se não sobrou nenhuma aberta.
+  //          O scheduler (1h) serve de safety net; aqui garante UX imediata.
+  if (result.recorrente) {
+    const { data: cob } = await supabase
+      .from('cobrancas')
+      .select('dia_pagamento, valor_mensalidade')
+      .eq('id', cobrancaId)
+      .eq('conta_id', contaId)
+      .single()
 
-    if ((count ?? 1) === 0) {
-      await supabase
-        .from('cobrancas')
-        .update({ status: 'concluida' })
-        .eq('id', parcela.cobranca_id)
-    }
-  }
-  // 6. Recorrente: gerar próxima parcela imediatamente se não sobrou nenhuma aberta.
-  //    O scheduler (1h) serve de safety net; aqui garante UX imediata.
-  if (cob && (cob as any).recorrente) {
     const { count: abertas } = await supabase
       .from('parcelas')
       .select('*', { count: 'exact', head: true })
-      .eq('cobranca_id', parcela.cobranca_id)
+      .eq('cobranca_id', cobrancaId)
+      .eq('conta_id', contaId)
       .eq('status', 'aberta')
 
-    if ((abertas ?? 0) === 0) {
+    if ((abertas ?? 0) === 0 && cob) {
       const { data: ultimaArr } = await supabase
         .from('parcelas')
         .select('numero, data_vencimento')
-        .eq('cobranca_id', parcela.cobranca_id)
+        .eq('cobranca_id', cobrancaId)
+        .eq('conta_id', contaId)
         .order('numero', { ascending: false })
         .limit(1)
 
@@ -169,24 +162,25 @@ export async function baixarParcelaAction(formData: FormData) {
         const ultima = ultimaArr[0]
         const proximoVencimento = calcularVencimento(
           new Date((ultima.data_vencimento as string) + 'T12:00:00'),
-          (cob as any).dia_pagamento as number,
+          cob.dia_pagamento,
           1,
         ).toISOString().slice(0, 10)
 
-        await supabase.from('parcelas').insert({
-          conta_id:        parcela.conta_id,
-          cobranca_id:     parcela.cobranca_id,
+        const { error: nextErr } = await supabase.from('parcelas').insert({
+          conta_id:        contaIdDaParcela,
+          cobranca_id:     cobrancaId,
           numero:          (ultima.numero as number) + 1,
-          valor:           (cob as any).valor_mensalidade,
+          valor:           cob.valor_mensalidade,
           data_vencimento: proximoVencimento,
           status:          'aberta',
         })
+        if (nextErr) console.error('[baixarParcela] proxima_parcela.insert', nextErr, { cobrancaId })
       }
     }
   }
 
   revalidatePath('/cobrancas')
-  revalidatePath(`/cobrancas/${parcela.cobranca_id}`)
+  revalidatePath(`/cobrancas/${cobrancaId}`)
   if (redirectTo) redirect(redirectTo)
 }
 
@@ -209,12 +203,13 @@ export async function editarParcelaAction(
   limite.setFullYear(limite.getFullYear() + 10)
   if (new Date(dataVencimento) > limite) return { error: 'Data de vencimento muito distante.' }
 
-  const { supabase } = await requireUser()
+  const { supabase, contaId } = await requireUser()
 
   const { error } = await supabase
     .from('parcelas')
     .update({ data_vencimento: dataVencimento, valor, observacao })
     .eq('id', parcelaId)
+    .eq('conta_id', contaId)
     .eq('status', 'aberta')  // não editar parcela já paga
 
   if (error) return { error: error.message }
@@ -227,6 +222,7 @@ export async function editarParcelaAction(
     .from('notificacoes_enviadas')
     .select('id, tipo')
     .eq('parcela_id', parcelaId)
+    .eq('conta_id', contaId)
     .eq('status', 'fila')
 
   if (notifsEmFila?.length) {
@@ -243,10 +239,12 @@ export async function editarParcelaAction(
       // Se a nova data já passou, mantém para ser enviado no próximo ciclo
       const agendadoPara = novaData < hojeRef ? hojeRef : novaData
 
-      await supabase
+      const { error: reagErr } = await supabase
         .from('notificacoes_enviadas')
         .update({ agendado_para: agendadoPara.toISOString() })
         .eq('id', notif.id)
+        .eq('conta_id', contaId)
+      if (reagErr) console.error('[editarParcela] notif.reagendar', reagErr, { notifId: notif.id })
     }
   }
 

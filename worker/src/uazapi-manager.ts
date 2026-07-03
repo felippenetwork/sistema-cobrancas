@@ -157,10 +157,11 @@ export class UazapiManager {
           await this.supabase.from('conexoes').upsert(
             { conta_id: contaId, status: 'conectado', qr_code: null, comando: null,
               numero_conectado: numero, device_name: nome,
-              ultima_conexao: new Date().toISOString() },
+              ultima_conexao: new Date().toISOString(),
+              uazapi_instance_token: inst.token as string },
             { onConflict: 'conta_id' },
           )
-        } catch {}
+        } catch (err) { logger.warn({ contaId, err }, 'uazapi: restaurarSessoes — falha ao sincronizar DB') }
         this.iniciarPolling(contaId)
         logger.info({ contaId }, 'uazapi: sessão restaurada')
       } else {
@@ -197,7 +198,8 @@ export class UazapiManager {
     }
 
     await this.supabase.from('conexoes').upsert(
-      { conta_id: contaId, status: 'conectando', qr_code: null, comando: null },
+      { conta_id: contaId, status: 'conectando', qr_code: null, comando: null,
+        uazapi_instance_token: token },
       { onConflict: 'conta_id' },
     )
 
@@ -256,7 +258,7 @@ export class UazapiManager {
 
     // Checar estado real no uazapi antes de qualquer ação destrutiva
     let estadoAtual: 'connected' | 'disconnected' | 'connecting' = 'disconnected'
-    try { estadoAtual = await this.pegarEstado(contaId) } catch {}
+    try { estadoAtual = await this.pegarEstado(contaId) } catch (err) { logger.warn({ contaId, err }, 'uazapi: reconectar — falha ao checar estado') }
 
     if (estadoAtual === 'connected') {
       // Já conectado — apenas sincronizar banco, sem desconectar
@@ -272,7 +274,7 @@ export class UazapiManager {
               ultima_conexao: new Date().toISOString() },
             { onConflict: 'conta_id' },
           )
-        } catch {}
+        } catch (err) { logger.warn({ contaId, err }, 'uazapi: reconectar — falha ao sincronizar DB') }
       }
       this.connected.add(contaId)
       this.iniciarPolling(contaId)
@@ -413,7 +415,7 @@ export class UazapiManager {
               ultima_conexao: new Date().toISOString() },
             { onConflict: 'conta_id' },
           )
-        } catch {}
+        } catch (err) { logger.warn({ contaId, err }, 'uazapi: sincronizarConexoes — falha ao sincronizar DB') }
         this.iniciarPolling(contaId)
         logger.info({ contaId }, 'uazapi: sincronizarConexoes — sessão restaurada, polling reiniciado')
 
@@ -425,7 +427,7 @@ export class UazapiManager {
             { conta_id: contaId, status: 'conectando', comando: null },
             { onConflict: 'conta_id' },
           )
-        } catch {}
+        } catch (err) { logger.warn({ contaId, err }, 'uazapi: sincronizarConexoes — falha ao atualizar status conectando') }
         this.iniciarPolling(contaId)
         logger.info({ contaId }, 'uazapi: sincronizarConexoes — QR atualizado')
 
@@ -469,7 +471,7 @@ export class UazapiManager {
       if (!this.polling.has(contaId)) return 'falhou'
 
       let state: 'connected' | 'disconnected' | 'connecting' = 'disconnected'
-      try { state = await this.pegarEstado(contaId) } catch {}
+      try { state = await this.pegarEstado(contaId) } catch (err) { logger.warn({ contaId, tentativa: i, err }, 'uazapi: tentarReconectarAuto — falha ao checar estado') }
 
       if (state === 'connected') {
         this.connected.add(contaId)
@@ -483,7 +485,7 @@ export class UazapiManager {
               ultima_conexao: new Date().toISOString() },
             { onConflict: 'conta_id' },
           )
-        } catch {}
+        } catch (err) { logger.warn({ contaId, err }, 'uazapi: tentarReconectarAuto — falha ao sincronizar DB pós-reconexão') }
         logger.info({ contaId, tentativa: i }, 'uazapi: reconexão automática bem-sucedida')
         return 'conectado'
       }
@@ -496,7 +498,7 @@ export class UazapiManager {
             { conta_id: contaId, status: 'conectando', comando: null },
             { onConflict: 'conta_id' },
           )
-        } catch {}
+        } catch (err) { logger.warn({ contaId, err }, 'uazapi: tentarReconectarAuto — falha ao atualizar status conectando') }
         logger.info({ contaId }, 'uazapi: reconexão automática gerou QR — aguardando scan do usuário')
         return 'conectando'
       }
@@ -540,7 +542,7 @@ export class UazapiManager {
                   ultima_conexao: new Date().toISOString() },
                 { onConflict: 'conta_id' },
               )
-            } catch {}
+            } catch (err) { logger.warn({ contaId, err }, 'uazapi: polling — falha ao sincronizar DB pós-conexão') }
           }
 
           if (state !== 'connected' && this.connected.has(contaId)) {
@@ -562,7 +564,7 @@ export class UazapiManager {
             logger.error({ contaId }, 'uazapi: muitos erros consecutivos — parando polling')
             this.polling.delete(contaId)
             this.connected.delete(contaId)
-            try { await this.marcarDesconectado(contaId) } catch {}
+            try { await this.marcarDesconectado(contaId) } catch (err) { logger.warn({ contaId, err }, 'uazapi: polling — falha ao marcar desconectado') }
             return
           }
         }

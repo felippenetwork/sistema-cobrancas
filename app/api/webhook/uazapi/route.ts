@@ -5,6 +5,18 @@ import { createAdminClient } from '@/lib/supabase/admin'
 // uazapi envia: connection.update, qrcode.updated, etc.
 
 export async function POST(req: NextRequest) {
+  // Valida segredo compartilhado (configurar UAZAPI_WEBHOOK_SECRET na Vercel e
+  // incluir ?secret=TOKEN na URL do webhook registrada na uazapi)
+  const webhookSecret = process.env.UAZAPI_WEBHOOK_SECRET
+  if (webhookSecret) {
+    const incoming = req.nextUrl.searchParams.get('secret')
+      ?? req.headers.get('x-webhook-secret')
+    if (incoming !== webhookSecret) {
+      console.warn('[webhook/uazapi] segredo inválido')
+      return NextResponse.json({ ok: false }, { status: 401 })
+    }
+  }
+
   try {
     const payload = await req.json() as Record<string, unknown>
 
@@ -50,25 +62,28 @@ export async function POST(req: NextRequest) {
         ? owner.replace('@s.whatsapp.net', '').replace(/\D/g, '')
         : null
 
-      await supabase.from('conexoes').update({
+      const { error } = await supabase.from('conexoes').update({
         status:           'conectado',
         qr_code:          null,
         numero_conectado: phone,
         ultima_conexao:   new Date().toISOString(),
       }).eq('conta_id', contaId)
+      if (error) console.error('[webhook/uazapi] conexoes.update.conectado', error, { contaId })
 
     } else if (qrcode) {
-      await supabase.from('conexoes').update({
+      const { error } = await supabase.from('conexoes').update({
         status:  'conectando',
         qr_code: qrcode,
       }).eq('conta_id', contaId)
+      if (error) console.error('[webhook/uazapi] conexoes.update.conectando', error, { contaId })
 
     } else {
       // Desconectado sem QR
-      await supabase.from('conexoes').update({
+      const { error } = await supabase.from('conexoes').update({
         status:  'desconectado',
         qr_code: null,
       }).eq('conta_id', contaId)
+      if (error) console.error('[webhook/uazapi] conexoes.update.desconectado', error, { contaId })
     }
 
     return NextResponse.json({ ok: true })

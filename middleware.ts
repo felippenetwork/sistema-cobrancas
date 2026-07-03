@@ -70,6 +70,21 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
+  // Verificar status da conta — redireciona se suspensa ou expirada
+  if (user && !isTenantPublic(pathname)) {
+    const { data: conta } = await supabase
+      .from('contas')
+      .select('status')
+      .eq('owner_user_id', user.id)
+      .maybeSingle()
+
+    if (conta && conta.status !== 'ativa') {
+      const url = request.nextUrl.clone()
+      url.pathname = '/plano-expirado'
+      return NextResponse.redirect(url)
+    }
+  }
+
   return response
 }
 

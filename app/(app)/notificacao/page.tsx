@@ -238,15 +238,17 @@ export default function NotificacaoPage() {
     if (!conta) return
 
     let { data } = await sb.from('notificacoes_config')
-      .select('*').eq('conta_id', (conta as any).id).order('created_at')
+      .select('tipo, horario, ativo_whatsapp, ativo_email, template_whatsapp, template_email, assunto_email')
+      .eq('conta_id', conta.id).order('created_at')
 
     if (!data?.length || data.length < NOTIF_DEFAULTS.length) {
       await seedNotificacoesAction()
       const { data: seeded } = await sb.from('notificacoes_config')
-        .select('*').eq('conta_id', (conta as any).id)
+        .select('tipo, horario, ativo_whatsapp, ativo_email, template_whatsapp, template_email, assunto_email')
+        .eq('conta_id', conta.id)
       data = seeded
     }
-    setConfigs((data as Config[]) ?? [])
+    setConfigs(data ?? [])
     setLoading(false)
   }, [])
 

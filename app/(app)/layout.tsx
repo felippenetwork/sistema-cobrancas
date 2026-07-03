@@ -27,7 +27,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (isBlocked) redirect('/plano-expirado')
 
   return (
-    <AppShell nomeEmpresa={(conta as any).nome_empresa ?? ''}>
+    <AppShell nomeEmpresa={conta.nome_empresa ?? ''}>
       {children}
     </AppShell>
   )

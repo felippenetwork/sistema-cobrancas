@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { Loader2, CheckCircle } from 'lucide-react'
 
-export default function DescadastrarForm({ clienteId }: { clienteId: string }) {
+export default function DescadastrarForm({ clienteId, token }: { clienteId: string; token: string }) {
   const [loading, setLoading]   = useState(false)
   const [concluido, setConcluido] = useState(false)
   const [erro, setErro]         = useState('')
@@ -12,7 +12,10 @@ export default function DescadastrarForm({ clienteId }: { clienteId: string }) {
     setLoading(true)
     setErro('')
 
-    const res = await fetch(`/api/descadastrar/${clienteId}`, { method: 'POST' })
+    const res = await fetch(
+      `/api/descadastrar/${clienteId}?token=${encodeURIComponent(token)}`,
+      { method: 'POST' },
+    )
     if (res.ok) {
       setConcluido(true)
     } else {

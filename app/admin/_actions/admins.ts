@@ -56,10 +56,11 @@ export async function adicionarAdminAction(
     const { error: insErr } = await admin.from('plataforma_admins').insert({ user_id: userId })
     if (insErr) return { error: insErr.message }
 
-    await admin.from('audit_log').insert({
+    const { error: auditErr } = await admin.from('audit_log').insert({
       actor: 'admin', actor_id: adminUserId,
       acao: 'adicionar_admin', detalhe: { email },
     })
+    if (auditErr) console.error('[adicionarAdmin] audit_log', auditErr)
   } catch (e: unknown) {
     return { error: e instanceof Error ? e.message : 'Erro desconhecido.' }
   }
@@ -84,10 +85,11 @@ export async function removerAdminAction(formData: FormData) {
   const { error } = await admin.from('plataforma_admins').delete().eq('user_id', userId)
   if (error) throw new Error(error.message)
 
-  await admin.from('audit_log').insert({
+  const { error: auditErr } = await admin.from('audit_log').insert({
     actor: 'admin', actor_id: adminUserId,
     acao: 'remover_admin', detalhe: { removido: userId },
   })
+  if (auditErr) console.error('[removerAdmin] audit_log', auditErr)
 
   revalidatePath('/admin/admins')
 }

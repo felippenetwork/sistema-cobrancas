@@ -35,7 +35,7 @@ export async function criarLancamentoAction(
 
     const { error } = await supabase.from('lancamentos').insert({
       conta_id: contaId,
-      tipo,
+      tipo:     tipo as 'entrada' | 'saida',
       origem:   'manual',
       valor,
       data,

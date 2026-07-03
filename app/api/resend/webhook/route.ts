@@ -2,9 +2,10 @@ import { Webhook } from 'svix'
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import type { Enums } from '@/types/database'
 
 // Mapeamento de eventos Resend → status interno
-const STATUS_MAP: Record<string, string> = {
+const STATUS_MAP: Record<string, Enums<'notif_status'>> = {
   'email.sent':             'enviado',
   'email.delivered':        'entregue',
   'email.opened':           'aberto',

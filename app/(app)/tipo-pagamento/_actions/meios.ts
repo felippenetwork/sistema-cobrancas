@@ -25,8 +25,9 @@ export async function criarMeioAction(_prev: ActionState, formData: FormData): P
 
     // Se vai ser padrão, remove padrão dos outros
     if (padrao) {
-      await supabase.from('meios_pagamento').update({ is_padrao: false })
-        .eq('conta_id', contaId).eq('is_padrao', true)
+      const { error: clearErr } = await supabase.from('meios_pagamento')
+        .update({ is_padrao: false }).eq('conta_id', contaId).eq('is_padrao', true)
+      if (clearErr) console.error('[criarMeio] clear_padrao', clearErr, { contaId })
     }
 
     const { error } = await supabase.from('meios_pagamento').insert({
@@ -44,8 +45,12 @@ export async function definirPadraoAction(formData: FormData) {
   const meioId = formData.get('meio_id') as string
   const { supabase, contaId } = await getConta()
   // Remove padrão de todos e define no selecionado
-  await supabase.from('meios_pagamento').update({ is_padrao: false }).eq('conta_id', contaId)
-  await supabase.from('meios_pagamento').update({ is_padrao: true }).eq('id', meioId)
+  const { error: clearErr } = await supabase.from('meios_pagamento')
+    .update({ is_padrao: false }).eq('conta_id', contaId)
+  if (clearErr) console.error('[definirPadrao] clear', clearErr, { contaId })
+  const { error: setErr } = await supabase.from('meios_pagamento')
+    .update({ is_padrao: true }).eq('id', meioId).eq('conta_id', contaId)
+  if (setErr) console.error('[definirPadrao] set', setErr, { meioId, contaId })
   revalidatePath('/tipo-pagamento')
 }
 
@@ -60,8 +65,9 @@ export async function editarMeioAction(_prev: ActionState, formData: FormData): 
     if (!nome || !mensagem) return { error: 'Preencha nome e mensagem/chave Pix.' }
 
     if (padrao) {
-      await supabase.from('meios_pagamento').update({ is_padrao: false })
-        .eq('conta_id', contaId).eq('is_padrao', true)
+      const { error: clearErr } = await supabase.from('meios_pagamento')
+        .update({ is_padrao: false }).eq('conta_id', contaId).eq('is_padrao', true)
+      if (clearErr) console.error('[editarMeio] clear_padrao', clearErr, { contaId })
     }
 
     const { error } = await supabase.from('meios_pagamento')
@@ -77,7 +83,8 @@ export async function editarMeioAction(_prev: ActionState, formData: FormData): 
 
 export async function excluirMeioAction(formData: FormData) {
   const meioId = formData.get('meio_id') as string
-  const { supabase } = await getConta()
-  await supabase.from('meios_pagamento').delete().eq('id', meioId)
+  const { supabase, contaId } = await getConta()
+  const { error } = await supabase.from('meios_pagamento').delete().eq('id', meioId).eq('conta_id', contaId)
+  if (error) throw new Error(error.message)
   revalidatePath('/tipo-pagamento')
 }

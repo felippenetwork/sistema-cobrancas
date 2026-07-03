@@ -5,38 +5,66 @@
 //   • Todo e-mail DEVE ter link de unsubscribe no rodapé (§2, §8).
 //   • Não enviar para clientes com optout_email = true.
 
+import { createHmac } from 'crypto'
 import pino from 'pino'
 import { Resend } from 'resend'
-import { dentroDaJanela, sleep, hojeEmSP, addDias } from '../format.js'
+import { dentroDaJanela, horaStr, TIPOS_SEM_JANELA, sleep, hojeEmSP, addDias } from '../format.js'
 import { resolverVariaveis, resolverVariaveisLeves } from '../variaveis.js'
 import type { SupabaseAdmin } from '../supabase.js'
 
 const logger = pino({ level: process.env.LOG_LEVEL ?? 'warn' })
 const resend  = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null
 
-const SITE_URL = process.env.SITE_URL ?? process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000'
+const SITE_URL     = process.env.SITE_URL ?? 'http://localhost:3000'
+const UNSUB_SECRET = process.env.UNSUB_SECRET ?? ''
+
+function gerarTokenDescadastro(clienteId: string): string {
+  if (!UNSUB_SECRET) return ''
+  return createHmac('sha256', UNSUB_SECRET).update(clienteId).digest('hex')
+}
 
 export async function processarFilaEmail(supabase: SupabaseAdmin) {
   if (!resend) {
     logger.warn('RESEND_API_KEY não configurada — worker de e-mail desativado')
     return
   }
-  if (!dentroDaJanela()) return
 
   const agora = new Date().toISOString()
 
   const { data: pendentes } = await supabase
     .from('notificacoes_enviadas')
-    .select('id, conta_id, parcela_id, cobranca_id, cliente_id, tipo, assunto, mensagem_final')
+    .select('id, conta_id, parcela_id, cobranca_id, cliente_id, tipo')
     .eq('canal', 'email')
     .eq('status', 'fila')
     .lte('agendado_para', agora)
     .order('agendado_para', { ascending: true })
     .limit(10)
 
-  for (const notif of pendentes ?? []) {
+  if (!pendentes?.length) return
+
+  // Carregar janela por conta (1 query para todas as contas do lote)
+  const contaIds = [...new Set(pendentes.map((n: any) => n.conta_id as string))]
+  const { data: configs } = await supabase
+    .from('configuracoes')
+    .select('conta_id, horario_inicio, horario_fim')
+    .in('conta_id', contaIds)
+
+  const cfgMap = new Map(
+    (configs ?? []).map((c: any) => [c.conta_id as string, c]),
+  )
+
+  for (const notif of pendentes) {
+    const cfg     = cfgMap.get(notif.conta_id as string)
+    const hInicio = horaStr(cfg?.horario_inicio ?? '09:00')
+    const hFim    = horaStr(cfg?.horario_fim    ?? '20:00')
+
+    // Tipos transacionais/manuais não têm restrição de janela
+    if (!TIPOS_SEM_JANELA.has(notif.tipo as string) && !dentroDaJanela(hInicio, hFim)) {
+      continue  // fora da janela desta conta
+    }
+
     await processarUmEmail(supabase, notif)
-    await sleep(2_000)  // pequena pausa para respeitar rate limit do Resend
+    await sleep(2_000)  // rate limit do Resend
   }
 }
 
@@ -60,7 +88,7 @@ async function processarUmEmail(
     .single()
 
   if (!cliente || (cliente as any).optout_email) {
-    await supabase.from('notificacoes_enviadas').update({ status: 'cancelado' }).eq('id', notif.id)
+    await emailCancelar(supabase, notif.id)
     return
   }
 
@@ -75,7 +103,7 @@ async function processarUmEmail(
   const template = (cfg as any)?.template_email
   const assunto  = (cfg as any)?.assunto_email
   if (!template || !assunto) {
-    await supabase.from('notificacoes_enviadas').update({ status: 'falhou' }).eq('id', notif.id)
+    await emailFalhou(supabase, notif.id)
     return
   }
 
@@ -88,7 +116,7 @@ async function processarUmEmail(
   const localPart = (remConfig as any)?.local_part
   const dominio   = (platConfig as any)?.dominio_email_operador
   if (!localPart || !dominio) {
-    await supabase.from('notificacoes_enviadas').update({ status: 'falhou' }).eq('id', notif.id)
+    await emailFalhou(supabase, notif.id)
     return
   }
 
@@ -107,7 +135,7 @@ async function processarUmEmail(
 
   if (!parcelaId) {
     logger.warn({ notifId: notif.id, tipo: notif.tipo }, 'Email: sem parcela para variáveis — falhou')
-    await supabase.from('notificacoes_enviadas').update({ status: 'falhou' }).eq('id', notif.id)
+    await emailFalhou(supabase, notif.id)
     return
   }
 
@@ -128,7 +156,7 @@ async function processarUmEmail(
     })
   } catch (err) {
     logger.error({ notifId: notif.id, err }, 'Email: erro ao resolver variáveis')
-    await supabase.from('notificacoes_enviadas').update({ status: 'falhou' }).eq('id', notif.id)
+    await emailFalhou(supabase, notif.id)
     return
   }
 
@@ -146,23 +174,21 @@ async function processarUmEmail(
 
     if (resendErr) throw resendErr
 
-    await supabase.from('notificacoes_enviadas').update({
+    const { error: updErr } = await supabase.from('notificacoes_enviadas').update({
       status:            'enviado',
       mensagem_final:    conteudoFinal,
       enviado_em:        new Date().toISOString(),
       resend_message_id: resendData?.id ?? null,
     }).eq('id', notif.id)
+    if (updErr) logger.error({ notifId: notif.id, updErr }, 'Email: falha ao marcar enviado')
 
     logger.info({ notifId: notif.id, resendId: resendData?.id }, 'Email: enviado')
   } catch (err) {
     logger.error({ notifId: notif.id, err }, 'Email: erro ao enviar')
     if (!dentroDaJanela()) {
-      const amanha = addDias(hojeEmSP(), 1)
-      await supabase.from('notificacoes_enviadas')
-        .update({ agendado_para: new Date(`${amanha}T09:00:00-03:00`).toISOString() })
-        .eq('id', notif.id)
+      await emailReagendar(supabase, notif.id)
     } else {
-      await supabase.from('notificacoes_enviadas').update({ status: 'falhou' }).eq('id', notif.id)
+      await emailFalhou(supabase, notif.id)
     }
   }
 }
@@ -181,24 +207,24 @@ async function processarEmailAgendado(
     .maybeSingle()
 
   if (!cliente || (cliente as any).deleted_at) {
-    await supabase.from('notificacoes_enviadas').update({ status: 'cancelado' }).eq('id', notif.id)
+    await emailCancelar(supabase, notif.id)
     return
   }
   if ((cliente as any).optout_email) {
-    await supabase.from('notificacoes_enviadas').update({ status: 'cancelado' }).eq('id', notif.id)
+    await emailCancelar(supabase, notif.id)
     return
   }
 
   const toAddress = (cliente as any).email as string | null
   if (!toAddress) {
-    await supabase.from('notificacoes_enviadas').update({ status: 'falhou' }).eq('id', notif.id)
+    await emailFalhou(supabase, notif.id)
     return
   }
 
   const assunto = notif.assunto?.trim()
   const corpo   = notif.mensagem_final?.trim()
   if (!assunto || !corpo) {
-    await supabase.from('notificacoes_enviadas').update({ status: 'falhou' }).eq('id', notif.id)
+    await emailFalhou(supabase, notif.id)
     return
   }
 
@@ -211,13 +237,16 @@ async function processarEmailAgendado(
   const localPart = (remConfig as any)?.local_part
   const dominio   = (platConfig as any)?.dominio_email_operador
   if (!localPart || !dominio) {
-    await supabase.from('notificacoes_enviadas').update({ status: 'falhou' }).eq('id', notif.id)
+    await emailFalhou(supabase, notif.id)
     return
   }
 
   const fromName    = (remConfig as any)?.from_name ?? localPart
   const fromAddress = `${fromName} <${localPart}@${dominio}>`
-  const unsubUrl    = `${SITE_URL}/descadastrar/${notif.cliente_id}`
+  const unsubToken  = gerarTokenDescadastro(notif.cliente_id)
+  const unsubUrl    = unsubToken
+    ? `${SITE_URL}/descadastrar/${notif.cliente_id}?token=${unsubToken}`
+    : `${SITE_URL}/descadastrar/${notif.cliente_id}`
 
   // Resolver variáveis no assunto e no corpo
   const [assuntoFinal, conteudoFinal] = await Promise.all([
@@ -238,25 +267,46 @@ async function processarEmailAgendado(
 
     if (resendErr) throw resendErr
 
-    await supabase.from('notificacoes_enviadas').update({
+    const { error: updErr } = await supabase.from('notificacoes_enviadas').update({
       status:            'enviado',
       mensagem_final:    conteudoFinal,
       enviado_em:        new Date().toISOString(),
       resend_message_id: resendData?.id ?? null,
     }).eq('id', notif.id)
+    if (updErr) logger.error({ notifId: notif.id, updErr }, 'Email agendado: falha ao marcar enviado')
 
     logger.info({ notifId: notif.id, resendId: resendData?.id }, 'Email agendado: enviado')
   } catch (err) {
     logger.error({ notifId: notif.id, err }, 'Email agendado: erro ao enviar')
     if (!dentroDaJanela()) {
-      const amanha = addDias(hojeEmSP(), 1)
-      await supabase.from('notificacoes_enviadas')
-        .update({ agendado_para: new Date(`${amanha}T09:00:00-03:00`).toISOString() })
-        .eq('id', notif.id)
+      await emailReagendar(supabase, notif.id)
     } else {
-      await supabase.from('notificacoes_enviadas').update({ status: 'falhou' }).eq('id', notif.id)
+      await emailFalhou(supabase, notif.id)
     }
   }
+}
+
+// ── Helpers de estado ────────────────────────────────────────────────────────
+
+async function emailReagendar(supabase: SupabaseAdmin, notifId: string) {
+  const amanha = addDias(hojeEmSP(), 1)
+  const { error } = await supabase.from('notificacoes_enviadas')
+    .update({ agendado_para: new Date(`${amanha}T09:00:00-03:00`).toISOString() })
+    .eq('id', notifId)
+  if (error) logger.error({ notifId, error }, 'Email: falha ao reagendar')
+  else logger.info({ notifId }, 'Email: reagendado para amanhã às 09h')
+}
+
+async function emailFalhou(supabase: SupabaseAdmin, notifId: string) {
+  const { error } = await supabase.from('notificacoes_enviadas')
+    .update({ status: 'falhou' }).eq('id', notifId)
+  if (error) logger.error({ notifId, error }, 'Email: falha ao marcar como falhou')
+}
+
+async function emailCancelar(supabase: SupabaseAdmin, notifId: string) {
+  const { error } = await supabase.from('notificacoes_enviadas')
+    .update({ status: 'cancelado' }).eq('id', notifId)
+  if (error) logger.error({ notifId, error }, 'Email: falha ao cancelar notif')
 }
 
 // Template HTML mínimo com unsubscribe (deve estar no rodapé de todo e-mail — §8)

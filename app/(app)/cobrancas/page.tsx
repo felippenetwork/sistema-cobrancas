@@ -50,12 +50,12 @@ export default async function CobrancasPage({
   ])
 
   // ── Indicadores (§6 regras-financeiras) ────────────────────────────────────
-  const parcsAbertas = (parcelasDoMes ?? []).filter((p: any) => p.status === 'aberta')
-  const parcsPagas   = (parcelasDoMes ?? []).filter((p: any) => p.status === 'paga')
+  const parcsAbertas = (parcelasDoMes ?? []).filter(p => p.status === 'aberta')
+  const parcsPagas   = (parcelasDoMes ?? []).filter(p => p.status === 'paga')
   const valRecebidos = somarValores(lancamentosDoMes ?? [])
   const valAReceber  = somarValores(parcsAbertas)
-  const cobAtivas    = (cobrancas ?? []).filter((c: any) =>
-    (c.parcelas as any[]).some((p: any) => p.status === 'aberta'),
+  const cobAtivas    = (cobrancas ?? []).filter(c =>
+    c.parcelas?.some(p => p.status === 'aberta'),
   ).length
 
   return (
@@ -95,7 +95,7 @@ export default async function CobrancasPage({
           </Link>
         </div>
       ) : (
-        <CobrancasTable cobrancas={cobrancas as any} />
+        <CobrancasTable cobrancas={cobrancas} />
       )}
     </div>
   )

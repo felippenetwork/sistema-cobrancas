@@ -10,7 +10,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@supabase/ssr": "^0.5.0",
+    "@supabase/ssr": "^0.12.0",
     "@supabase/supabase-js": "^2.0.0",
     "lucide-react": "^1.21.0",
     "next": "15",
@@ -18,7 +18,8 @@
     "react-dom": "^19.0.0",
     "react-qr-code": "^2.2.0",
     "resend": "^6.14.0",
-    "svix": "^1.96.0"
+    "svix": "^1.96.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^20",

@@ -1,7 +1,7 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
-import { NOTIF_DEFAULTS, SAUDACOES_PADRAO } from '@/lib/notificacao/tipos'
+import { NOTIF_DEFAULTS, SAUDACOES_PADRAO, type NotifTipo } from '@/lib/notificacao/tipos'
 import { revalidatePath } from 'next/cache'
 
 export type ActionState = { error: string | null; success?: boolean }
@@ -18,7 +18,7 @@ async function getConta() {
 // Garante que os 8 tipos existem para esta conta (idempotente)
 export async function seedNotificacoesAction() {
   const { supabase, contaId } = await getConta()
-  await supabase.from('notificacoes_config').upsert(
+  const { error: notifErr } = await supabase.from('notificacoes_config').upsert(
     NOTIF_DEFAULTS.map(n => ({
       conta_id: contaId, tipo: n.tipo, horario: n.horario,
       ativo_whatsapp: false, ativo_email: false,
@@ -27,10 +27,12 @@ export async function seedNotificacoesAction() {
     })),
     { onConflict: 'conta_id,tipo', ignoreDuplicates: true },
   )
+  if (notifErr) console.error('[seedNotificacoes] notificacoes_config.upsert', notifErr, { contaId })
   // Seed saudações se ainda não existirem
   const { count } = await supabase.from('saudacoes').select('*', { count: 'exact', head: true }).eq('conta_id', contaId)
   if (!count) {
-    await supabase.from('saudacoes').insert(SAUDACOES_PADRAO.map(texto => ({ conta_id: contaId, texto })))
+    const { error: saudErr } = await supabase.from('saudacoes').insert(SAUDACOES_PADRAO.map(texto => ({ conta_id: contaId, texto })))
+    if (saudErr) console.error('[seedNotificacoes] saudacoes.insert', saudErr, { contaId })
   }
   revalidatePath('/notificacao')
 }
@@ -42,12 +44,13 @@ export async function toggleCanalAction(
   ativo: boolean,
 ) {
   const { supabase, contaId } = await getConta()
-  const campo = canal === 'whatsapp' ? 'ativo_whatsapp' : 'ativo_email'
+  const updateObj = canal === 'whatsapp' ? { ativo_whatsapp: ativo } : { ativo_email: ativo }
 
-  await supabase.from('notificacoes_config')
-    .update({ [campo]: ativo })
+  const { error } = await supabase.from('notificacoes_config')
+    .update(updateObj)
     .eq('conta_id', contaId)
-    .eq('tipo', tipo)
+    .eq('tipo', tipo as NotifTipo)
+  if (error) console.error('[toggleCanal]', error, { tipo, canal, ativo, contaId })
 
   revalidatePath('/notificacao')
 }
@@ -72,7 +75,7 @@ export async function salvarTemplateAction(
     const { error } = await supabase.from('notificacoes_config').update({
       horario, template_whatsapp: templateWhatsapp,
       assunto_email: assuntoEmail, template_email: templateEmail,
-    }).eq('conta_id', contaId).eq('tipo', tipo)
+    }).eq('conta_id', contaId).eq('tipo', tipo as NotifTipo)
 
     if (error) return { error: error.message }
   } catch (e: unknown) {

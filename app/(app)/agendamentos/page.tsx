@@ -60,7 +60,7 @@ export default async function AgendamentosPage() {
     <div className="p-6 md:p-8">
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-xl font-semibold text-foreground">Agendamentos</h1>
-        <NovoAgendamentoForm clientes={(clientes ?? []) as any[]} />
+        <NovoAgendamentoForm clientes={clientes ?? []} />
       </div>
 
       {!agendamentos?.length ? (

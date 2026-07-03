@@ -55,7 +55,7 @@ export async function salvarConfiguracoesAction(
       )
 
       if (remErr?.code === '23505') {
-        return { error: 'Este nome de remetente já está em uso por outra conta. Escolha outro.' }
+        return { error: 'Este nome de remetente não está disponível. Tente outro.' }
       }
       if (remErr) return { error: remErr.message }
     }

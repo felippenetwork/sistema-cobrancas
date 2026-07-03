@@ -46,8 +46,8 @@ export default function TipoPagamentoPage() {
     if (!user) return
     const { data: conta } = await sb.from('contas').select('id').eq('owner_user_id', user.id).single()
     if (!conta) return
-    const { data } = await sb.from('meios_pagamento').select('*').eq('conta_id', (conta as any).id).order('created_at')
-    setMeios((data as Meio[]) ?? [])
+    const { data } = await sb.from('meios_pagamento').select('id, nome, mensagem, is_padrao').eq('conta_id', conta.id).order('created_at')
+    setMeios(data ?? [])
     setLoading(false)
   }
 
@@ -92,7 +92,12 @@ export default function TipoPagamentoPage() {
 
   async function handleExcluir(id: string) {
     const sb = createClient()
-    await sb.from('meios_pagamento').delete().eq('id', id)
+    const { error } = await sb.from('meios_pagamento').delete().eq('id', id)
+    if (error) {
+      console.error('[handleExcluir]', error, { id })
+      setExcluindoId(null)
+      return
+    }
     setExcluindoId(null)
     setRefresh(r => r + 1)
   }
