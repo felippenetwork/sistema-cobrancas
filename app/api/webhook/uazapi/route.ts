@@ -5,6 +5,18 @@ import { createAdminClient } from '@/lib/supabase/admin'
 // uazapi envia: connection.update, qrcode.updated, etc.
 
 export async function POST(req: NextRequest) {
+  // Valida segredo compartilhado (configurar UAZAPI_WEBHOOK_SECRET na Vercel e
+  // incluir ?secret=TOKEN na URL do webhook registrada na uazapi)
+  const webhookSecret = process.env.UAZAPI_WEBHOOK_SECRET
+  if (webhookSecret) {
+    const incoming = req.nextUrl.searchParams.get('secret')
+      ?? req.headers.get('x-webhook-secret')
+    if (incoming !== webhookSecret) {
+      console.warn('[webhook/uazapi] segredo inválido')
+      return NextResponse.json({ ok: false }, { status: 401 })
+    }
+  }
+
   try {
     const payload = await req.json() as Record<string, unknown>
 

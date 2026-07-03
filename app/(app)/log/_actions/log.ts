@@ -20,12 +20,13 @@ export async function cancelarNotificacaoAction(id: string) {
   const { contaId } = await getContaId()
 
   const admin = createAdminClient()
-  await admin
+  const { error } = await admin
     .from('notificacoes_enviadas')
     .update({ status: 'cancelado' })
     .eq('id', id)
     .eq('conta_id', contaId)
     .eq('status', 'fila')
+  if (error) console.error('[cancelarNotificacao]', error, { id, contaId })
 
   revalidatePath('/log')
 }
@@ -35,7 +36,7 @@ export async function reenviarNotificacaoAction(id: string) {
   const { contaId } = await getContaId()
 
   const admin = createAdminClient()
-  await admin
+  const { error } = await admin
     .from('notificacoes_enviadas')
     .update({
       status:        'fila',
@@ -45,6 +46,7 @@ export async function reenviarNotificacaoAction(id: string) {
     .eq('id', id)
     .eq('conta_id', contaId)
     .in('status', ['falhou', 'cancelado'])
+  if (error) console.error('[reenviarNotificacao]', error, { id, contaId })
 
   revalidatePath('/log')
 }

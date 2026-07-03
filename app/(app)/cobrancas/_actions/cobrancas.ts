@@ -180,27 +180,36 @@ export async function criarCobrancaRapidaAction(
 // ── Cancelar cobrança ────────────────────────────────────────────────────────
 export async function cancelarCobrancaAction(formData: FormData) {
   const cobrancaId = formData.get('cobranca_id') as string
-  const { supabase } = await getConta()
+  const { supabase, contaId } = await getConta()
 
-  await supabase.from('cobrancas').update({ status: 'cancelada' }).eq('id', cobrancaId)
+  const { error: cobErr } = await supabase
+    .from('cobrancas')
+    .update({ status: 'cancelada' })
+    .eq('id', cobrancaId)
+    .eq('conta_id', contaId)
+  if (cobErr) console.error('[cancelarCobranca] cobrancas.update', cobErr, { cobrancaId, contaId })
 
   // Cancelar notificações em fila das parcelas dessa cobrança
   const { data: parcelas } = await supabase
-    .from('parcelas').select('id').eq('cobranca_id', cobrancaId)
+    .from('parcelas').select('id').eq('cobranca_id', cobrancaId).eq('conta_id', contaId)
   const ids = (parcelas ?? []).map((p: any) => p.id)
   if (ids.length > 0) {
-    await supabase
+    const { error: nErr } = await supabase
       .from('notificacoes_enviadas')
       .update({ status: 'cancelado' })
       .eq('status', 'fila')
+      .eq('conta_id', contaId)
       .in('parcela_id', ids)
+    if (nErr) console.error('[cancelarCobranca] notifs.update', nErr, { cobrancaId, contaId })
   }
   // Cancelar boasvindas em fila (têm cobranca_id mas não parcela_id)
-  await supabase
+  const { error: bvErr } = await supabase
     .from('notificacoes_enviadas')
     .update({ status: 'cancelado' })
     .eq('cobranca_id', cobrancaId)
+    .eq('conta_id', contaId)
     .eq('status', 'fila')
+  if (bvErr) console.error('[cancelarCobranca] boasvindas.update', bvErr, { cobrancaId, contaId })
 
   revalidatePath('/cobrancas')
   redirect('/cobrancas')

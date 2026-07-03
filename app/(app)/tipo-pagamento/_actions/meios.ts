@@ -45,7 +45,7 @@ export async function definirPadraoAction(formData: FormData) {
   const { supabase, contaId } = await getConta()
   // Remove padrão de todos e define no selecionado
   await supabase.from('meios_pagamento').update({ is_padrao: false }).eq('conta_id', contaId)
-  await supabase.from('meios_pagamento').update({ is_padrao: true }).eq('id', meioId)
+  await supabase.from('meios_pagamento').update({ is_padrao: true }).eq('id', meioId).eq('conta_id', contaId)
   revalidatePath('/tipo-pagamento')
 }
 
@@ -77,7 +77,7 @@ export async function editarMeioAction(_prev: ActionState, formData: FormData): 
 
 export async function excluirMeioAction(formData: FormData) {
   const meioId = formData.get('meio_id') as string
-  const { supabase } = await getConta()
-  await supabase.from('meios_pagamento').delete().eq('id', meioId)
+  const { supabase, contaId } = await getConta()
+  await supabase.from('meios_pagamento').delete().eq('id', meioId).eq('conta_id', contaId)
   revalidatePath('/tipo-pagamento')
 }

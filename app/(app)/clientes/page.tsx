@@ -9,7 +9,7 @@ import {
 import { createClient } from '@/lib/supabase/client'
 import { formatarCelular, mascararCelular } from '@/lib/validations/celular'
 import { formatBRL } from '@/lib/utils/format'
-import { criarClienteAction } from './_actions/clientes'
+import { criarClienteAction, excluirClienteAction } from './_actions/clientes'
 import { criarCobrancaRapidaAction } from '../cobrancas/_actions/cobrancas'
 
 type Filtro = 'todos' | 'ativos' | 'inativos'
@@ -170,10 +170,9 @@ export default function ClientesPage() {
   }
 
   async function handleExcluir(id: string) {
-    await createClient()
-      .from('clientes')
-      .update({ deleted_at: new Date().toISOString() })
-      .eq('id', id)
+    const fd = new FormData()
+    fd.set('cliente_id', id)
+    await excluirClienteAction(fd)
     setExcluindoId(null)
     setRefresh((r) => r + 1)
   }

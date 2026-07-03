@@ -44,10 +44,11 @@ export async function toggleCanalAction(
   const { supabase, contaId } = await getConta()
   const campo = canal === 'whatsapp' ? 'ativo_whatsapp' : 'ativo_email'
 
-  await supabase.from('notificacoes_config')
+  const { error } = await supabase.from('notificacoes_config')
     .update({ [campo]: ativo })
     .eq('conta_id', contaId)
     .eq('tipo', tipo)
+  if (error) console.error('[toggleCanal]', error, { tipo, canal, ativo, contaId })
 
   revalidatePath('/notificacao')
 }
