@@ -16,21 +16,24 @@ const LABEL = 'block text-xs font-medium uppercase tracking-wide text-muted-fore
 type Cliente = {
   id: string; nome: string; sobrenome: string | null
   celular: string; cpf: string | null; email: string | null
+  tipo_integracao: string | null; login_externo: string | null
 }
 
 export default function EditarClientePage() {
   const { id } = useParams<{ id: string }>()
   const [cliente, setCliente] = useState<Cliente | null>(null)
   const [loading, setLoading] = useState(true)
-  const [celularInput, setCelularInput] = useState('')
-  const [ddi, setDdi] = useState('55')
+  const [celularInput, setCelularInput]     = useState('')
+  const [ddi, setDdi]                       = useState('55')
+  const [tipoIntegracao, setTipoIntegracao] = useState('')
+  const [loginExterno, setLoginExterno]     = useState('')
   const [state, formAction, isPending] = useActionState(atualizarClienteAction, { error: null })
 
   useEffect(() => {
     const supabase = createClient()
     supabase
       .from('clientes')
-      .select('id, nome, sobrenome, celular, cpf, email')
+      .select('id, nome, sobrenome, celular, cpf, email, tipo_integracao, login_externo')
       .eq('id', id)
       .single()
       .then(({ data }) => {
@@ -40,6 +43,8 @@ export default function EditarClientePage() {
           setDdi(clienteDdi)
           setCelularInput(mascararCelular(numero, clienteDdi))
         }
+        setTipoIntegracao(data?.tipo_integracao ?? '')
+        setLoginExterno(data?.login_externo ?? '')
         setLoading(false)
       })
   }, [id])
@@ -128,6 +133,34 @@ export default function EditarClientePage() {
               <label className={LABEL}>E-mail</label>
               <input type="email" name="email" defaultValue={cliente.email ?? ''} className={INPUT} />
             </div>
+
+            <div className="space-y-1.5">
+              <label className={LABEL}>Integração LookDefense</label>
+              <select
+                name="tipo_integracao"
+                value={tipoIntegracao}
+                onChange={e => { setTipoIntegracao(e.target.value); setLoginExterno('') }}
+                className={INPUT}
+              >
+                <option value="">Nenhuma</option>
+                <option value="lookdefense_iptv">LookDefense — IPTV</option>
+                <option value="lookdefense_p2p">LookDefense — P2P</option>
+              </select>
+            </div>
+
+            {tipoIntegracao && (
+              <div className="space-y-1.5">
+                <label className={LABEL}>Login no LookDefense</label>
+                <input
+                  type="text"
+                  name="login_externo"
+                  value={loginExterno}
+                  onChange={e => setLoginExterno(e.target.value)}
+                  placeholder="Usuário do cliente no painel"
+                  className={INPUT}
+                />
+              </div>
+            )}
 
             {state.error && (
               <p className="rounded-md bg-destructive-bg px-3 py-2 text-sm text-destructive">{state.error}</p>

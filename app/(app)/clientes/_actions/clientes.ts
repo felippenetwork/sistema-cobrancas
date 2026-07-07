@@ -33,12 +33,14 @@ async function getConta() {
 // ── Validações comuns ────────────────────────────────────────────────────────
 function extrairCampos(formData: FormData) {
   return {
-    nome:      ((formData.get('nome')      as string) ?? '').trim(),
-    sobrenome: ((formData.get('sobrenome') as string) ?? '').trim(),
-    cpfRaw:    ((formData.get('cpf')       as string) ?? '').trim(),
-    celRaw:    ((formData.get('celular')   as string) ?? '').trim(),
-    ddi:       ((formData.get('ddi')       as string) ?? '55').trim() || '55',
-    email:     ((formData.get('email')     as string) ?? '').trim().toLowerCase(),
+    nome:            ((formData.get('nome')             as string) ?? '').trim(),
+    sobrenome:       ((formData.get('sobrenome')        as string) ?? '').trim(),
+    cpfRaw:          ((formData.get('cpf')              as string) ?? '').trim(),
+    celRaw:          ((formData.get('celular')          as string) ?? '').trim(),
+    ddi:             ((formData.get('ddi')              as string) ?? '55').trim() || '55',
+    email:           ((formData.get('email')            as string) ?? '').trim().toLowerCase(),
+    tipoIntegracao:  ((formData.get('tipo_integracao')  as string) ?? '').trim() || null,
+    loginExterno:    ((formData.get('login_externo')    as string) ?? '').trim() || null,
   }
 }
 
@@ -101,12 +103,14 @@ export async function criarClienteAction(
     if (celDuplicado) return { error: 'Celular já cadastrado para outro cliente desta conta.' }
 
     const { data: novo, error } = await supabase.from('clientes').insert({
-      conta_id:  contaId,
-      nome:      campos.nome,
-      sobrenome: campos.sobrenome || null,
+      conta_id:         contaId,
+      nome:             campos.nome,
+      sobrenome:        campos.sobrenome || null,
       celular,
-      cpf:       cpf ?? null,
-      email:     campos.email || null,
+      cpf:              cpf ?? null,
+      email:            campos.email || null,
+      tipo_integracao:  campos.tipoIntegracao,
+      login_externo:    campos.loginExterno,
     }).select('id').single()
     if (error) return { error: error.message }
 
@@ -151,7 +155,15 @@ export async function atualizarClienteAction(
 
     const { error } = await supabase
       .from('clientes')
-      .update({ nome: campos.nome, sobrenome: campos.sobrenome || null, celular, cpf: cpf ?? null, email: campos.email || null })
+      .update({
+        nome:            campos.nome,
+        sobrenome:       campos.sobrenome || null,
+        celular,
+        cpf:             cpf ?? null,
+        email:           campos.email || null,
+        tipo_integracao: campos.tipoIntegracao,
+        login_externo:   campos.loginExterno,
+      })
       .eq('id', clienteId)   // RLS garante que só altera cliente da própria conta
     if (error) return { error: error.message }
 

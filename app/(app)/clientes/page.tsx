@@ -64,6 +64,8 @@ export default function ClientesPage() {
   const [pixPadrao, setPixPadrao]           = useState('—')
   const [celularInput, setCelularInput]     = useState('')
   const [ddi, setDdi]                       = useState('55')
+  const [tipoIntegracao, setTipoIntegracao] = useState('')
+  const [loginExterno, setLoginExterno]     = useState('')
 
   const totalPages = Math.ceil(total / perPage)
   const inicio     = total === 0 ? 0 : (page - 1) * perPage + 1
@@ -135,6 +137,8 @@ export default function ClientesPage() {
     setSheetAberto(false)
     setCelularInput('')
     setDdi('55')
+    setTipoIntegracao('')
+    setLoginExterno('')
   }
 
   // Após criar cliente → abre sheet de cobrança
@@ -144,6 +148,8 @@ export default function ClientesPage() {
       formRef.current?.reset()
       setCelularInput('')
       setDdi('55')
+      setTipoIntegracao('')
+      setLoginExterno('')
       setNovoClienteId(state.clienteId)
       setNovoClienteNome(state.clienteNome ?? '')
       setRecorrente(false)
@@ -543,6 +549,32 @@ export default function ClientesPage() {
                   <label className={LABEL}>E-mail</label>
                   <input type="email" name="email" placeholder="joao@email.com" className={INPUT} />
                 </div>
+                <div className="space-y-1.5">
+                  <label className={LABEL}>Integração LookDefense</label>
+                  <select
+                    name="tipo_integracao"
+                    value={tipoIntegracao}
+                    onChange={e => { setTipoIntegracao(e.target.value); setLoginExterno('') }}
+                    className={INPUT}
+                  >
+                    <option value="">Nenhuma</option>
+                    <option value="lookdefense_iptv">LookDefense — IPTV</option>
+                    <option value="lookdefense_p2p">LookDefense — P2P</option>
+                  </select>
+                </div>
+                {tipoIntegracao && (
+                  <div className="space-y-1.5">
+                    <label className={LABEL}>Login no LookDefense</label>
+                    <input
+                      type="text"
+                      name="login_externo"
+                      value={loginExterno}
+                      onChange={e => setLoginExterno(e.target.value)}
+                      placeholder="Usuário do cliente no painel"
+                      className={INPUT}
+                    />
+                  </div>
+                )}
                 {state.error && (
                   <p className="rounded-md bg-destructive-bg px-3 py-2 text-sm text-destructive">{state.error}</p>
                 )}

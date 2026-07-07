@@ -15,6 +15,8 @@ export default function NovoClientePage() {
   const [state, formAction, isPending] = useActionState(criarClienteAction, { error: null })
   const [celularInput, setCelularInput] = useState('')
   const [ddi, setDdi] = useState('55')
+  const [tipoIntegracao, setTipoIntegracao] = useState('')
+  const [loginExterno, setLoginExterno] = useState('')
 
   useEffect(() => {
     if (state.success) router.push('/clientes')
@@ -85,6 +87,34 @@ export default function NovoClientePage() {
               className={INPUT}
             />
           </div>
+
+          <div className="space-y-1.5">
+            <label className={LABEL}>Integração LookDefense</label>
+            <select
+              name="tipo_integracao"
+              value={tipoIntegracao}
+              onChange={e => { setTipoIntegracao(e.target.value); setLoginExterno('') }}
+              className={INPUT}
+            >
+              <option value="">Nenhuma</option>
+              <option value="lookdefense_iptv">LookDefense — IPTV</option>
+              <option value="lookdefense_p2p">LookDefense — P2P</option>
+            </select>
+          </div>
+
+          {tipoIntegracao && (
+            <div className="space-y-1.5">
+              <label className={LABEL}>Login no LookDefense</label>
+              <input
+                type="text"
+                name="login_externo"
+                value={loginExterno}
+                onChange={e => setLoginExterno(e.target.value)}
+                placeholder="Usuário do cliente no painel"
+                className={INPUT}
+              />
+            </div>
+          )}
 
           {state.error && (
             <p className="rounded-md bg-destructive-bg px-3 py-2 text-sm text-destructive">

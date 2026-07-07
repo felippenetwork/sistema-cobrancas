@@ -274,6 +274,26 @@ export async function baixarParcelaComConfirmacaoAction(
     }
   }
 
+  // Passo 5b: integração externa — enfileirar renovação no LookDefense
+  if (clienteId) {
+    const { data: integ } = await supabase
+      .from('clientes')
+      .select('login_externo, tipo_integracao')
+      .eq('id', clienteId)
+      .maybeSingle()
+
+    if ((integ as any)?.login_externo && (integ as any)?.tipo_integracao) {
+      const { error: integErr } = await supabase.from('baixas_externas').insert({
+        conta_id:        contaIdFinal,
+        cliente_id:      clienteId,
+        parcela_id:      parcelaId,
+        login_externo:   (integ as any).login_externo,
+        tipo_integracao: (integ as any).tipo_integracao,
+      })
+      if (integErr) console.error('[baixarComConfirmacao] baixa_externa', integErr)
+    }
+  }
+
   // Passo 6: recorrente → gerar próxima parcela com vencimento informado ou calculado
   if (result.recorrente && cob) {
     const { count: abertas } = await supabase
