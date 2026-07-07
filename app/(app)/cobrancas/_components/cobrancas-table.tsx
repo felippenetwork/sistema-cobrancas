@@ -3,10 +3,10 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { Check, Eye, Trash2, Search, X } from 'lucide-react'
-import { baixarParcelaAction } from '../_actions/parcelas'
 import { cancelarCobrancaAction } from '../_actions/cobrancas'
 import { formatBRL, formatData } from '@/lib/utils/format'
 import { formatarCelular } from '@/lib/validations/celular'
+import { ConfirmarBaixaModal, type ModalPagamento } from './ConfirmarBaixaModal'
 
 function diasAteVencimento(dataVencimento: string): number {
   const hoje = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }))
@@ -44,8 +44,15 @@ type CobrancaRow = {
 
 const PER_PAGE_OPTIONS = [10, 15, 25, 50]
 
+function calcProximoVencimento(dataISO: string): string {
+  const [ano, mes, dia] = dataISO.split('-').map(Number)
+  // month em JS é 0-indexed — passar mes (1-indexed) avança 1 mês
+  return new Date(ano, mes, dia).toISOString().slice(0, 10)
+}
+
 export function CobrancasTable({ cobrancas }: { cobrancas: CobrancaRow[] }) {
-  const [cancelandoId, setCancelandoId] = useState<string | null>(null)
+  const [cancelandoId, setCancelandoId]   = useState<string | null>(null)
+  const [modalPagamento, setModalPagamento] = useState<ModalPagamento | null>(null)
   const [pagina, setPagina]     = useState(1)
   const [perPage, setPerPage]   = useState(10)
   const [busca, setBusca]       = useState('')
@@ -171,18 +178,24 @@ export function CobrancasTable({ cobrancas }: { cobrancas: CobrancaRow[] }) {
 
                 <td className="px-4 py-3">
                   <div className="flex items-center justify-end gap-1.5">
-                    {/* Dar baixa rápida */}
+                    {/* Dar baixa — abre modal de confirmação */}
                     {proxima && (
-                      <form action={baixarParcelaAction}>
-                        <input type="hidden" name="parcela_id" value={proxima.id} />
-                        <button
-                          type="submit"
-                          title="Marcar como pago"
-                          className="flex h-7 w-7 items-center justify-center rounded-md bg-success-bg text-success transition hover:opacity-80"
-                        >
-                          <Check className="h-3.5 w-3.5" />
-                        </button>
-                      </form>
+                      <button
+                        type="button"
+                        title="Marcar como pago"
+                        onClick={() => setModalPagamento({
+                          parcelaId:         proxima.id,
+                          cobrancaId:        c.id,
+                          clienteNome:       `${cli.nome} ${cli.sobrenome ?? ''}`.trim(),
+                          valor:             proxima.valor,
+                          createdAt:         c.created_at,
+                          recorrente:        c.recorrente,
+                          proximoVencimento: calcProximoVencimento(proxima.data_vencimento),
+                        })}
+                        className="flex h-7 w-7 items-center justify-center rounded-md bg-success-bg text-success transition hover:opacity-80"
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                      </button>
                     )}
 
                     {/* Ver detalhes */}
@@ -305,6 +318,14 @@ export function CobrancasTable({ cobrancas }: { cobrancas: CobrancaRow[] }) {
           </div>
         )}
       </div>
+
+      {/* Modal de confirmação de pagamento */}
+      {modalPagamento && (
+        <ConfirmarBaixaModal
+          modal={modalPagamento}
+          onClose={() => setModalPagamento(null)}
+        />
+      )}
     </div>
   )
 }

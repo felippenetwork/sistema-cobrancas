@@ -184,6 +184,134 @@ export async function baixarParcelaAction(formData: FormData) {
   if (redirectTo) redirect(redirectTo)
 }
 
+// ── Dar baixa com confirmação (modal) ────────────────────────────────────────
+// Igual ao baixarParcelaAction, mas:
+//  - retorna ActionState (para useActionState no modal)
+//  - atualiza valor_mensalidade e parcelas abertas se o valor mudou
+//  - usa proximo_vencimento informado pelo usuário para a próxima parcela recorrente
+export async function baixarParcelaComConfirmacaoAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parcelaId         = formData.get('parcela_id') as string
+  const cobrancaId        = formData.get('cobranca_id') as string
+  const valorStr          = ((formData.get('valor') as string) ?? '').replace(',', '.')
+  const proximoVencimento = (formData.get('proximo_vencimento') as string) || null
+
+  if (!schemaId.safeParse(parcelaId).success)  return { error: 'Parcela inválida.' }
+  if (!schemaId.safeParse(cobrancaId).success) return { error: 'Cobrança inválida.' }
+
+  const valor = parseFloat(valorStr)
+  if (isNaN(valor) || valor <= 0) return { error: 'Valor deve ser maior que zero.' }
+
+  const { supabase, contaId } = await requireUser()
+  const hoje = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' })
+
+  // Passos 1-4: baixar parcela atomicamente via RPC
+  const admin = createAdminClient()
+  const { data: rpcData, error: rpcErr } = await admin.rpc('baixar_parcela', {
+    p_parcela_id: parcelaId,
+    p_conta_id:   contaId,
+    p_hoje:       hoje,
+  })
+  if (rpcErr) {
+    console.error('[baixarComConfirmacao] rpc', rpcErr, { parcelaId, contaId })
+    return { error: 'Não foi possível registrar o pagamento. Tente novamente.' }
+  }
+
+  const result = rpcData as { ok: boolean; cobranca_id?: string; conta_id?: string; recorrente?: boolean; cliente_id?: string }
+  if (!result?.ok) return { error: 'Parcela não encontrada ou já paga.' }
+
+  const cobrancaIdFinal = result.cobranca_id as string
+  const contaIdFinal    = result.conta_id    as string
+
+  // Buscar dados da cobrança para comparar valor e calcular próxima parcela
+  const { data: cob } = await supabase
+    .from('cobrancas')
+    .select('valor_mensalidade, dia_pagamento')
+    .eq('id', cobrancaIdFinal)
+    .eq('conta_id', contaId)
+    .single()
+
+  // Atualizar valor se mudou — cascateia para todas as parcelas abertas
+  const valorAtual = parseFloat(String(cob?.valor_mensalidade ?? 0))
+  if (cob && Math.abs(valor - valorAtual) > 0.001) {
+    const { error: updCobErr } = await supabase
+      .from('cobrancas').update({ valor_mensalidade: valor })
+      .eq('id', cobrancaIdFinal).eq('conta_id', contaId)
+    if (updCobErr) console.error('[baixarComConfirmacao] update.cobranca.valor', updCobErr)
+
+    const { error: updParErr } = await supabase
+      .from('parcelas').update({ valor })
+      .eq('cobranca_id', cobrancaIdFinal).eq('conta_id', contaId).eq('status', 'aberta')
+    if (updParErr) console.error('[baixarComConfirmacao] update.parcelas.valor', updParErr)
+  }
+
+  // Passo 5: enfileirar confirmação de pagamento
+  const clienteId = result.cliente_id as string | null
+  if (clienteId) {
+    const { data: cfgPag } = await supabase
+      .from('notificacoes_config').select('ativo_whatsapp, ativo_email')
+      .eq('conta_id', contaIdFinal).eq('tipo', 'pagamento_confirmado').maybeSingle()
+
+    const agora     = new Date().toISOString()
+    const baseNotif = {
+      conta_id:      contaIdFinal,
+      parcela_id:    parcelaId,
+      cobranca_id:   cobrancaIdFinal,
+      cliente_id:    clienteId,
+      tipo:          'pagamento_confirmado' as const,
+      status:        'fila'                as const,
+      agendado_para: agora,
+    }
+    if (cfgPag?.ativo_whatsapp) {
+      const { error: e } = await supabase.from('notificacoes_enviadas').insert({ ...baseNotif, canal: 'whatsapp' as const })
+      if (e) console.error('[baixarComConfirmacao] notif.whatsapp', e)
+    }
+    if (cfgPag?.ativo_email) {
+      const { error: e } = await supabase.from('notificacoes_enviadas').insert({ ...baseNotif, canal: 'email' as const })
+      if (e) console.error('[baixarComConfirmacao] notif.email', e)
+    }
+  }
+
+  // Passo 6: recorrente → gerar próxima parcela com vencimento informado ou calculado
+  if (result.recorrente && cob) {
+    const { count: abertas } = await supabase
+      .from('parcelas').select('*', { count: 'exact', head: true })
+      .eq('cobranca_id', cobrancaIdFinal).eq('conta_id', contaId).eq('status', 'aberta')
+
+    if ((abertas ?? 0) === 0) {
+      const { data: ultimaArr } = await supabase
+        .from('parcelas').select('numero, data_vencimento')
+        .eq('cobranca_id', cobrancaIdFinal).eq('conta_id', contaId)
+        .order('numero', { ascending: false }).limit(1)
+
+      if (ultimaArr?.length) {
+        const ultima         = ultimaArr[0]
+        const novoVencimento = proximoVencimento ?? calcularVencimento(
+          new Date((ultima.data_vencimento as string) + 'T12:00:00'),
+          cob.dia_pagamento as number,
+          1,
+        ).toISOString().slice(0, 10)
+
+        const { error: nextErr } = await supabase.from('parcelas').insert({
+          conta_id:        contaIdFinal,
+          cobranca_id:     cobrancaIdFinal,
+          numero:          (ultima.numero as number) + 1,
+          valor,
+          data_vencimento: novoVencimento,
+          status:          'aberta',
+        })
+        if (nextErr) console.error('[baixarComConfirmacao] proxima_parcela', nextErr, { cobrancaId: cobrancaIdFinal })
+      }
+    }
+  }
+
+  revalidatePath('/cobrancas')
+  revalidatePath(`/cobrancas/${cobrancaIdFinal}`)
+  return { error: null, success: true }
+}
+
 // ── Editar parcela (vencimento, valor, observação) ───────────────────────────
 export async function editarParcelaAction(
   _prev: ActionState,

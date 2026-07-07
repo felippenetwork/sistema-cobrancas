@@ -5,7 +5,8 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { Loader2, CheckCircle, Pencil, CalendarCheck, Bell, X, Send } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { baixarParcelaAction, editarParcelaAction, cobrarManualAction } from '../_actions/parcelas'
+import { editarParcelaAction, cobrarManualAction } from '../_actions/parcelas'
+import { ConfirmarBaixaModal, type ModalPagamento } from '../_components/ConfirmarBaixaModal'
 import { cancelarCobrancaAction } from '../_actions/cobrancas'
 import { calcularStatusVisual, STATUS_VISUAL_CFG } from '@/lib/utils/parcelas'
 import { formatBRL, formatData } from '@/lib/utils/format'
@@ -19,6 +20,7 @@ type Parcela = {
 type Cobranca = {
   id: string; valor_mensalidade: string; recorrente: boolean
   dia_pagamento: number; observacao: string | null; status: string
+  created_at: string
   clientes: { nome: string; sobrenome: string; celular: string; email: string }
   parcelas: Parcela[]
 }
@@ -90,17 +92,23 @@ function NotificarBtn({ parcelaId }: { parcelaId: string }) {
   )
 }
 
+function calcProximoVencimento(dataISO: string): string {
+  const [ano, mes, dia] = dataISO.split('-').map(Number)
+  return new Date(ano, mes, dia).toISOString().slice(0, 10)
+}
+
 export default function CobrancaDetailPage() {
   const { id } = useParams<{ id: string }>()
-  const [cobranca, setCobranca] = useState<Cobranca | null>(null)
-  const [loading, setLoading]   = useState(true)
-  const [editandoId, setEditandoId] = useState<string | null>(null)
+  const [cobranca, setCobranca]       = useState<Cobranca | null>(null)
+  const [loading, setLoading]         = useState(true)
+  const [editandoId, setEditandoId]   = useState<string | null>(null)
+  const [modalPagamento, setModalPagamento] = useState<ModalPagamento | null>(null)
 
   const fetchCobranca = useCallback(async () => {
     const sb = createClient()
     const { data } = await sb
       .from('cobrancas')
-      .select(`id, valor_mensalidade, recorrente, dia_pagamento, observacao, status,
+      .select(`id, valor_mensalidade, recorrente, dia_pagamento, observacao, status, created_at,
         clientes!inner (nome, sobrenome, celular, email),
         parcelas (id, numero, valor, data_vencimento, status, data_pagamento, observacao)`)
       .eq('id', id)
@@ -194,13 +202,22 @@ export default function CobrancaDetailPage() {
                             >
                               <Pencil className="h-3.5 w-3.5" />
                             </button>
-                            <form action={baixarParcelaAction}>
-                              <input type="hidden" name="parcela_id" value={p.id} />
-                              <input type="hidden" name="redirect_to" value={`/cobrancas/${id}`} />
-                              <button type="submit" aria-label="Dar baixa" className="rounded p-1 text-success hover:bg-success-bg">
-                                <CalendarCheck className="h-3.5 w-3.5" />
-                              </button>
-                            </form>
+                            <button
+                              type="button"
+                              aria-label="Dar baixa"
+                              onClick={() => setModalPagamento({
+                                parcelaId:         p.id,
+                                cobrancaId:        cobranca.id,
+                                clienteNome:       `${cli.nome} ${cli.sobrenome ?? ''}`.trim(),
+                                valor:             parseFloat(p.valor),
+                                createdAt:         cobranca.created_at,
+                                recorrente:        cobranca.recorrente,
+                                proximoVencimento: calcProximoVencimento(p.data_vencimento),
+                              })}
+                              className="rounded p-1 text-success hover:bg-success-bg"
+                            >
+                              <CalendarCheck className="h-3.5 w-3.5" />
+                            </button>
                             <NotificarBtn parcelaId={p.id} />
                           </>
                         )}
@@ -213,6 +230,15 @@ export default function CobrancaDetailPage() {
           </tbody>
         </table>
       </div>
+
+      {/* Modal de confirmação de pagamento */}
+      {modalPagamento && (
+        <ConfirmarBaixaModal
+          modal={modalPagamento}
+          onClose={() => setModalPagamento(null)}
+          onSuccess={fetchCobranca}
+        />
+      )}
 
       {/* Cancelar cobrança */}
       {cobranca.status === 'ativa' && (
