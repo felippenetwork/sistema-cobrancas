@@ -58,7 +58,9 @@ export default function ClientesPage() {
   const [sheetCob, setSheetCob]             = useState(false)
   const [novoClienteId, setNovoClienteId]   = useState('')
   const [novoClienteNome, setNovoClienteNome] = useState('')
+  const [novoClienteIntegracao, setNovoClienteIntegracao] = useState('')
   const [recorrente, setRecorrente]         = useState(false)
+  const [renovarExterno, setRenovarExterno] = useState(false)
   const [excluindoId, setExcluindoId]       = useState<string | null>(null)
   const [refresh, setRefresh]               = useState(0)
   const [pixPadrao, setPixPadrao]           = useState('—')
@@ -148,11 +150,13 @@ export default function ClientesPage() {
       formRef.current?.reset()
       setCelularInput('')
       setDdi('55')
-      setTipoIntegracao('')
-      setLoginExterno('')
       setNovoClienteId(state.clienteId)
       setNovoClienteNome(state.clienteNome ?? '')
+      setNovoClienteIntegracao(tipoIntegracao)
+      setTipoIntegracao('')
+      setLoginExterno('')
       setRecorrente(false)
+      setRenovarExterno(!!tipoIntegracao)
       setSheetCob(true)
       setRefresh((r) => r + 1)
     }
@@ -464,6 +468,23 @@ export default function ClientesPage() {
                   <textarea name="observacao" rows={2} placeholder="Opcional..."
                     className="w-full resize-none rounded-md border border-border bg-input px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary" />
                 </div>
+
+                {novoClienteIntegracao && (
+                  <div className="flex items-center gap-3 rounded-md border border-border bg-muted/30 px-3 py-3">
+                    <input
+                      id="renovar-externo-cob"
+                      type="checkbox"
+                      name="renovar_externo"
+                      value="true"
+                      checked={renovarExterno}
+                      onChange={e => setRenovarExterno(e.target.checked)}
+                      className="h-4 w-4 rounded accent-primary"
+                    />
+                    <label htmlFor="renovar-externo-cob" className="cursor-pointer select-none text-sm text-foreground">
+                      Renovar no LookDefense {novoClienteIntegracao === 'lookdefense_p2p' ? '(P2P)' : '(IPTV)'}
+                    </label>
+                  </div>
+                )}
 
                 <div className="flex items-center gap-3 rounded-md border border-border bg-muted/30 px-3 py-3">
                   <input id="boas-vindas-cob" type="checkbox" name="enviar_boas_vindas" value="true"

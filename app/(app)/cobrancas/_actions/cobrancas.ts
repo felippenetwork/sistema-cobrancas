@@ -125,6 +125,7 @@ export async function criarCobrancaRapidaAction(
     const primeiroVenc     = formData.get('primeiro_vencimento') as string  // "YYYY-MM-DD"
     const observacao       = (formData.get('observacao') as string | null)?.trim() || null
     const enviarBoasVindas = formData.get('enviar_boas_vindas') === 'true'
+    const renovarExterno   = formData.get('renovar_externo')   === 'true'
 
     if (!clienteId)                         return { error: 'Cliente inválido.' }
     if (!primeiroVenc || !/^\d{4}-\d{2}-\d{2}$/.test(primeiroVenc))
@@ -166,31 +167,33 @@ export async function criarCobrancaRapidaAction(
     const { error: parcErr } = await supabase.from('parcelas').insert(parcelas)
     if (parcErr) return { error: parcErr.message }
 
-    // Integração LookDefense: renovar no ato do cadastro (pagamento à vista)
-    const { data: clienteInteg } = await supabase
-      .from('clientes')
-      .select('login_externo, tipo_integracao')
-      .eq('id', clienteId)
-      .maybeSingle()
-
-    if (clienteInteg?.login_externo && clienteInteg?.tipo_integracao) {
-      const { data: primeiraParc } = await supabase
-        .from('parcelas')
-        .select('id')
-        .eq('cobranca_id', cob.id)
-        .order('numero', { ascending: true })
-        .limit(1)
+    // Integração LookDefense: renovar apenas se o checkbox estiver marcado
+    if (renovarExterno) {
+      const { data: clienteInteg } = await supabase
+        .from('clientes')
+        .select('login_externo, tipo_integracao')
+        .eq('id', clienteId)
         .maybeSingle()
 
-      if (primeiraParc?.id) {
-        const { error: integErr } = await supabase.from('baixas_externas').insert({
-          conta_id:        contaId,
-          cliente_id:      clienteId,
-          parcela_id:      primeiraParc.id,
-          login_externo:   clienteInteg.login_externo,
-          tipo_integracao: clienteInteg.tipo_integracao,
-        })
-        if (integErr) console.error('[criarCobrancaRapida] baixa_externa', integErr)
+      if (clienteInteg?.login_externo && clienteInteg?.tipo_integracao) {
+        const { data: primeiraParc } = await supabase
+          .from('parcelas')
+          .select('id')
+          .eq('cobranca_id', cob.id)
+          .order('numero', { ascending: true })
+          .limit(1)
+          .maybeSingle()
+
+        if (primeiraParc?.id) {
+          const { error: integErr } = await supabase.from('baixas_externas').insert({
+            conta_id:        contaId,
+            cliente_id:      clienteId,
+            parcela_id:      primeiraParc.id,
+            login_externo:   clienteInteg.login_externo,
+            tipo_integracao: clienteInteg.tipo_integracao,
+          })
+          if (integErr) console.error('[criarCobrancaRapida] baixa_externa', integErr)
+        }
       }
     }
 
