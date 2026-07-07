@@ -23,9 +23,11 @@ function proximoMes() {
 
 export default function NovaCobrancaPage() {
   const [state, formAction, isPending] = useActionState(criarCobrancaAction, { error: null })
-  const [clientes, setClientes]     = useState<Cliente[]>([])
-  const [meios, setMeios]           = useState<Meio[]>([])
-  const [recorrente, setRecorrente] = useState(false)
+  const [clientes, setClientes]         = useState<Cliente[]>([])
+  const [meios, setMeios]               = useState<Meio[]>([])
+  const [recorrente, setRecorrente]     = useState(false)
+  const [tipoIntegracao, setTipoIntegracao] = useState('')
+  const [renovarExterno, setRenovarExterno] = useState(false)
 
   useEffect(() => {
     const sb = createClient()
@@ -37,6 +39,22 @@ export default function NovaCobrancaPage() {
       setMeios((m as Meio[]) ?? [])
     })
   }, [])
+
+  async function handleClienteChange(e: React.ChangeEvent<HTMLSelectElement>) {
+    const id = e.target.value
+    setTipoIntegracao('')
+    setRenovarExterno(false)
+    if (!id) return
+    const { data } = await createClient()
+      .from('clientes')
+      .select('tipo_integracao, login_externo')
+      .eq('id', id)
+      .maybeSingle()
+    if (data?.tipo_integracao && data?.login_externo) {
+      setTipoIntegracao(data.tipo_integracao)
+      setRenovarExterno(true)
+    }
+  }
 
   return (
     <div className="p-8">
@@ -55,7 +73,7 @@ export default function NovaCobrancaPage() {
           {/* Cliente */}
           <div className="space-y-1.5">
             <label className={LABEL}>Cliente *</label>
-            <select name="cliente_id" required className={INPUT}>
+            <select name="cliente_id" required className={INPUT} onChange={handleClienteChange}>
               <option value="">Selecione...</option>
               {clientes.map(c => (
                 <option key={c.id} value={c.id}>{c.nome}{c.sobrenome ? ' ' + c.sobrenome : ''}</option>
@@ -123,6 +141,24 @@ export default function NovaCobrancaPage() {
             <label className={LABEL}>Observação</label>
             <textarea name="observacao" rows={2} placeholder="Opcional..." className={INPUT} />
           </div>
+
+          {/* Renovar no LookDefense (só aparece se o cliente tiver integração) */}
+          {tipoIntegracao && (
+            <div className="flex items-center gap-3 rounded-md border border-border bg-muted/30 px-3 py-3">
+              <input
+                id="renovar_externo"
+                type="checkbox"
+                name="renovar_externo"
+                value="true"
+                checked={renovarExterno}
+                onChange={e => setRenovarExterno(e.target.checked)}
+                className="h-4 w-4 rounded accent-primary"
+              />
+              <label htmlFor="renovar_externo" className="text-sm text-foreground cursor-pointer select-none">
+                Renovar no LookDefense {tipoIntegracao === 'lookdefense_p2p' ? '(P2P)' : '(IPTV)'}
+              </label>
+            </div>
+          )}
 
           {/* Boas-vindas */}
           <div className="flex items-center gap-3 rounded-md border border-border bg-muted/30 px-3 py-3">
