@@ -166,6 +166,34 @@ export async function criarCobrancaRapidaAction(
     const { error: parcErr } = await supabase.from('parcelas').insert(parcelas)
     if (parcErr) return { error: parcErr.message }
 
+    // Integração LookDefense: renovar no ato do cadastro (pagamento à vista)
+    const { data: clienteInteg } = await supabase
+      .from('clientes')
+      .select('login_externo, tipo_integracao')
+      .eq('id', clienteId)
+      .maybeSingle()
+
+    if (clienteInteg?.login_externo && clienteInteg?.tipo_integracao) {
+      const { data: primeiraParc } = await supabase
+        .from('parcelas')
+        .select('id')
+        .eq('cobranca_id', cob.id)
+        .order('numero', { ascending: true })
+        .limit(1)
+        .maybeSingle()
+
+      if (primeiraParc?.id) {
+        const { error: integErr } = await supabase.from('baixas_externas').insert({
+          conta_id:        contaId,
+          cliente_id:      clienteId,
+          parcela_id:      primeiraParc.id,
+          login_externo:   clienteInteg.login_externo,
+          tipo_integracao: clienteInteg.tipo_integracao,
+        })
+        if (integErr) console.error('[criarCobrancaRapida] baixa_externa', integErr)
+      }
+    }
+
     if (enviarBoasVindas) {
       const { data: cfgBv } = await supabase
         .from('notificacoes_config')
