@@ -12,6 +12,7 @@ type Conexao = {
   device_name:      string | null
   qr_code:          string | null
   ultima_conexao:   string | null
+  desconectado_em:  string | null
 }
 
 export default function ConexaoPage() {
@@ -40,7 +41,7 @@ export default function ConexaoPage() {
       const fetchConexao = async () => {
         const { data } = await sb
           .from('conexoes')
-          .select('id, status, numero_conectado, device_name, qr_code, ultima_conexao')
+          .select('id, status, numero_conectado, device_name, qr_code, ultima_conexao, desconectado_em')
           .eq('conta_id', conta.id).maybeSingle()
         if (data) setConexao(data)
       }
@@ -157,11 +158,18 @@ export default function ConexaoPage() {
                     </div>
                     <p className="text-sm font-medium text-foreground">Conexão encerrada</p>
                     <p className="text-xs text-muted-foreground">+{conexao.numero_conectado}</p>
-                    <p className="mt-1 text-center text-xs text-muted-foreground">
-                      Clique em{' '}
-                      <span className="font-medium text-foreground">Reconectar</span>{' '}
-                      para restaurar.
-                    </p>
+                    {conexao.desconectado_em && (
+                      <p className="mt-1 text-center text-xs text-muted-foreground">
+                        Desconectado em{' '}
+                        <span className="font-medium text-foreground">
+                          {new Date(conexao.desconectado_em).toLocaleString('pt-BR', {
+                            timeZone: 'America/Sao_Paulo',
+                            day: '2-digit', month: '2-digit', year: 'numeric',
+                            hour: '2-digit', minute: '2-digit',
+                          })}
+                        </span>
+                      </p>
+                    )}
                   </>
                 ) : (
                   <>
