@@ -7,7 +7,7 @@ import {
   ChevronsLeft, ChevronsRight, X, Loader2, MessageCircle, Pencil, Trash2,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { formatarCelular, mascararCelular } from '@/lib/validations/celular'
+import { formatarCelular, mascararCelular, DDIS } from '@/lib/validations/celular'
 import { formatBRL } from '@/lib/utils/format'
 import { criarClienteAction, excluirClienteAction } from './_actions/clientes'
 import { criarCobrancaRapidaAction } from '../cobrancas/_actions/cobrancas'
@@ -63,6 +63,7 @@ export default function ClientesPage() {
   const [refresh, setRefresh]               = useState(0)
   const [pixPadrao, setPixPadrao]           = useState('—')
   const [celularInput, setCelularInput]     = useState('')
+  const [ddi, setDdi]                       = useState('55')
 
   const totalPages = Math.ceil(total / perPage)
   const inicio     = total === 0 ? 0 : (page - 1) * perPage + 1
@@ -133,6 +134,7 @@ export default function ClientesPage() {
   function fecharSheetCliente() {
     setSheetAberto(false)
     setCelularInput('')
+    setDdi('55')
   }
 
   // Após criar cliente → abre sheet de cobrança
@@ -141,6 +143,7 @@ export default function ClientesPage() {
       setSheetAberto(false)
       formRef.current?.reset()
       setCelularInput('')
+      setDdi('55')
       setNovoClienteId(state.clienteId)
       setNovoClienteNome(state.clienteNome ?? '')
       setRecorrente(false)
@@ -514,15 +517,27 @@ export default function ClientesPage() {
                 </div>
                 <div className="space-y-1.5">
                   <label className={LABEL}>Celular / WhatsApp *</label>
-                  <input
-                    type="text"
-                    name="celular"
-                    required
-                    value={celularInput}
-                    onChange={e => setCelularInput(mascararCelular(e.target.value))}
-                    placeholder="+55 (11) 99999-9999"
-                    className={INPUT}
-                  />
+                  <div className="flex gap-2">
+                    <select
+                      name="ddi"
+                      value={ddi}
+                      onChange={e => { setDdi(e.target.value); setCelularInput('') }}
+                      className="flex-shrink-0 rounded-md border border-border bg-input py-2 pl-2 pr-6 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary"
+                    >
+                      {DDIS.map(d => (
+                        <option key={d.code} value={d.code}>{d.label} {d.pais}</option>
+                      ))}
+                    </select>
+                    <input
+                      type="text"
+                      name="celular"
+                      required
+                      value={celularInput}
+                      onChange={e => setCelularInput(mascararCelular(e.target.value, ddi))}
+                      placeholder={ddi === '55' ? '(11) 99999-9999' : 'número local'}
+                      className={INPUT}
+                    />
+                  </div>
                 </div>
                 <div className="space-y-1.5">
                   <label className={LABEL}>E-mail</label>

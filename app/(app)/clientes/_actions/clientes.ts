@@ -37,6 +37,7 @@ function extrairCampos(formData: FormData) {
     sobrenome: ((formData.get('sobrenome') as string) ?? '').trim(),
     cpfRaw:    ((formData.get('cpf')       as string) ?? '').trim(),
     celRaw:    ((formData.get('celular')   as string) ?? '').trim(),
+    ddi:       ((formData.get('ddi')       as string) ?? '55').trim() || '55',
     email:     ((formData.get('email')     as string) ?? '').trim().toLowerCase(),
   }
 }
@@ -44,7 +45,7 @@ function extrairCampos(formData: FormData) {
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 
 function validarCampos(campos: ReturnType<typeof extrairCampos>) {
-  const { nome, cpfRaw, celRaw, email } = campos
+  const { nome, cpfRaw, celRaw, ddi, email } = campos
   if (!nome || !celRaw) {
     return { error: 'Preencha nome e celular.' }
   }
@@ -52,9 +53,13 @@ function validarCampos(campos: ReturnType<typeof extrairCampos>) {
   if (cpf && !validarCPF(cpf)) {
     return { error: 'CPF inválido. Verifique os dígitos informados.' }
   }
-  const celular = normalizarCelular(celRaw)
+  const celular = normalizarCelular(celRaw, ddi)
   if (!celular) {
-    return { error: 'Celular inválido. Use o formato (DDD) número, ex.: 11 99999-9999.' }
+    return {
+      error: ddi === '55'
+        ? 'Celular inválido. Informe DDD + número, ex.: 11 99999-9999.'
+        : 'Número inválido. Informe apenas os dígitos do número local.',
+    }
   }
   if (email && !EMAIL_REGEX.test(email)) {
     return { error: 'E-mail inválido. Verifique o endereço informado.' }
@@ -89,6 +94,11 @@ export async function criarClienteAction(
         .from('clientes').select('id').eq('cpf', cpf).is('deleted_at', null).maybeSingle()
       if (cpfDuplicado) return { error: 'CPF já cadastrado para outro cliente desta conta.' }
     }
+
+    // Celular único por conta
+    const { data: celDuplicado } = await supabase
+      .from('clientes').select('id').eq('celular', celular).is('deleted_at', null).maybeSingle()
+    if (celDuplicado) return { error: 'Celular já cadastrado para outro cliente desta conta.' }
 
     const { data: novo, error } = await supabase.from('clientes').insert({
       conta_id:  contaId,
@@ -133,6 +143,11 @@ export async function atualizarClienteAction(
         .from('clientes').select('id').eq('cpf', cpf).neq('id', clienteId).is('deleted_at', null).maybeSingle()
       if (cpfDuplicado) return { error: 'CPF já cadastrado para outro cliente desta conta.' }
     }
+
+    // Celular único excluindo o próprio cliente
+    const { data: celDuplicado } = await supabase
+      .from('clientes').select('id').eq('celular', celular).neq('id', clienteId).is('deleted_at', null).maybeSingle()
+    if (celDuplicado) return { error: 'Celular já cadastrado para outro cliente desta conta.' }
 
     const { error } = await supabase
       .from('clientes')

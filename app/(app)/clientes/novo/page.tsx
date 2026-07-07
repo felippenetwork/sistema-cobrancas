@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { Loader2 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { criarClienteAction } from '../_actions/clientes'
-import { mascararCelular } from '@/lib/validations/celular'
+import { mascararCelular, DDIS } from '@/lib/validations/celular'
 
 const INPUT = 'w-full rounded-md border border-border bg-input px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary focus:ring-offset-1 focus:ring-offset-card'
 const LABEL = 'block text-xs font-medium uppercase tracking-wide text-muted-foreground'
@@ -14,6 +14,7 @@ export default function NovoClientePage() {
   const router = useRouter()
   const [state, formAction, isPending] = useActionState(criarClienteAction, { error: null })
   const [celularInput, setCelularInput] = useState('')
+  const [ddi, setDdi] = useState('55')
 
   useEffect(() => {
     if (state.success) router.push('/clientes')
@@ -55,13 +56,25 @@ export default function NovoClientePage() {
 
           <div className="space-y-1.5">
             <label className={LABEL}>Celular *</label>
-            <input
-              type="text" name="celular" required
-              value={celularInput}
-              onChange={e => setCelularInput(mascararCelular(e.target.value))}
-              placeholder="+55 (11) 99999-9999"
-              className={INPUT}
-            />
+            <div className="flex gap-2">
+              <select
+                name="ddi"
+                value={ddi}
+                onChange={e => { setDdi(e.target.value); setCelularInput('') }}
+                className="flex-shrink-0 rounded-md border border-border bg-input py-2 pl-2 pr-6 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary"
+              >
+                {DDIS.map(d => (
+                  <option key={d.code} value={d.code}>{d.label} {d.pais}</option>
+                ))}
+              </select>
+              <input
+                type="text" name="celular" required
+                value={celularInput}
+                onChange={e => setCelularInput(mascararCelular(e.target.value, ddi))}
+                placeholder={ddi === '55' ? '(11) 99999-9999' : 'número local'}
+                className={INPUT}
+              />
+            </div>
           </div>
 
           <div className="space-y-1.5">

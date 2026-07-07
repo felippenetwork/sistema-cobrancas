@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { Loader2, CheckCircle } from 'lucide-react'
 import { atualizarClienteAction, excluirClienteAction } from '../_actions/clientes'
 import { formatarCPF } from '@/lib/validations/cpf'
-import { mascararCelular } from '@/lib/validations/celular'
+import { mascararCelular, DDIS, extrairDDI } from '@/lib/validations/celular'
 import { createClient } from '@/lib/supabase/client'
 import { useParams } from 'next/navigation'
 
@@ -23,6 +23,7 @@ export default function EditarClientePage() {
   const [cliente, setCliente] = useState<Cliente | null>(null)
   const [loading, setLoading] = useState(true)
   const [celularInput, setCelularInput] = useState('')
+  const [ddi, setDdi] = useState('55')
   const [state, formAction, isPending] = useActionState(atualizarClienteAction, { error: null })
 
   useEffect(() => {
@@ -34,7 +35,11 @@ export default function EditarClientePage() {
       .single()
       .then(({ data }) => {
         setCliente(data as Cliente)
-        if (data?.celular) setCelularInput(mascararCelular(data.celular))
+        if (data?.celular) {
+          const { ddi: clienteDdi, numero } = extrairDDI(data.celular)
+          setDdi(clienteDdi)
+          setCelularInput(mascararCelular(numero, clienteDdi))
+        }
         setLoading(false)
       })
   }, [id])
@@ -98,12 +103,25 @@ export default function EditarClientePage() {
 
             <div className="space-y-1.5">
               <label className={LABEL}>Celular *</label>
-              <input
-                type="text" name="celular" required
-                value={celularInput}
-                onChange={e => setCelularInput(mascararCelular(e.target.value))}
-                className={INPUT}
-              />
+              <div className="flex gap-2">
+                <select
+                  name="ddi"
+                  value={ddi}
+                  onChange={e => { setDdi(e.target.value); setCelularInput('') }}
+                  className="flex-shrink-0 rounded-md border border-border bg-input py-2 pl-2 pr-6 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary"
+                >
+                  {DDIS.map(d => (
+                    <option key={d.code} value={d.code}>{d.label} {d.pais}</option>
+                  ))}
+                </select>
+                <input
+                  type="text" name="celular" required
+                  value={celularInput}
+                  onChange={e => setCelularInput(mascararCelular(e.target.value, ddi))}
+                  placeholder={ddi === '55' ? '(11) 99999-9999' : 'número local'}
+                  className={INPUT}
+                />
+              </div>
             </div>
 
             <div className="space-y-1.5">
