@@ -162,10 +162,16 @@ export default function ClientesPage() {
     }
   }, [state.success])
 
+  function fecharSheetCob() {
+    setSheetCob(false)
+    setNovoClienteIntegracao('')
+    setRenovarExterno(false)
+  }
+
   // Após criar cobrança
   useEffect(() => {
     if (stateCob.success) {
-      setSheetCob(false)
+      fecharSheetCob()
       formCobRef.current?.reset()
       setRefresh((r) => r + 1)
     }
@@ -419,14 +425,14 @@ export default function ClientesPage() {
       {/* ── Sheet — Criar Cobrança (pós-cadastro) ─────────────────────────────── */}
       {sheetCob && (
         <>
-          <div className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm" onClick={() => setSheetCob(false)} />
+          <div className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm" onClick={fecharSheetCob} />
           <div className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col bg-card shadow-2xl">
             <div className="flex items-center justify-between border-b border-border px-6 py-4">
               <div>
                 <h2 className="text-base font-semibold text-foreground">Criar Cobrança</h2>
                 <p className="text-xs text-muted-foreground">{novoClienteNome}</p>
               </div>
-              <button onClick={() => setSheetCob(false)} aria-label="Fechar"
+              <button onClick={fecharSheetCob} aria-label="Fechar"
                 className="rounded-md p-1 text-muted-foreground transition hover:text-foreground">
                 <X className="h-5 w-5" />
               </button>
@@ -505,7 +511,7 @@ export default function ClientesPage() {
                 {isPendingCob && <Loader2 className="h-4 w-4 animate-spin" />}
                 {isPendingCob ? 'Salvando...' : 'Criar cobrança'}
               </button>
-              <button type="button" onClick={() => setSheetCob(false)}
+              <button type="button" onClick={fecharSheetCob}
                 className="rounded-md border border-border px-4 py-2 text-sm text-muted-foreground transition hover:text-foreground">
                 Agora não
               </button>
