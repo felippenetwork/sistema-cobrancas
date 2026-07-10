@@ -47,19 +47,17 @@ export async function POST(req: NextRequest) {
     }
 
     // Log estruturado para debug
+    const bm = body?.message
     console.log('[webhook/whatsapp] debug:', JSON.stringify({
-      topKeys:    Object.keys(body),
-      EventType:  body?.EventType,
-      event:      body?.event,
-      hasMessages: Array.isArray(body?.messages),
-      msgCount:   Array.isArray(body?.messages) ? (body.messages as any[]).length : 0,
-      firstMsg:   Array.isArray(body?.messages) && body.messages[0] ? {
-        keys:   Object.keys(body.messages[0]),
-        fromMe: body.messages[0]?.fromMe ?? body.messages[0]?.key?.fromMe,
-        from:   body.messages[0]?.from,
-        body:   body.messages[0]?.body,
-        type:   body.messages[0]?.type,
-      } : null,
+      topKeys:        Object.keys(body),
+      EventType:      body?.EventType,
+      instanceName:   body?.instanceName,
+      hasMessages:    Array.isArray(body?.messages),
+      bodyMsgType:    typeof bm,
+      bodyMsgKeys:    bm && typeof bm === 'object' ? Object.keys(bm) : null,
+      bodyMsgFromMe:  bm?.key?.fromMe ?? bm?.fromMe,
+      bodyMsgJid:     bm?.key?.remoteJid ?? bm?.remoteJid ?? bm?.from,
+      bodyMsgText:    bm?.message?.conversation ?? bm?.message?.extendedTextMessage?.text ?? bm?.body ?? bm?.text,
     }))
 
     // ── uazapi / uazapiGO: qualquer evento com mensagens ─────────────────────
