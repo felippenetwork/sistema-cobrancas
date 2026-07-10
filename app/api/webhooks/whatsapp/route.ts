@@ -46,39 +46,50 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true })
     }
 
-    // Log estruturado para debug
-    const bm = body?.message
-    const bc = body?.chat
-    console.log('[webhook/whatsapp] debug:', JSON.stringify({
-      msgKeys:        bm && typeof bm === 'object' ? Object.keys(bm) : null,
-      msgKeyObj:      bm?.key ? Object.keys(bm.key) : null,
-      msgFromMe:      bm?.key?.fromMe ?? bm?.fromMe,
-      msgRemoteJid:   bm?.key?.remoteJid,
-      msgFrom:        bm?.from,
-      msgPhone:       bm?.phone ?? bm?.chatId ?? bm?.to,
-      msgText:        bm?.message?.conversation ?? bm?.message?.extendedTextMessage?.text ?? bm?.body ?? bm?.text,
-      chatKeys:       bc && typeof bc === 'object' ? Object.keys(bc) : null,
-      chatPhone:      bc?.phone ?? bc?.jid ?? bc?.rid ?? bc?.number,
-      owner:          body?.owner,
-    }))
+    // ── uazapiGO: body.EventType + phone em body.chat.phone ──────────────────
+    if (body?.EventType) {
+      if (body.EventType !== 'messages') return NextResponse.json({ ok: true })
 
-    // ── uazapi / uazapiGO: qualquer evento com mensagens ─────────────────────
-    const event = (body?.event ?? body?.EventType ?? '') as string
+      const msg    = body.message
+      const fromMe = msg?.fromMe ?? msg?.key?.fromMe ?? false
+      if (!msg || fromMe) return NextResponse.json({ ok: true })
 
-    // Extração sem ?? chain para evitar body.data truthy parando antes de body.messages
+      const rawPhone = (body?.chat?.phone ?? msg?.chatId ?? msg?.key?.remoteJid ?? msg?.from ?? '') as string
+      const celular  = rawPhone.replace('@s.whatsapp.net', '').replace('@c.us', '').replace(/\D/g, '')
+      if (!celular) return NextResponse.json({ ok: true })
+
+      const texto = (
+        msg?.message?.conversation ??
+        msg?.message?.extendedTextMessage?.text ??
+        msg?.message?.imageMessage?.caption ??
+        msg?.content ??
+        msg?.body ??
+        msg?.text ??
+        '[Mídia não suportada]'
+      ) as string
+
+      const waId     = (msg?.id ?? msg?.key?.id ?? null) as string | null
+      const cid      = contaId
+                    ?? await resolverContaPorInstancia(supabase, body?.instanceName)
+                    ?? await resolverContaPorCelular(supabase, celular)
+      if (!cid) return NextResponse.json({ ok: true })
+
+      await salvarMensagem(supabase, { contaId: cid, celular, texto, waId, direcao: 'in' })
+      return NextResponse.json({ ok: true })
+    }
+
+    // ── uazapi v2 / Baileys: body.event (minúsculo) ───────────────────────────
+    const event = (body?.event ?? '') as string
     const msgs: any[] = (() => {
-      if (Array.isArray(body?.data?.messages)) return body.data.messages  // uazapi v2
+      if (Array.isArray(body?.data?.messages)) return body.data.messages
       if (Array.isArray(body?.data))           return body.data
-      if (Array.isArray(body?.messages))       return body.messages       // uazapiGO
+      if (Array.isArray(body?.messages))       return body.messages
       if (body?.data)                          return [body.data]
       if (body?.message)                       return [body.message]
       return []
     })()
 
-    // Processar se for evento de mensagem (qualquer variante) ou se tiver msgs
-    const ehEvtMsg = event.startsWith('message') || event === 'msg' || msgs.length > 0
-
-    if (ehEvtMsg) {
+    if (event.startsWith('message') || event === 'msg' || msgs.length > 0) {
       const cid = contaId ?? await resolverContaPorInstancia(supabase, body?.instance ?? body?.instanceName)
 
       for (const msg of msgs) {
@@ -98,12 +109,9 @@ export async function POST(req: NextRequest) {
           '[Mídia não suportada]'
         ) as string
 
-        const waId = (msg?.key?.id ?? msg?.id ?? null) as string | null
+        const waId     = (msg?.key?.id ?? msg?.id ?? null) as string | null
         const cidFinal = cid ?? await resolverContaPorCelular(supabase, celular)
-        if (!cidFinal) {
-          console.warn('[webhook/whatsapp] conta não encontrada para celular:', celular)
-          continue
-        }
+        if (!cidFinal) continue
 
         await salvarMensagem(supabase, { contaId: cidFinal, celular, texto, waId, direcao: 'in' })
       }
