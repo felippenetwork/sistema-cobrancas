@@ -469,6 +469,51 @@ export type Database = {
         }
         Relationships: [{ foreignKeyName: 'meios_pagamento_conta_id_fkey'; columns: ['conta_id']; isOneToOne: false; referencedRelation: 'contas'; referencedColumns: ['id'] }]
       }
+      mensagens_wa: {
+        Row: {
+          id: string
+          conta_id: string
+          cliente_id: string | null
+          celular: string
+          direcao: 'in' | 'out'
+          texto: string
+          tipo: string
+          status: string
+          wa_id: string | null
+          recebido_em: string
+          lida: boolean
+        }
+        Insert: {
+          id?: string
+          conta_id: string
+          cliente_id?: string | null
+          celular: string
+          direcao: 'in' | 'out'
+          texto: string
+          tipo?: string
+          status?: string
+          wa_id?: string | null
+          recebido_em?: string
+          lida?: boolean
+        }
+        Update: {
+          id?: string
+          conta_id?: string
+          cliente_id?: string | null
+          celular?: string
+          direcao?: 'in' | 'out'
+          texto?: string
+          tipo?: string
+          status?: string
+          wa_id?: string | null
+          recebido_em?: string
+          lida?: boolean
+        }
+        Relationships: [
+          { foreignKeyName: 'mensagens_wa_conta_id_fkey'; columns: ['conta_id']; isOneToOne: false; referencedRelation: 'contas'; referencedColumns: ['id'] },
+          { foreignKeyName: 'mensagens_wa_cliente_id_fkey'; columns: ['cliente_id']; isOneToOne: false; referencedRelation: 'clientes'; referencedColumns: ['id'] },
+        ]
+      }
       notificacoes_config: {
         Row: {
           assunto_email: string | null

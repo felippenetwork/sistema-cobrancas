@@ -3,7 +3,7 @@
 import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Users, FileText, Wallet, Smartphone, Bell, CreditCard, ScrollText, Settings, X, CalendarClock } from 'lucide-react'
+import { LayoutDashboard, Users, FileText, Wallet, Smartphone, Bell, CreditCard, ScrollText, Settings, X, CalendarClock, MessageSquare } from 'lucide-react'
 import { signOutAction } from '../_actions/auth'
 import { SairButton } from '@/app/_components/sair-button'
 
@@ -21,6 +21,7 @@ const NAV_COBRANCAS: NavItem[] = [
   { href: '/agendamentos',   label: 'Agendamentos',  icon: <CalendarClock className="h-4 w-4" /> },
   { href: '/tipo-pagamento', label: 'Tipo Pag.',     icon: <CreditCard className="h-4 w-4" /> },
   { href: '/log',            label: 'Log',           icon: <ScrollText className="h-4 w-4" /> },
+  { href: '/atendimento',    label: 'Atendimento',   icon: <MessageSquare className="h-4 w-4" /> },
   { href: '/conexao',        label: 'Conexão WA',   icon: <Smartphone className="h-4 w-4" /> },
   { href: '/configuracoes',  label: 'Configurações', icon: <Settings   className="h-4 w-4" /> },
 ]
