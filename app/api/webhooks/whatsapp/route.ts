@@ -46,21 +46,34 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true })
     }
 
-    // Log para debug (visível nos Vercel Logs)
-    console.log('[webhook/whatsapp] body recebido:', JSON.stringify(body).slice(0, 500))
+    // Log estruturado para debug
+    console.log('[webhook/whatsapp] debug:', JSON.stringify({
+      topKeys:    Object.keys(body),
+      EventType:  body?.EventType,
+      event:      body?.event,
+      hasMessages: Array.isArray(body?.messages),
+      msgCount:   Array.isArray(body?.messages) ? (body.messages as any[]).length : 0,
+      firstMsg:   Array.isArray(body?.messages) && body.messages[0] ? {
+        keys:   Object.keys(body.messages[0]),
+        fromMe: body.messages[0]?.fromMe ?? body.messages[0]?.key?.fromMe,
+        from:   body.messages[0]?.from,
+        body:   body.messages[0]?.body,
+        type:   body.messages[0]?.type,
+      } : null,
+    }))
 
-    // ── uazapi: qualquer evento com mensagens ─────────────────────────────────
-    const event = (body?.event ?? '') as string
+    // ── uazapi / uazapiGO: qualquer evento com mensagens ─────────────────────
+    const event = (body?.event ?? body?.EventType ?? '') as string
 
-    // Tenta extrair msgs de qualquer estrutura conhecida do uazapi
-    const msgs: any[] = (
-      body?.data?.messages ??          // messages.upsert padrão
-      (Array.isArray(body?.data) ? body.data : null) ??
-      (body?.data ? [body.data] : null) ??
-      (body?.messages ? body.messages : null) ??
-      (body?.message ? [body.message] : null) ??
-      []
-    )
+    // Extração sem ?? chain para evitar body.data truthy parando antes de body.messages
+    const msgs: any[] = (() => {
+      if (Array.isArray(body?.data?.messages)) return body.data.messages  // uazapi v2
+      if (Array.isArray(body?.data))           return body.data
+      if (Array.isArray(body?.messages))       return body.messages       // uazapiGO
+      if (body?.data)                          return [body.data]
+      if (body?.message)                       return [body.message]
+      return []
+    })()
 
     // Processar se for evento de mensagem (qualquer variante) ou se tiver msgs
     const ehEvtMsg = event.startsWith('message') || event === 'msg' || msgs.length > 0
