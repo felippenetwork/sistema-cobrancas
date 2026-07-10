@@ -58,15 +58,7 @@ export async function POST(req: NextRequest) {
       const celular  = rawPhone.replace('@s.whatsapp.net', '').replace('@c.us', '').replace(/\D/g, '')
       if (!celular) return NextResponse.json({ ok: true })
 
-      const texto = (
-        msg?.message?.conversation ??
-        msg?.message?.extendedTextMessage?.text ??
-        msg?.message?.imageMessage?.caption ??
-        msg?.content ??
-        msg?.body ??
-        msg?.text ??
-        '[Mídia não suportada]'
-      ) as string
+      const texto = extrairTexto(msg) as string
 
       const waId     = (msg?.id ?? msg?.key?.id ?? null) as string | null
       const cid      = contaId
@@ -126,6 +118,34 @@ export async function POST(req: NextRequest) {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+function extrairTexto(msg: any): string {
+  // 1. Proto padrão: texto simples
+  if (msg?.message?.conversation)              return msg.message.conversation
+  // 2. Proto padrão: texto extendido (com contextInfo, reply, etc.)
+  if (msg?.message?.extendedTextMessage?.text) return msg.message.extendedTextMessage.text
+  // 3. Legenda de mídia
+  if (msg?.message?.imageMessage?.caption)     return msg.message.imageMessage.caption
+  if (msg?.message?.videoMessage?.caption)     return msg.message.videoMessage.caption
+  // 4. uazapiGO: content pode ser objeto {text, contextInfo} ou JSON string do mesmo
+  const content = msg?.content
+  if (content) {
+    if (typeof content === 'object' && content.text) return content.text
+    if (typeof content === 'string') {
+      try {
+        const parsed = JSON.parse(content)
+        if (parsed?.text) return parsed.text
+        if (parsed?.URL || parsed?.url) return '[Mídia]'
+      } catch { /* não é JSON */ }
+    }
+  }
+  // 5. Campos simples
+  if (msg?.body && typeof msg.body === 'string') return msg.body
+  if (msg?.text && typeof msg.text === 'string') return msg.text
+  // 6. Mídia sem texto detectável
+  const tipo = msg?.mediaType ?? msg?.message?.audioMessage ? 'Áudio' : 'Mídia'
+  return `[${tipo}]`
+}
 
 async function salvarMensagem(
   supabase: ReturnType<typeof createAdminClient>,
