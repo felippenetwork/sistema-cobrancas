@@ -46,37 +46,56 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true })
     }
 
-    // ── uazapi: evento messages.upsert ────────────────────────────────────────
-    const event = body?.event as string | undefined
-    if (event === 'messages.upsert' || event === 'message') {
-      const msgs: any[] = body?.data?.messages ?? (body?.data ? [body.data] : [])
+    // Log para debug (visível nos Vercel Logs)
+    console.log('[webhook/whatsapp] body recebido:', JSON.stringify(body).slice(0, 500))
+
+    // ── uazapi: qualquer evento com mensagens ─────────────────────────────────
+    const event = (body?.event ?? '') as string
+
+    // Tenta extrair msgs de qualquer estrutura conhecida do uazapi
+    const msgs: any[] = (
+      body?.data?.messages ??          // messages.upsert padrão
+      (Array.isArray(body?.data) ? body.data : null) ??
+      (body?.data ? [body.data] : null) ??
+      (body?.messages ? body.messages : null) ??
+      (body?.message ? [body.message] : null) ??
+      []
+    )
+
+    // Processar se for evento de mensagem (qualquer variante) ou se tiver msgs
+    const ehEvtMsg = event.startsWith('message') || event === 'msg' || msgs.length > 0
+
+    if (ehEvtMsg) {
+      const cid = contaId ?? await resolverContaPorInstancia(supabase, body?.instance ?? body?.instanceName)
 
       for (const msg of msgs) {
-        const fromMe  = msg?.key?.fromMe as boolean
-        if (fromMe) continue  // ignorar mensagens enviadas por nós
+        const fromMe = msg?.key?.fromMe ?? msg?.fromMe ?? false
+        if (fromMe) continue
 
-        const remoteJid = (msg?.key?.remoteJid ?? msg?.remoteJid ?? '') as string
-        const celular   = remoteJid.replace('@s.whatsapp.net', '').replace(/\D/g, '')
+        const remoteJid = (msg?.key?.remoteJid ?? msg?.remoteJid ?? msg?.from ?? '') as string
+        const celular   = remoteJid.replace('@s.whatsapp.net', '').replace('@c.us', '').replace(/\D/g, '')
         if (!celular) continue
 
         const texto = (
           msg?.message?.conversation ??
           msg?.message?.extendedTextMessage?.text ??
           msg?.message?.imageMessage?.caption ??
+          msg?.body ??
+          msg?.text ??
           '[Mídia não suportada]'
         ) as string
 
-        const waId = (msg?.key?.id ?? null) as string | null
+        const waId = (msg?.key?.id ?? msg?.id ?? null) as string | null
+        const cidFinal = cid ?? await resolverContaPorCelular(supabase, celular)
+        if (!cidFinal) {
+          console.warn('[webhook/whatsapp] conta não encontrada para celular:', celular)
+          continue
+        }
 
-        const cid = contaId ?? await resolverContaPorInstancia(supabase, body?.instance)
-        if (!cid) continue
-
-        await salvarMensagem(supabase, { contaId: cid, celular, texto, waId, direcao: 'in' })
+        await salvarMensagem(supabase, { contaId: cidFinal, celular, texto, waId, direcao: 'in' })
       }
-      return NextResponse.json({ ok: true })
     }
 
-    // Evento não tratado — responde 200 para o uazapi não retentar
     return NextResponse.json({ ok: true })
 
   } catch (err) {
