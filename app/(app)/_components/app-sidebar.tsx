@@ -14,19 +14,25 @@ const NAV: NavItem[] = [
 ]
 
 const NAV_COBRANCAS: NavItem[] = [
-  { href: '/clientes',       label: 'Clientes',      icon: <Users      className="h-4 w-4" /> },
-  { href: '/cobrancas',      label: 'Cobranças',     icon: <FileText   className="h-4 w-4" /> },
-  { href: '/caixa',          label: 'Caixa',         icon: <Wallet     className="h-4 w-4" /> },
+  { href: '/clientes',       label: 'Clientes',      icon: <Users         className="h-4 w-4" /> },
+  { href: '/cobrancas',      label: 'Cobranças',     icon: <FileText      className="h-4 w-4" /> },
+  { href: '/caixa',          label: 'Caixa',         icon: <Wallet        className="h-4 w-4" /> },
   { href: '/notificacao',    label: 'Notificação',   icon: <Bell          className="h-4 w-4" /> },
   { href: '/agendamentos',   label: 'Agendamentos',  icon: <CalendarClock className="h-4 w-4" /> },
-  { href: '/tipo-pagamento', label: 'Tipo Pag.',     icon: <CreditCard className="h-4 w-4" /> },
-  { href: '/log',            label: 'Log',           icon: <ScrollText className="h-4 w-4" /> },
-  { href: '/atendimento',    label: 'Atendimento',   icon: <MessageSquare className="h-4 w-4" /> },
-  { href: '/equipe',         label: 'Equipe',        icon: <UserCheck  className="h-4 w-4" /> },
-  { href: '/wa-templates',   label: 'Templates WA',  icon: <FilePlus   className="h-4 w-4" /> },
-  { href: '/disparos',       label: 'Disparos',      icon: <Send       className="h-4 w-4" /> },
-  { href: '/conexao',        label: 'Conexão WA',   icon: <Smartphone className="h-4 w-4" /> },
-  { href: '/configuracoes',  label: 'Configurações', icon: <Settings   className="h-4 w-4" /> },
+  { href: '/tipo-pagamento', label: 'Tipo Pag.',     icon: <CreditCard    className="h-4 w-4" /> },
+  { href: '/log',            label: 'Log',           icon: <ScrollText    className="h-4 w-4" /> },
+]
+
+const NAV_ATENDIMENTO: NavItem[] = [
+  { href: '/atendimento',  label: 'Atendimento',  icon: <MessageSquare className="h-4 w-4" /> },
+  { href: '/equipe',       label: 'Equipe',       icon: <UserCheck     className="h-4 w-4" /> },
+  { href: '/wa-templates', label: 'Templates WA', icon: <FilePlus      className="h-4 w-4" /> },
+  { href: '/disparos',     label: 'Disparos',     icon: <Send          className="h-4 w-4" /> },
+  { href: '/conexao',      label: 'Conexão WA',   icon: <Smartphone    className="h-4 w-4" /> },
+]
+
+const NAV_SISTEMA: NavItem[] = [
+  { href: '/configuracoes', label: 'Configurações', icon: <Settings className="h-4 w-4" /> },
 ]
 
 export function AppSidebar({
@@ -96,6 +102,26 @@ export function AppSidebar({
           Cobranças
         </p>
         {NAV_COBRANCAS.map(item => (
+          <Link key={item.href} href={item.href} className={cls(item.href)} onClick={onClose}>
+            {item.icon}
+            {item.label}
+          </Link>
+        ))}
+
+        <p className="mb-1 mt-4 px-2 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
+          Atendimento
+        </p>
+        {NAV_ATENDIMENTO.map(item => (
+          <Link key={item.href} href={item.href} className={cls(item.href)} onClick={onClose}>
+            {item.icon}
+            {item.label}
+          </Link>
+        ))}
+
+        <p className="mb-1 mt-4 px-2 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
+          Sistema
+        </p>
+        {NAV_SISTEMA.map(item => (
           <Link key={item.href} href={item.href} className={cls(item.href)} onClick={onClose}>
             {item.icon}
             {item.label}
