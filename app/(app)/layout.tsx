@@ -8,11 +8,36 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   if (!user) redirect('/login')
 
-  const { data: conta } = await supabase
+  // Tenta resolver a conta do usuário: owner direto ou membro convidado
+  let conta: { id: string; status: string | null; validade_plano: string | null; nome_empresa: string | null } | null = null
+
+  const { data: contaOwner } = await supabase
     .from('contas')
     .select('id, status, validade_plano, nome_empresa')
     .eq('owner_user_id', user.id)
     .maybeSingle()
+
+  if (contaOwner) {
+    conta = contaOwner
+  } else {
+    // Membro convidado — busca conta via membros_conta
+    const { data: membro } = await supabase
+      .from('membros_conta')
+      .select('conta_id')
+      .eq('user_id', user.id)
+      .eq('ativo', true)
+      .maybeSingle()
+
+    if (membro) {
+      const { data: contaMembro } = await supabase
+        .from('contas')
+        .select('id, status, validade_plano, nome_empresa')
+        .eq('id', membro.conta_id)
+        .maybeSingle()
+
+      conta = contaMembro ?? null
+    }
+  }
 
   if (!conta) redirect('/sem-conta')
 

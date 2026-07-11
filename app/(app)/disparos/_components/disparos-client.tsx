@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useActionState } from 'react'
-import { Send, Plus, XCircle, CheckCircle, Clock, AlertCircle, BarChart3, Users, Loader2 } from 'lucide-react'
+import { useState } from 'react'
+import { Send, Plus, XCircle, CheckCircle, Clock, AlertCircle, Users, Loader2 } from 'lucide-react'
 import { criarCampanhaAction, adicionarDestinatariosAction, enviarCampanhaAction, cancelarCampanhaAction } from '../_actions'
 
 type Modelo  = { id: string; nome: string; status: string }
@@ -22,14 +22,14 @@ type Campanha = {
 }
 
 const STATUS_CONFIG: Record<string, { label: string; icon: React.ReactNode; cls: string }> = {
-  rascunho: { label: 'Rascunho',    icon: <Clock className="h-3 w-3" />,        cls: 'bg-muted text-muted-foreground' },
-  agendada: { label: 'Agendada',    icon: <Clock className="h-3 w-3" />,        cls: 'bg-blue-500/15 text-blue-500' },
-  enviando: { label: 'Enviando',    icon: <Loader2 className="h-3 w-3 animate-spin" />, cls: 'bg-amber-500/15 text-amber-500' },
-  concluida: { label: 'Concluída', icon: <CheckCircle className="h-3 w-3" />,  cls: 'bg-green-500/15 text-green-500' },
-  cancelada: { label: 'Cancelada', icon: <AlertCircle className="h-3 w-3" />, cls: 'bg-muted text-muted-foreground' },
+  rascunho:  { label: 'Rascunho',  icon: <Clock className="h-3 w-3" />,                      cls: 'bg-muted text-muted-foreground' },
+  agendada:  { label: 'Agendada',  icon: <Clock className="h-3 w-3" />,                      cls: 'bg-blue-500/15 text-blue-500' },
+  enviando:  { label: 'Enviando',  icon: <Loader2 className="h-3 w-3 animate-spin" />,       cls: 'bg-amber-500/15 text-amber-500' },
+  concluida: { label: 'Concluída', icon: <CheckCircle className="h-3 w-3" />,                cls: 'bg-green-500/15 text-green-500' },
+  cancelada: { label: 'Cancelada', icon: <AlertCircle className="h-3 w-3" />,               cls: 'bg-muted text-muted-foreground' },
 }
 
-// ── Modal nova campanha ────────────────────────────────────────────────────────
+// ── Modal nova campanha (bottom sheet no mobile) ───────────────────────────────
 
 function ModalNovaCampanha({
   modelos,
@@ -45,13 +45,13 @@ function ModalNovaCampanha({
   const [criandoErr, setCriandoErr]     = useState<string | null>(null)
   const [criando, setCriando]           = useState(false)
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
-  const [buscaCliente, setBusca]        = useState('')
+  const [busca, setBusca]               = useState('')
   const [enviando, setEnviando]         = useState(false)
   const [resultado, setResultado]       = useState<{ enviados: number; falhas: number } | null>(null)
 
   const clientesFiltrados = clientes.filter(c => {
     const nome = [c.nome, c.sobrenome].filter(Boolean).join(' ').toLowerCase()
-    return nome.includes(buscaCliente.toLowerCase()) || c.celular.includes(buscaCliente)
+    return nome.includes(busca.toLowerCase()) || c.celular.includes(busca)
   })
 
   function toggleCliente(cel: string) {
@@ -63,7 +63,7 @@ function ModalNovaCampanha({
     })
   }
 
-  async function handleCriarCampanha(e: React.FormEvent<HTMLFormElement>) {
+  async function handleCriar(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setCriandoErr(null)
     setCriando(true)
@@ -77,10 +77,8 @@ function ModalNovaCampanha({
   async function handleEnviar() {
     if (!campanhaId || selecionados.size === 0) return
     setEnviando(true)
-
     const r1 = await adicionarDestinatariosAction(campanhaId, [...selecionados])
     if (r1.error) { setEnviando(false); setCriandoErr(r1.error); return }
-
     const r2 = await enviarCampanhaAction(campanhaId)
     setEnviando(false)
     if (r2.error) { setCriandoErr(r2.error); return }
@@ -88,37 +86,45 @@ function ModalNovaCampanha({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="w-full max-w-xl rounded-xl border border-border bg-card shadow-2xl">
+    <div
+      className="fixed inset-0 z-50 flex flex-col justify-end bg-black/60 md:items-center md:justify-center md:p-4"
+      onClick={e => e.target === e.currentTarget && onFechar()}
+    >
+      <div className="w-full rounded-t-2xl border border-border bg-card shadow-2xl md:max-w-xl md:rounded-xl">
+        {/* Handle visual mobile */}
+        <div className="flex justify-center pt-3 md:hidden">
+          <div className="h-1 w-10 rounded-full bg-border" />
+        </div>
+
         <div className="flex items-center justify-between border-b border-border px-5 py-4">
           <h2 className="text-sm font-semibold text-foreground">
             {resultado ? 'Campanha enviada!' : step === 1 ? 'Nova Campanha' : 'Selecionar Destinatários'}
           </h2>
-          <button onClick={onFechar} className="rounded p-1 text-muted-foreground hover:text-foreground">
+          <button onClick={onFechar} className="rounded-lg p-1.5 text-muted-foreground hover:text-foreground">
             <XCircle className="h-4 w-4" />
           </button>
         </div>
 
         {resultado ? (
-          <div className="p-8 text-center space-y-4">
+          <div className="space-y-4 p-8 text-center" style={{ paddingBottom: 'max(2rem, env(safe-area-inset-bottom, 0px))' }}>
             <CheckCircle className="mx-auto h-12 w-12 text-green-500" />
             <div>
               <p className="text-lg font-semibold text-foreground">{resultado.enviados} mensagens enviadas</p>
               {resultado.falhas > 0 && (
-                <p className="text-sm text-muted-foreground">{resultado.falhas} falhas</p>
+                <p className="text-sm text-muted-foreground">{resultado.falhas} falha{resultado.falhas !== 1 ? 's' : ''}</p>
               )}
             </div>
             <button
               onClick={onFechar}
-              className="rounded-md bg-primary px-6 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90"
+              className="rounded-xl bg-primary px-6 py-3 text-sm font-medium text-primary-foreground transition hover:opacity-90"
             >
               Fechar
             </button>
           </div>
         ) : step === 1 ? (
-          <form onSubmit={handleCriarCampanha} className="space-y-4 p-5">
+          <form onSubmit={handleCriar} className="space-y-4 p-5">
             {criandoErr && (
-              <p className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">{criandoErr}</p>
+              <p className="rounded-xl bg-destructive/10 px-3 py-2 text-xs text-destructive">{criandoErr}</p>
             )}
             <div>
               <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Nome da campanha</label>
@@ -126,14 +132,14 @@ function ModalNovaCampanha({
                 name="nome"
                 required
                 placeholder="Lembrete julho 2026"
-                className="w-full rounded-md border border-border bg-input px-3 py-2 text-sm text-foreground outline-none focus:border-primary"
+                className="w-full rounded-xl border border-border bg-input px-3 py-3 text-sm text-foreground outline-none focus:border-primary"
               />
             </div>
             <div>
               <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Template de mensagem</label>
               <select
                 name="modelo_id"
-                className="w-full rounded-md border border-border bg-input px-3 py-2 text-sm text-foreground outline-none focus:border-primary"
+                className="w-full rounded-xl border border-border bg-input px-3 py-3 text-sm text-foreground outline-none focus:border-primary"
               >
                 <option value="">Mensagem livre (sem template)</option>
                 {modelos.map(m => (
@@ -144,28 +150,41 @@ function ModalNovaCampanha({
                 Para uazapiGO use mensagem livre. API Meta requer template aprovado.
               </p>
             </div>
-            <div className="flex gap-2 pt-1">
-              <button type="button" onClick={onFechar} className="flex-1 rounded-md border border-border px-3 py-2 text-sm text-muted-foreground transition hover:bg-accent">
+            <div
+              className="flex gap-3 pt-1"
+              style={{ paddingBottom: 'max(0.25rem, env(safe-area-inset-bottom, 0px))' }}
+            >
+              <button
+                type="button"
+                onClick={onFechar}
+                className="flex-1 rounded-xl border border-border px-3 py-3 text-sm text-muted-foreground transition hover:bg-accent"
+              >
                 Cancelar
               </button>
-              <button type="submit" disabled={criando} className="flex-1 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50">
+              <button
+                type="submit"
+                disabled={criando}
+                className="flex-1 rounded-xl bg-primary px-3 py-3 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
+              >
                 {criando ? 'Criando…' : 'Próximo →'}
               </button>
             </div>
           </form>
         ) : (
-          <div className="flex flex-col gap-4 p-5 max-h-[70vh]">
+          <div className="flex flex-col gap-4 p-5" style={{ maxHeight: '70dvh' }}>
             {criandoErr && (
-              <p className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">{criandoErr}</p>
+              <p className="rounded-xl bg-destructive/10 px-3 py-2 text-xs text-destructive">{criandoErr}</p>
             )}
             <input
-              value={buscaCliente}
+              value={busca}
               onChange={e => setBusca(e.target.value)}
               placeholder="Buscar cliente ou celular…"
-              className="w-full rounded-md border border-border bg-input px-3 py-2 text-sm text-foreground outline-none focus:border-primary"
+              className="w-full rounded-xl border border-border bg-input px-3 py-3 text-sm text-foreground outline-none focus:border-primary"
             />
-            <p className="text-xs text-muted-foreground">{selecionados.size} selecionado{selecionados.size !== 1 ? 's' : ''}</p>
-            <div className="flex-1 overflow-y-auto space-y-1 max-h-64">
+            <p className="text-xs text-muted-foreground">
+              {selecionados.size} selecionado{selecionados.size !== 1 ? 's' : ''}
+            </p>
+            <div className="flex-1 overflow-y-auto space-y-1" style={{ maxHeight: '40dvh' }}>
               {clientesFiltrados.map(c => {
                 const nome = [c.nome, c.sobrenome].filter(Boolean).join(' ') || c.celular
                 const sel  = selecionados.has(c.celular)
@@ -174,7 +193,7 @@ function ModalNovaCampanha({
                     key={c.celular}
                     onClick={() => toggleCliente(c.celular)}
                     className={[
-                      'flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm transition',
+                      'flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm transition',
                       sel ? 'bg-primary/10 text-foreground' : 'hover:bg-accent text-muted-foreground',
                     ].join(' ')}
                   >
@@ -187,14 +206,20 @@ function ModalNovaCampanha({
                 )
               })}
             </div>
-            <div className="flex gap-2 border-t border-border pt-4">
-              <button onClick={() => setStep(1)} className="rounded-md border border-border px-3 py-2 text-sm text-muted-foreground transition hover:bg-accent">
+            <div
+              className="flex gap-3 border-t border-border pt-4"
+              style={{ paddingBottom: 'max(0.25rem, env(safe-area-inset-bottom, 0px))' }}
+            >
+              <button
+                onClick={() => setStep(1)}
+                className="rounded-xl border border-border px-3 py-3 text-sm text-muted-foreground transition hover:bg-accent"
+              >
                 ← Voltar
               </button>
               <button
                 onClick={handleEnviar}
                 disabled={selecionados.size === 0 || enviando}
-                className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-primary px-3 py-3 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
               >
                 {enviando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                 {enviando ? `Enviando para ${selecionados.size}…` : `Enviar para ${selecionados.size}`}
@@ -218,7 +243,7 @@ export function DisparosClient({
   modelos: Modelo[]
   clientes: Cliente[]
 }) {
-  const [modalNovo, setModalNovo] = useState(false)
+  const [modalNovo, setModalNovo]   = useState(false)
   const [cancelando, setCancelando] = useState<string | null>(null)
 
   async function handleCancelar(id: string) {
@@ -238,9 +263,9 @@ export function DisparosClient({
         />
       )}
 
-      <div className="mx-auto max-w-4xl space-y-6 p-6">
+      <div className="mx-auto max-w-4xl space-y-6 p-4 md:p-6">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-start justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
               <Send className="h-5 w-5 text-primary" />
@@ -252,21 +277,22 @@ export function DisparosClient({
           </div>
           <button
             onClick={() => setModalNovo(true)}
-            className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90"
+            className="shrink-0 flex items-center gap-1.5 rounded-xl bg-primary px-3 py-2.5 text-sm font-medium text-primary-foreground transition hover:opacity-90 active:opacity-80"
           >
             <Plus className="h-4 w-4" />
-            Nova campanha
+            <span className="hidden sm:inline">Nova campanha</span>
+            <span className="sm:hidden">Nova</span>
           </button>
         </div>
 
         {/* Lista */}
         {campanhas.length === 0 ? (
-          <div className="rounded-xl border border-border bg-card p-16 text-center">
-            <Send className="mx-auto h-8 w-8 text-muted-foreground/30 mb-3" />
+          <div className="rounded-2xl border border-border bg-card p-14 text-center">
+            <Send className="mx-auto mb-3 h-8 w-8 text-muted-foreground/30" />
             <p className="text-sm text-muted-foreground">Nenhuma campanha ainda.</p>
             <button
               onClick={() => setModalNovo(true)}
-              className="mt-4 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90"
+              className="mt-4 rounded-xl bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition hover:opacity-90"
             >
               Criar primeira campanha
             </button>
@@ -274,16 +300,16 @@ export function DisparosClient({
         ) : (
           <div className="space-y-3">
             {campanhas.map(c => {
-              const st = STATUS_CONFIG[c.status] ?? STATUS_CONFIG.rascunho
+              const st      = STATUS_CONFIG[c.status] ?? STATUS_CONFIG.rascunho
               const enviados = c.total_enviados
               const total    = c.total_destinatarios
               const pct      = total > 0 ? Math.round((enviados / total) * 100) : 0
 
               return (
-                <div key={c.id} className="rounded-xl border border-border bg-card p-5">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
+                <div key={c.id} className="rounded-2xl border border-border bg-card p-4 md:p-5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
                         <p className="text-sm font-medium text-foreground">{c.nome}</p>
                         <span className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${st.cls}`}>
                           {st.icon}
@@ -295,11 +321,9 @@ export function DisparosClient({
                           Template: {c.modelos_wa.nome}
                         </p>
                       )}
-                    </div>
 
-                    <div className="flex items-center gap-4 shrink-0">
                       {/* Estatísticas */}
-                      <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                      <div className="mt-2 flex items-center gap-4 text-xs text-muted-foreground">
                         <span className="flex items-center gap-1">
                           <Users className="h-3.5 w-3.5" />
                           {c.total_destinatarios}
@@ -315,28 +339,28 @@ export function DisparosClient({
                           </span>
                         )}
                       </div>
-
-                      {/* Ações */}
-                      {['rascunho', 'agendada'].includes(c.status) && (
-                        <button
-                          onClick={() => handleCancelar(c.id)}
-                          disabled={cancelando === c.id}
-                          className="rounded-md border border-border px-2.5 py-1.5 text-xs text-muted-foreground transition hover:border-destructive hover:text-destructive disabled:opacity-50"
-                        >
-                          Cancelar
-                        </button>
-                      )}
                     </div>
+
+                    {/* Ação */}
+                    {['rascunho', 'agendada'].includes(c.status) && (
+                      <button
+                        onClick={() => handleCancelar(c.id)}
+                        disabled={cancelando === c.id}
+                        className="shrink-0 rounded-xl border border-border px-3 py-2 text-xs text-muted-foreground transition hover:border-destructive hover:text-destructive disabled:opacity-50"
+                      >
+                        Cancelar
+                      </button>
+                    )}
                   </div>
 
                   {/* Barra de progresso */}
                   {total > 0 && (
                     <div className="mt-3">
-                      <div className="flex justify-between text-[10px] text-muted-foreground mb-1">
+                      <div className="mb-1 flex justify-between text-[10px] text-muted-foreground">
                         <span>Progresso</span>
                         <span>{pct}% ({enviados}/{total})</span>
                       </div>
-                      <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                      <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
                         <div
                           className="h-full rounded-full bg-primary transition-all"
                           style={{ width: `${pct}%` }}
