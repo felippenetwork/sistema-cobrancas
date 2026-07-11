@@ -51,8 +51,8 @@ type Departamento = { id: string; nome: string; cor: string }
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const TAB_CONFIG: { status: AtendimentoStatus; label: string; labelCurto: string; Icon: React.ComponentType<{ className?: string }> }[] = [
-  { status: 'aguardando',     label: 'Pendentes',      labelCurto: 'Pendentes',  Icon: Inbox },
   { status: 'em_atendimento', label: 'Em Atendimento', labelCurto: 'Em Aten.',   Icon: MessageSquare },
+  { status: 'aguardando',     label: 'Pendentes',      labelCurto: 'Pendentes',  Icon: Inbox },
   { status: 'finalizado',     label: 'Finalizados',    labelCurto: 'Finalizados',Icon: History },
 ]
 
