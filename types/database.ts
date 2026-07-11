@@ -15,7 +15,13 @@ type MeioPagTipo       = 'pix' | 'outro'
 type NotifCanal        = 'whatsapp' | 'email'
 type NotifStatus       = 'fila' | 'enviado' | 'entregue' | 'lido' | 'aberto' | 'falhou' | 'cancelado'
 type NotifTipo         = '5d' | '3d' | '2d' | '1d' | 'dia' | 'vencido1d' | 'manual' | 'boasvindas' | 'pagamento_confirmado' | 'agendada'
-type ParcelaStatus     = 'aberta' | 'paga' | 'vencida'
+type ParcelaStatus      = 'aberta' | 'paga' | 'vencida'
+type AtendimentoStatus = 'aguardando' | 'em_atendimento' | 'finalizado'
+type MembroRole        = 'admin' | 'atendente'
+type ModeloCategoria   = 'UTILITY' | 'MARKETING' | 'AUTHENTICATION'
+type ModeloStatus      = 'rascunho' | 'em_analise' | 'aprovado' | 'rejeitado'
+type CampanhaStatus    = 'rascunho' | 'agendada' | 'enviando' | 'concluida' | 'cancelada'
+type DestinatarioStatus = 'pendente' | 'enviado' | 'falhou' | 'lido'
 
 export type Database = {
   public: {
@@ -474,6 +480,7 @@ export type Database = {
           id: string
           conta_id: string
           cliente_id: string | null
+          atendimento_id: string | null
           celular: string
           direcao: 'in' | 'out'
           texto: string
@@ -487,6 +494,7 @@ export type Database = {
           id?: string
           conta_id: string
           cliente_id?: string | null
+          atendimento_id?: string | null
           celular: string
           direcao: 'in' | 'out'
           texto: string
@@ -500,6 +508,7 @@ export type Database = {
           id?: string
           conta_id?: string
           cliente_id?: string | null
+          atendimento_id?: string | null
           celular?: string
           direcao?: 'in' | 'out'
           texto?: string
@@ -512,6 +521,7 @@ export type Database = {
         Relationships: [
           { foreignKeyName: 'mensagens_wa_conta_id_fkey'; columns: ['conta_id']; isOneToOne: false; referencedRelation: 'contas'; referencedColumns: ['id'] },
           { foreignKeyName: 'mensagens_wa_cliente_id_fkey'; columns: ['cliente_id']; isOneToOne: false; referencedRelation: 'clientes'; referencedColumns: ['id'] },
+          { foreignKeyName: 'mensagens_wa_atendimento_id_fkey'; columns: ['atendimento_id']; isOneToOne: false; referencedRelation: 'atendimentos'; referencedColumns: ['id'] },
         ]
       }
       notificacoes_config: {
@@ -674,6 +684,262 @@ export type Database = {
         Insert: { conta_id: string; created_at?: string; id?: string; texto: string }
         Update: { conta_id?: string; created_at?: string; id?: string; texto?: string }
         Relationships: [{ foreignKeyName: 'saudacoes_conta_id_fkey'; columns: ['conta_id']; isOneToOne: false; referencedRelation: 'contas'; referencedColumns: ['id'] }]
+      }
+      membros_conta: {
+        Row: {
+          id: string
+          conta_id: string
+          user_id: string
+          nome: string
+          email: string
+          role: MembroRole
+          ativo: boolean
+          criado_em: string
+        }
+        Insert: {
+          id?: string
+          conta_id: string
+          user_id: string
+          nome: string
+          email: string
+          role?: MembroRole
+          ativo?: boolean
+          criado_em?: string
+        }
+        Update: {
+          id?: string
+          conta_id?: string
+          user_id?: string
+          nome?: string
+          email?: string
+          role?: MembroRole
+          ativo?: boolean
+          criado_em?: string
+        }
+        Relationships: [
+          { foreignKeyName: 'membros_conta_conta_id_fkey'; columns: ['conta_id']; isOneToOne: false; referencedRelation: 'contas'; referencedColumns: ['id'] },
+        ]
+      }
+      departamentos: {
+        Row: {
+          id: string
+          conta_id: string
+          nome: string
+          cor: string
+          criado_em: string
+        }
+        Insert: {
+          id?: string
+          conta_id: string
+          nome: string
+          cor?: string
+          criado_em?: string
+        }
+        Update: {
+          id?: string
+          conta_id?: string
+          nome?: string
+          cor?: string
+          criado_em?: string
+        }
+        Relationships: [
+          { foreignKeyName: 'departamentos_conta_id_fkey'; columns: ['conta_id']; isOneToOne: false; referencedRelation: 'contas'; referencedColumns: ['id'] },
+        ]
+      }
+      atendimentos: {
+        Row: {
+          id: string
+          conta_id: string
+          numero: number
+          celular: string
+          cliente_id: string | null
+          departamento_id: string | null
+          status: AtendimentoStatus
+          atendente_id: string | null
+          ultima_mensagem: string | null
+          ultima_msg_em: string | null
+          criado_em: string
+          aceito_em: string | null
+          finalizado_em: string | null
+        }
+        Insert: {
+          id?: string
+          conta_id: string
+          numero?: number
+          celular: string
+          cliente_id?: string | null
+          departamento_id?: string | null
+          status?: AtendimentoStatus
+          atendente_id?: string | null
+          ultima_mensagem?: string | null
+          ultima_msg_em?: string | null
+          criado_em?: string
+          aceito_em?: string | null
+          finalizado_em?: string | null
+        }
+        Update: {
+          id?: string
+          conta_id?: string
+          numero?: number
+          celular?: string
+          cliente_id?: string | null
+          departamento_id?: string | null
+          status?: AtendimentoStatus
+          atendente_id?: string | null
+          ultima_mensagem?: string | null
+          ultima_msg_em?: string | null
+          criado_em?: string
+          aceito_em?: string | null
+          finalizado_em?: string | null
+        }
+        Relationships: [
+          { foreignKeyName: 'atendimentos_conta_id_fkey'; columns: ['conta_id']; isOneToOne: false; referencedRelation: 'contas'; referencedColumns: ['id'] },
+          { foreignKeyName: 'atendimentos_cliente_id_fkey'; columns: ['cliente_id']; isOneToOne: false; referencedRelation: 'clientes'; referencedColumns: ['id'] },
+          { foreignKeyName: 'atendimentos_departamento_id_fkey'; columns: ['departamento_id']; isOneToOne: false; referencedRelation: 'departamentos'; referencedColumns: ['id'] },
+        ]
+      }
+      modelos_wa: {
+        Row: {
+          id: string
+          conta_id: string
+          nome: string
+          categoria: ModeloCategoria
+          idioma: string
+          corpo: string
+          cabecalho: string | null
+          rodape: string | null
+          botoes: Json | null
+          variaveis: Json | null
+          status: ModeloStatus
+          meta_template_id: string | null
+          criado_em: string
+          atualizado_em: string
+        }
+        Insert: {
+          id?: string
+          conta_id: string
+          nome: string
+          categoria?: ModeloCategoria
+          idioma?: string
+          corpo: string
+          cabecalho?: string | null
+          rodape?: string | null
+          botoes?: Json | null
+          variaveis?: Json | null
+          status?: ModeloStatus
+          meta_template_id?: string | null
+          criado_em?: string
+          atualizado_em?: string
+        }
+        Update: {
+          id?: string
+          conta_id?: string
+          nome?: string
+          categoria?: ModeloCategoria
+          idioma?: string
+          corpo?: string
+          cabecalho?: string | null
+          rodape?: string | null
+          botoes?: Json | null
+          variaveis?: Json | null
+          status?: ModeloStatus
+          meta_template_id?: string | null
+          criado_em?: string
+          atualizado_em?: string
+        }
+        Relationships: [
+          { foreignKeyName: 'modelos_wa_conta_id_fkey'; columns: ['conta_id']; isOneToOne: false; referencedRelation: 'contas'; referencedColumns: ['id'] },
+        ]
+      }
+      campanhas_wa: {
+        Row: {
+          id: string
+          conta_id: string
+          nome: string
+          modelo_id: string | null
+          status: CampanhaStatus
+          total_destinatarios: number
+          total_enviados: number
+          total_falhas: number
+          agendado_para: string | null
+          iniciado_em: string | null
+          concluido_em: string | null
+          criado_em: string
+        }
+        Insert: {
+          id?: string
+          conta_id: string
+          nome: string
+          modelo_id?: string | null
+          status?: CampanhaStatus
+          total_destinatarios?: number
+          total_enviados?: number
+          total_falhas?: number
+          agendado_para?: string | null
+          iniciado_em?: string | null
+          concluido_em?: string | null
+          criado_em?: string
+        }
+        Update: {
+          id?: string
+          conta_id?: string
+          nome?: string
+          modelo_id?: string | null
+          status?: CampanhaStatus
+          total_destinatarios?: number
+          total_enviados?: number
+          total_falhas?: number
+          agendado_para?: string | null
+          iniciado_em?: string | null
+          concluido_em?: string | null
+          criado_em?: string
+        }
+        Relationships: [
+          { foreignKeyName: 'campanhas_wa_conta_id_fkey'; columns: ['conta_id']; isOneToOne: false; referencedRelation: 'contas'; referencedColumns: ['id'] },
+          { foreignKeyName: 'campanhas_wa_modelo_id_fkey'; columns: ['modelo_id']; isOneToOne: false; referencedRelation: 'modelos_wa'; referencedColumns: ['id'] },
+        ]
+      }
+      campanha_destinatarios: {
+        Row: {
+          id: string
+          campanha_id: string
+          conta_id: string
+          cliente_id: string | null
+          celular: string
+          variaveis: Json | null
+          status: DestinatarioStatus
+          wa_id: string | null
+          enviado_em: string | null
+          erro: string | null
+        }
+        Insert: {
+          id?: string
+          campanha_id: string
+          conta_id: string
+          cliente_id?: string | null
+          celular: string
+          variaveis?: Json | null
+          status?: DestinatarioStatus
+          wa_id?: string | null
+          enviado_em?: string | null
+          erro?: string | null
+        }
+        Update: {
+          id?: string
+          campanha_id?: string
+          conta_id?: string
+          cliente_id?: string | null
+          celular?: string
+          variaveis?: Json | null
+          status?: DestinatarioStatus
+          wa_id?: string | null
+          enviado_em?: string | null
+          erro?: string | null
+        }
+        Relationships: [
+          { foreignKeyName: 'campanha_dest_campanha_id_fkey'; columns: ['campanha_id']; isOneToOne: false; referencedRelation: 'campanhas_wa'; referencedColumns: ['id'] },
+          { foreignKeyName: 'campanha_dest_conta_id_fkey'; columns: ['conta_id']; isOneToOne: false; referencedRelation: 'contas'; referencedColumns: ['id'] },
+        ]
       }
     }
     Views: Record<never, never>

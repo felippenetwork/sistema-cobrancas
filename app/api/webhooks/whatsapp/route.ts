@@ -119,6 +119,71 @@ export async function POST(req: NextRequest) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+async function encontrarOuCriarAtendimento(
+  supabase: ReturnType<typeof createAdminClient>,
+  contaId: string,
+  celular: string,
+  clienteId: string | null,
+  texto: string,
+): Promise<string | null> {
+  // Busca atendimento aberto (aguardando | em_atendimento)
+  const { data: existing } = await supabase
+    .from('atendimentos')
+    .select('id')
+    .eq('conta_id', contaId)
+    .eq('celular', celular)
+    .neq('status', 'finalizado')
+    .maybeSingle()
+
+  if (existing) {
+    await supabase
+      .from('atendimentos')
+      .update({ ultima_mensagem: texto, ultima_msg_em: new Date().toISOString() })
+      .eq('id', existing.id)
+    return existing.id
+  }
+
+  // Busca departamento padrão (Geral) da conta
+  const { data: deptGeral } = await supabase
+    .from('departamentos')
+    .select('id')
+    .eq('conta_id', contaId)
+    .eq('nome', 'Geral')
+    .maybeSingle()
+
+  const { data: novo, error } = await supabase
+    .from('atendimentos')
+    .insert({
+      conta_id:        contaId,
+      celular,
+      cliente_id:      clienteId,
+      departamento_id: deptGeral?.id ?? null,
+      status:          'aguardando',
+      ultima_mensagem: texto,
+      ultima_msg_em:   new Date().toISOString(),
+    })
+    .select('id')
+    .single()
+
+  if (error) {
+    // conflito de unicidade (race condition): busca novamente
+    if (error.code === '23505') {
+      const { data: race } = await supabase
+        .from('atendimentos')
+        .select('id')
+        .eq('conta_id', contaId)
+        .eq('celular', celular)
+        .neq('status', 'finalizado')
+        .maybeSingle()
+      return race?.id ?? null
+    }
+    console.error('[webhook] encontrarOuCriarAtendimento', error)
+    return null
+  }
+
+  return novo?.id ?? null
+}
+
 function extrairTexto(msg: any): string {
   // 1. Proto padrão: texto simples
   if (msg?.message?.conversation)              return msg.message.conversation
@@ -151,7 +216,6 @@ async function salvarMensagem(
   supabase: ReturnType<typeof createAdminClient>,
   params: { contaId: string; celular: string; texto: string; waId: string | null; direcao: 'in' | 'out' },
 ) {
-  // Encontrar cliente pelo celular (normalizado)
   const { data: cliente } = await supabase
     .from('clientes')
     .select('id')
@@ -159,14 +223,27 @@ async function salvarMensagem(
     .eq('celular', params.celular)
     .maybeSingle()
 
+  // Para mensagens recebidas (in), vincula ao atendimento (cria se necessário)
+  let atendimentoId: string | null = null
+  if (params.direcao === 'in') {
+    atendimentoId = await encontrarOuCriarAtendimento(
+      supabase,
+      params.contaId,
+      params.celular,
+      cliente?.id ?? null,
+      params.texto,
+    )
+  }
+
   const { error } = await supabase.from('mensagens_wa').insert({
-    conta_id:   params.contaId,
-    cliente_id: cliente?.id ?? null,
-    celular:    params.celular,
-    direcao:    params.direcao,
-    texto:      params.texto,
-    wa_id:      params.waId,
-    lida:       false,
+    conta_id:       params.contaId,
+    cliente_id:     cliente?.id ?? null,
+    atendimento_id: atendimentoId,
+    celular:        params.celular,
+    direcao:        params.direcao,
+    texto:          params.texto,
+    wa_id:          params.waId,
+    lida:           false,
   })
 
   // Duplicata (wa_id já existe) → ignorar silenciosamente

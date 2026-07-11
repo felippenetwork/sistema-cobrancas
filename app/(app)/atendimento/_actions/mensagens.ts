@@ -1,19 +1,9 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { getConta } from '@/lib/conta'
 
 export type ActionState = { error: string | null }
-
-async function getConta() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Não autenticado.')
-  const { data: conta } = await supabase
-    .from('contas').select('id').eq('owner_user_id', user.id).single()
-  if (!conta) throw new Error('Conta não encontrada.')
-  return { supabase, contaId: conta.id as string }
-}
 
 // ── Enviar resposta ao cliente ────────────────────────────────────────────────
 export async function enviarRespostaAction(
@@ -23,13 +13,13 @@ export async function enviarRespostaAction(
   try {
     const { supabase, contaId } = await getConta()
 
-    const celular = (formData.get('celular') as string)?.trim()
-    const texto   = (formData.get('texto')   as string)?.trim()
+    const celular       = (formData.get('celular')        as string)?.trim()
+    const texto         = (formData.get('texto')          as string)?.trim()
+    const atendimentoId = (formData.get('atendimento_id') as string | null) ?? null
 
     if (!celular) return { error: 'Celular inválido.' }
     if (!texto)   return { error: 'Mensagem vazia.' }
 
-    // Buscar token uazapi da instância conectada
     const { data: conexao } = await supabase
       .from('conexoes')
       .select('uazapi_instance_token, status')
@@ -43,7 +33,6 @@ export async function enviarRespostaAction(
     const uazapiUrl = process.env.UAZAPI_URL?.replace(/\/$/, '')
     if (!uazapiUrl) return { error: 'Configuração UAZAPI_URL ausente.' }
 
-    // Enviar via uazapi
     const res = await fetch(`${uazapiUrl}/send/text`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json', token: conexao.uazapi_instance_token },
@@ -55,7 +44,6 @@ export async function enviarRespostaAction(
       return { error: `Falha ao enviar: ${res.status} ${body}` }
     }
 
-    // Salvar mensagem enviada no histórico
     const { data: cliente } = await supabase
       .from('clientes')
       .select('id')
@@ -64,13 +52,23 @@ export async function enviarRespostaAction(
       .maybeSingle()
 
     await supabase.from('mensagens_wa').insert({
-      conta_id:   contaId,
-      cliente_id: cliente?.id ?? null,
+      conta_id:       contaId,
+      cliente_id:     cliente?.id ?? null,
+      atendimento_id: atendimentoId,
       celular,
-      direcao:    'out',
+      direcao: 'out',
       texto,
-      lida:       true,
+      lida:    true,
     })
+
+    // Atualiza ultima_mensagem do atendimento
+    if (atendimentoId) {
+      await supabase
+        .from('atendimentos')
+        .update({ ultima_mensagem: texto, ultima_msg_em: new Date().toISOString() })
+        .eq('id', atendimentoId)
+        .eq('conta_id', contaId)
+    }
 
   } catch (e: unknown) {
     return { error: e instanceof Error ? e.message : 'Erro desconhecido.' }
@@ -80,7 +78,7 @@ export async function enviarRespostaAction(
   return { error: null }
 }
 
-// ── Marcar conversa como lida ─────────────────────────────────────────────────
+// ── Marcar mensagens de uma conversa como lidas ───────────────────────────────
 export async function marcarLidaAction(celular: string): Promise<void> {
   try {
     const { supabase, contaId } = await getConta()
