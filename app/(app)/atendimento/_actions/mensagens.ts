@@ -20,30 +20,70 @@ export async function enviarRespostaAction(
     if (!celular) return { error: 'Celular inválido.' }
     if (!texto)   return { error: 'Mensagem vazia.' }
 
-    const { data: conexao } = await supabase
-      .from('conexoes')
-      .select('uazapi_instance_token, status')
-      .eq('conta_id', contaId)
-      .maybeSingle()
+    // Busca credenciais Meta + conexão uazapiGO em paralelo
+    const [{ data: cfg }, { data: conexao }] = await Promise.all([
+      supabase
+        .from('configuracoes')
+        .select('meta_access_token, meta_phone_number_id')
+        .eq('conta_id', contaId)
+        .maybeSingle(),
+      supabase
+        .from('conexoes')
+        .select('uazapi_instance_token, status')
+        .eq('conta_id', contaId)
+        .maybeSingle(),
+    ])
 
-    if (!conexao?.uazapi_instance_token || conexao.status !== 'conectado') {
-      return { error: 'WhatsApp não está conectado. Verifique a conexão.' }
+    const usarMeta = !!(cfg?.meta_access_token && cfg?.meta_phone_number_id)
+
+    if (usarMeta) {
+      // ── Envio via Meta Cloud API ────────────────────────────────────────────
+      const res = await fetch(
+        `https://graph.facebook.com/v20.0/${cfg.meta_phone_number_id}/messages`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${cfg.meta_access_token}`,
+          },
+          body: JSON.stringify({
+            messaging_product: 'whatsapp',
+            recipient_type:    'individual',
+            to:                celular,
+            type:              'text',
+            text:              { preview_url: false, body: texto },
+          }),
+        },
+      )
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        const msg  = body?.error?.message ?? `Erro Meta API: ${res.status}`
+        return { error: msg }
+      }
+
+    } else {
+      // ── Fallback: uazapiGO ─────────────────────────────────────────────────
+      if (!conexao?.uazapi_instance_token || conexao.status !== 'conectado') {
+        return { error: 'WhatsApp não está conectado. Configure a API Meta ou verifique a conexão.' }
+      }
+
+      const uazapiUrl = process.env.UAZAPI_URL?.replace(/\/$/, '')
+      if (!uazapiUrl) return { error: 'UAZAPI_URL não configurado.' }
+
+      const res = await fetch(`${uazapiUrl}/send/text`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', token: conexao.uazapi_instance_token },
+        body:    JSON.stringify({ number: celular, text: texto }),
+      })
+
+      if (!res.ok) {
+        const body = await res.text().catch(() => '')
+        return { error: `Falha ao enviar: ${res.status} ${body}` }
+      }
     }
 
-    const uazapiUrl = process.env.UAZAPI_URL?.replace(/\/$/, '')
-    if (!uazapiUrl) return { error: 'Configuração UAZAPI_URL ausente.' }
-
-    const res = await fetch(`${uazapiUrl}/send/text`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json', token: conexao.uazapi_instance_token },
-      body:    JSON.stringify({ number: celular, text: texto }),
-    })
-
-    if (!res.ok) {
-      const body = await res.text().catch(() => '')
-      return { error: `Falha ao enviar: ${res.status} ${body}` }
-    }
-
+    // Salva mensagem enviada no banco
     const { data: cliente } = await supabase
       .from('clientes')
       .select('id')
@@ -61,7 +101,6 @@ export async function enviarRespostaAction(
       lida:    true,
     })
 
-    // Atualiza ultima_mensagem do atendimento
     if (atendimentoId) {
       await supabase
         .from('atendimentos')

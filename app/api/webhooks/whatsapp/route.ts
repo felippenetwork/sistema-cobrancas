@@ -29,15 +29,23 @@ export async function POST(req: NextRequest) {
     if (body?.object === 'whatsapp_business_account') {
       for (const entry of body.entry ?? []) {
         for (const change of entry.changes ?? []) {
-          const msgs = change.value?.messages ?? []
+          const value   = change.value ?? {}
+          const msgs    = value.messages ?? []
+          if (!msgs.length) continue
+
+          // Resolve a conta pelo phone_number_id do metadata da Meta
+          const phoneId = value.metadata?.phone_number_id as string | undefined
+          const cid     = phoneId
+            ? await resolverContaPorMetaPhoneId(supabase, phoneId)
+            : (contaId ?? await resolverContaPorCelular(supabase, msgs[0]?.from ?? ''))
+
+          if (!cid) continue
+
           for (const msg of msgs) {
             if (msg.type !== 'text') continue
             const celular = msg.from as string
             const texto   = (msg.text?.body ?? '') as string
             const waId    = msg.id as string
-
-            const cid = contaId ?? await resolverContaPorCelular(supabase, celular)
-            if (!cid) continue
 
             await salvarMensagem(supabase, { contaId: cid, celular, texto, waId, direcao: 'in' })
           }
@@ -250,6 +258,18 @@ async function salvarMensagem(
   if (error && error.code !== '23505') {
     console.error('[webhook/whatsapp] salvarMensagem', error, params)
   }
+}
+
+async function resolverContaPorMetaPhoneId(
+  supabase: ReturnType<typeof createAdminClient>,
+  phoneNumberId: string,
+): Promise<string | null> {
+  const { data } = await supabase
+    .from('configuracoes')
+    .select('conta_id')
+    .eq('meta_phone_number_id', phoneNumberId)
+    .maybeSingle()
+  return (data?.conta_id as string) ?? null
 }
 
 async function resolverContaPorInstancia(
