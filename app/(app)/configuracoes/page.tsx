@@ -179,6 +179,14 @@ export default function ConfiguracoesPage() {
         </button>
       </form>
 
+      {/* Forms de toggle fora dos forms de credenciais (forms aninhados são inválidos em HTML) */}
+      <form id="form-toggle-meta" action={formActionToggleMeta} className="hidden">
+        <input type="hidden" name="ativo" value={metaAtivo ? 'false' : 'true'} />
+      </form>
+      <form id="form-toggle-twilio" action={formActionToggleTwilio} className="hidden">
+        <input type="hidden" name="ativo" value={twilioAtivo ? 'false' : 'true'} />
+      </form>
+
       {/* ── WhatsApp Business API (Meta) ────────────────────────────────────── */}
       <form action={formActionMeta} className="space-y-6">
         <section className="rounded-2xl border border-border bg-card p-6 space-y-5">
@@ -191,13 +199,10 @@ export default function ConfiguracoesPage() {
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
               {metaConfigurado && (
-                <form action={formActionToggleMeta}>
-                  <input type="hidden" name="ativo" value={metaAtivo ? 'false' : 'true'} />
-                  <button type="submit" title={metaAtivo ? 'Desativar' : 'Ativar'}
-                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${metaAtivo ? 'bg-green-500' : 'bg-muted'}`}>
-                    <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${metaAtivo ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
-                  </button>
-                </form>
+                <button type="submit" form="form-toggle-meta" title={metaAtivo ? 'Desativar' : 'Ativar'}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${metaAtivo ? 'bg-green-500' : 'bg-muted'}`}>
+                  <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${metaAtivo ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
+                </button>
               )}
               {metaConfigurado ? (
                 <span className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium ${metaAtivo ? 'bg-green-500/15 text-green-500' : 'bg-muted text-muted-foreground'}`}>
@@ -311,13 +316,10 @@ export default function ConfiguracoesPage() {
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
               {twilioConfigurado && (
-                <form action={formActionToggleTwilio}>
-                  <input type="hidden" name="ativo" value={twilioAtivo ? 'false' : 'true'} />
-                  <button type="submit" title={twilioAtivo ? 'Desativar' : 'Ativar'}
-                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${twilioAtivo ? 'bg-green-500' : 'bg-muted'}`}>
-                    <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${twilioAtivo ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
-                  </button>
-                </form>
+                <button type="submit" form="form-toggle-twilio" title={twilioAtivo ? 'Desativar' : 'Ativar'}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${twilioAtivo ? 'bg-green-500' : 'bg-muted'}`}>
+                  <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${twilioAtivo ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
+                </button>
               )}
               {twilioConfigurado ? (
                 <span className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium ${twilioAtivo ? 'bg-green-500/15 text-green-500' : 'bg-muted text-muted-foreground'}`}>
