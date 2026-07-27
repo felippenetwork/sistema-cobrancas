@@ -34,8 +34,8 @@ export default function ConfiguracoesPage() {
   const [stateGeral,  formActionGeral,  isPendingGeral]  = useActionState(salvarConfiguracoesAction, { error: null })
   const [stateMeta,   formActionMeta,   isPendingMeta]   = useActionState(salvarMetaApiAction,       { error: null })
   const [stateTwilio,      formActionTwilio,      isPendingTwilio]      = useActionState(salvarTwilioAction,    { error: null })
-  const [, formActionToggleMeta]   = useActionState(toggleMetaApiAction, { error: null })
-  const [, formActionToggleTwilio] = useActionState(toggleTwilioAction,  { error: null })
+  const [stateToggleMeta,   formActionToggleMeta]   = useActionState(toggleMetaApiAction, { error: null })
+  const [stateToggleTwilio, formActionToggleTwilio] = useActionState(toggleTwilioAction,  { error: null })
 
   const [data, setData]                   = useState<Data | null>(null)
   const [localPart, setLocalPart]         = useState('')
@@ -68,9 +68,11 @@ export default function ConfiguracoesPage() {
   }
 
   useEffect(() => { loadData() }, [])
-  useEffect(() => { if (stateGeral.success)  loadData() }, [stateGeral.success])
-  useEffect(() => { if (stateMeta.success)   loadData() }, [stateMeta.success])
-  useEffect(() => { if (stateTwilio.success) loadData() }, [stateTwilio.success])
+  useEffect(() => { if (stateGeral.success)        loadData() }, [stateGeral.success])
+  useEffect(() => { if (stateMeta.success)         loadData() }, [stateMeta.success])
+  useEffect(() => { if (stateTwilio.success)       loadData() }, [stateTwilio.success])
+  useEffect(() => { if (stateToggleMeta.success)   loadData() }, [stateToggleMeta.success])
+  useEffect(() => { if (stateToggleTwilio.success) loadData() }, [stateToggleTwilio.success])
 
   const previewEmail = data?.domain && localPart
     ? `${sanitizarLocalPart(localPart)}@${data.domain}`
