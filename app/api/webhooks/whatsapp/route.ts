@@ -21,9 +21,32 @@ export async function GET(req: NextRequest) {
 // ── Receber mensagens (POST) ──────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   try {
-    const body     = await req.json()
     const contaId  = req.nextUrl.searchParams.get('conta') ?? null
     const supabase = createAdminClient()
+
+    // ── Twilio WhatsApp ───────────────────────────────────────────────────────
+    const contentType = req.headers.get('content-type') ?? ''
+    if (contentType.includes('application/x-www-form-urlencoded')) {
+      const raw        = await req.text()
+      const params     = new URLSearchParams(raw)
+      const from       = (params.get('From') ?? '').replace('whatsapp:+', '').replace(/\D/g, '')
+      const texto      = params.get('Body') ?? ''
+      const waId       = params.get('MessageSid') ?? null
+      const accountSid = params.get('AccountSid') ?? null
+
+      if (!from || !texto) return NextResponse.json({ ok: true })
+
+      const cid = accountSid
+        ? await resolverContaPorTwilioSid(supabase, accountSid)
+        : (contaId ?? await resolverContaPorCelular(supabase, from))
+
+      if (cid) {
+        await salvarMensagem(supabase, { contaId: cid, celular: from, texto, waId, direcao: 'in' })
+      }
+      return NextResponse.json({ ok: true })
+    }
+
+    const body     = await req.json()
 
     // ── Meta Cloud API ────────────────────────────────────────────────────────
     if (body?.object === 'whatsapp_business_account') {
@@ -258,6 +281,18 @@ async function salvarMensagem(
   if (error && error.code !== '23505') {
     console.error('[webhook/whatsapp] salvarMensagem', error, params)
   }
+}
+
+async function resolverContaPorTwilioSid(
+  supabase: ReturnType<typeof createAdminClient>,
+  accountSid: string,
+): Promise<string | null> {
+  const { data } = await supabase
+    .from('configuracoes')
+    .select('conta_id')
+    .eq('twilio_account_sid', accountSid)
+    .maybeSingle()
+  return (data?.conta_id as string) ?? null
 }
 
 async function resolverContaPorMetaPhoneId(

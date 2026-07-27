@@ -2,7 +2,7 @@
 
 import { useActionState, useState, useEffect } from 'react'
 import { Loader2, CheckCircle, Eye, EyeOff, ExternalLink } from 'lucide-react'
-import { salvarConfiguracoesAction, salvarMetaApiAction } from './_actions/configuracoes'
+import { salvarConfiguracoesAction, salvarMetaApiAction, salvarTwilioAction } from './_actions/configuracoes'
 import { sanitizarLocalPart } from '@/lib/email/template'
 import { createClient } from '@/lib/supabase/client'
 
@@ -18,6 +18,9 @@ type Data = {
     meta_access_token?: string | null
     meta_phone_number_id?: string | null
     meta_waba_id?: string | null
+    twilio_account_sid?: string | null
+    twilio_auth_token?: string | null
+    twilio_from_number?: string | null
   } | null
   rem:    { local_part?: string | null; from_name?: string | null } | null
   domain: string | null
@@ -26,13 +29,15 @@ type Data = {
 export const dynamic = 'force-dynamic'
 
 export default function ConfiguracoesPage() {
-  const [stateGeral, formActionGeral, isPendingGeral] = useActionState(salvarConfiguracoesAction, { error: null })
-  const [stateMeta,  formActionMeta,  isPendingMeta]  = useActionState(salvarMetaApiAction,       { error: null })
+  const [stateGeral,  formActionGeral,  isPendingGeral]  = useActionState(salvarConfiguracoesAction, { error: null })
+  const [stateMeta,   formActionMeta,   isPendingMeta]   = useActionState(salvarMetaApiAction,       { error: null })
+  const [stateTwilio, formActionTwilio, isPendingTwilio] = useActionState(salvarTwilioAction,        { error: null })
 
-  const [data, setData]           = useState<Data | null>(null)
-  const [localPart, setLocalPart] = useState('')
-  const [loading, setLoading]     = useState(true)
-  const [showToken, setShowToken] = useState(false)
+  const [data, setData]                   = useState<Data | null>(null)
+  const [localPart, setLocalPart]         = useState('')
+  const [loading, setLoading]             = useState(true)
+  const [showToken, setShowToken]         = useState(false)
+  const [showTwilioToken, setShowTwilioToken] = useState(false)
 
   const loadData = async () => {
     const sb = createClient()
@@ -47,7 +52,7 @@ export default function ConfiguracoesPage() {
 
     const [{ data: cfg }, { data: rem }] = await Promise.all([
       sb.from('configuracoes')
-        .select('contato, cpf_cnpj, endereco, nome_comercial, meta_access_token, meta_phone_number_id, meta_waba_id')
+        .select('contato, cpf_cnpj, endereco, nome_comercial, meta_access_token, meta_phone_number_id, meta_waba_id, twilio_account_sid, twilio_auth_token, twilio_from_number')
         .eq('conta_id', conta.id)
         .maybeSingle(),
       sb.from('email_remetente').select('local_part, from_name').eq('conta_id', conta.id).maybeSingle(),
@@ -59,14 +64,16 @@ export default function ConfiguracoesPage() {
   }
 
   useEffect(() => { loadData() }, [])
-  useEffect(() => { if (stateGeral.success) loadData() }, [stateGeral.success])
-  useEffect(() => { if (stateMeta.success)  loadData() }, [stateMeta.success])
+  useEffect(() => { if (stateGeral.success)  loadData() }, [stateGeral.success])
+  useEffect(() => { if (stateMeta.success)   loadData() }, [stateMeta.success])
+  useEffect(() => { if (stateTwilio.success) loadData() }, [stateTwilio.success])
 
   const previewEmail = data?.domain && localPart
     ? `${sanitizarLocalPart(localPart)}@${data.domain}`
     : null
 
-  const metaConfigurado = !!(data?.cfg?.meta_access_token && data?.cfg?.meta_phone_number_id && data?.cfg?.meta_waba_id)
+  const metaConfigurado    = !!(data?.cfg?.meta_access_token && data?.cfg?.meta_phone_number_id && data?.cfg?.meta_waba_id)
+  const twilioConfigurado  = !!(data?.cfg?.twilio_account_sid && data?.cfg?.twilio_auth_token && data?.cfg?.twilio_from_number)
 
   if (loading) return (
     <div className="flex min-h-[40vh] items-center justify-center p-8">
@@ -270,6 +277,100 @@ export default function ConfiguracoesPage() {
         >
           {isPendingMeta && <Loader2 className="h-4 w-4 animate-spin" />}
           {isPendingMeta ? 'Salvando…' : 'Salvar credenciais Meta'}
+        </button>
+      </form>
+
+      {/* ── Twilio WhatsApp (Sandbox / Produção) ────────────────────────────── */}
+      <form action={formActionTwilio} className="space-y-6">
+        <section className="rounded-2xl border border-border bg-card p-6 space-y-5">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-foreground">Twilio WhatsApp</h2>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Alternativa à Meta API — sandbox para testes ou número próprio em produção.
+              </p>
+            </div>
+            {twilioConfigurado ? (
+              <span className="flex items-center gap-1 rounded-full bg-green-500/15 px-2.5 py-1 text-[11px] font-medium text-green-500">
+                <CheckCircle className="h-3 w-3" />
+                Configurado
+              </span>
+            ) : (
+              <span className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
+                Não configurado
+              </span>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground space-y-1">
+            <p className="font-medium text-foreground">Sandbox (teste):</p>
+            <p>From Number: <span className="font-mono text-foreground">whatsapp:+14155238886</span></p>
+            <p className="pt-1 font-medium text-foreground">Webhook Twilio (configurar em Sandbox Settings):</p>
+            <p className="font-mono text-foreground break-all">
+              {typeof window !== 'undefined' ? window.location.origin : 'https://seu-dominio.com'}/api/webhooks/whatsapp
+            </p>
+          </div>
+
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <label className={LABEL}>Account SID</label>
+              <input
+                name="twilio_account_sid"
+                defaultValue={data?.cfg?.twilio_account_sid ?? ''}
+                placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                className={INPUT}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className={LABEL}>Auth Token</label>
+              <div className="relative">
+                <input
+                  name="twilio_auth_token"
+                  type={showTwilioToken ? 'text' : 'password'}
+                  defaultValue={data?.cfg?.twilio_auth_token ?? ''}
+                  placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                  className={INPUT + ' pr-10'}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowTwilioToken(v => !v)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {showTwilioToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className={LABEL}>From Number</label>
+              <input
+                name="twilio_from_number"
+                defaultValue={data?.cfg?.twilio_from_number ?? ''}
+                placeholder="whatsapp:+14155238886"
+                className={INPUT}
+              />
+              <p className="text-[10px] text-muted-foreground">Sandbox: whatsapp:+14155238886 — produção: whatsapp:+seu-numero-twilio</p>
+            </div>
+          </div>
+        </section>
+
+        {stateTwilio.error && (
+          <p className="rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">{stateTwilio.error}</p>
+        )}
+        {stateTwilio.success && (
+          <p className="flex items-center gap-2 rounded-xl bg-success-bg px-3 py-2 text-sm text-success">
+            <CheckCircle className="h-4 w-4" />
+            Credenciais Twilio salvas.
+          </p>
+        )}
+
+        <button
+          type="submit" disabled={isPendingTwilio}
+          className="flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
+        >
+          {isPendingTwilio && <Loader2 className="h-4 w-4 animate-spin" />}
+          {isPendingTwilio ? 'Salvando…' : 'Salvar credenciais Twilio'}
         </button>
       </form>
     </div>

@@ -20,11 +20,11 @@ export async function enviarRespostaAction(
     if (!celular) return { error: 'Celular inválido.' }
     if (!texto)   return { error: 'Mensagem vazia.' }
 
-    // Busca credenciais Meta + conexão uazapiGO em paralelo
+    // Busca credenciais Meta + Twilio + conexão uazapiGO em paralelo
     const [{ data: cfg }, { data: conexao }] = await Promise.all([
       supabase
         .from('configuracoes')
-        .select('meta_access_token, meta_phone_number_id')
+        .select('meta_access_token, meta_phone_number_id, twilio_account_sid, twilio_auth_token, twilio_from_number')
         .eq('conta_id', contaId)
         .maybeSingle(),
       supabase
@@ -34,7 +34,8 @@ export async function enviarRespostaAction(
         .maybeSingle(),
     ])
 
-    const usarMeta = !!(cfg?.meta_access_token && cfg?.meta_phone_number_id)
+    const usarMeta   = !!(cfg?.meta_access_token && cfg?.meta_phone_number_id)
+    const usarTwilio = !!(cfg?.twilio_account_sid && cfg?.twilio_auth_token && cfg?.twilio_from_number)
 
     if (usarMeta) {
       // ── Envio via Meta Cloud API ────────────────────────────────────────────
@@ -62,10 +63,35 @@ export async function enviarRespostaAction(
         return { error: msg }
       }
 
+    } else if (usarTwilio) {
+      // ── Envio via Twilio ────────────────────────────────────────────────────
+      const sid   = cfg.twilio_account_sid!
+      const token = cfg.twilio_auth_token!
+      const from  = cfg.twilio_from_number!
+      const to    = `whatsapp:+${celular}`
+
+      const res = await fetch(
+        `https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            Authorization:  `Basic ${Buffer.from(`${sid}:${token}`).toString('base64')}`,
+          },
+          body: new URLSearchParams({ From: from, To: to, Body: texto }).toString(),
+        },
+      )
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        const msg  = body?.message ?? `Erro Twilio: ${res.status}`
+        return { error: msg }
+      }
+
     } else {
       // ── Fallback: uazapiGO ─────────────────────────────────────────────────
       if (!conexao?.uazapi_instance_token || conexao.status !== 'conectado') {
-        return { error: 'WhatsApp não está conectado. Configure a API Meta ou verifique a conexão.' }
+        return { error: 'WhatsApp não está conectado. Configure Meta API, Twilio ou verifique a conexão.' }
       }
 
       const uazapiUrl = process.env.UAZAPI_URL?.replace(/\/$/, '')
