@@ -1,6 +1,6 @@
 'use client'
 
-import { useActionState, useState, useEffect, useTransition } from 'react'
+import { useActionState, useState, useEffect, useTransition, useRef } from 'react'
 import { Loader2, CheckCircle, Eye, EyeOff, ExternalLink } from 'lucide-react'
 import { salvarConfiguracoesAction, salvarMetaApiAction, salvarTwilioAction, toggleMetaApiAction, toggleTwilioAction } from './_actions/configuracoes'
 import { sanitizarLocalPart } from '@/lib/email/template'
@@ -44,8 +44,15 @@ export default function ConfiguracoesPage() {
   const [showTwilioToken, setShowTwilioToken] = useState(false)
   const [overrideMetaAtivo, setOverrideMetaAtivo]     = useState<boolean | null>(null)
   const [overrideTwilioAtivo, setOverrideTwilioAtivo] = useState<boolean | null>(null)
+  const scrollSaveRef = useRef(0)
 
-  const loadData = async () => {
+  const SCROLL_KEY = 'cfg-scroll-y'
+
+  const loadData = async (preserveScroll = false) => {
+    if (preserveScroll && typeof window !== 'undefined') {
+      scrollSaveRef.current = window.scrollY
+    }
+
     const sb = createClient()
     const { data: { user } } = await sb.auth.getUser()
     if (!user) return
@@ -67,12 +74,37 @@ export default function ConfiguracoesPage() {
     setData({ cfg, rem, domain: plat?.dominio_email_operador ?? null })
     setLocalPart(rem?.local_part ?? '')
     setLoading(false)
+
+    if (preserveScroll && scrollSaveRef.current > 0) {
+      requestAnimationFrame(() => window.scrollTo({ top: scrollSaveRef.current, behavior: 'instant' }))
+    }
   }
 
+  // Carga inicial
   useEffect(() => { loadData() }, [])
-  useEffect(() => { if (stateGeral.success)  loadData() }, [stateGeral.success])
-  useEffect(() => { if (stateMeta.success)   loadData() }, [stateMeta.success])
-  useEffect(() => { if (stateTwilio.success) loadData() }, [stateTwilio.success])
+
+  // Salvar posição no F5/navegação
+  useEffect(() => {
+    const save = () => sessionStorage.setItem(SCROLL_KEY, String(window.scrollY))
+    window.addEventListener('beforeunload', save)
+    return () => window.removeEventListener('beforeunload', save)
+  }, [])
+
+  // Restaurar posição após carregar dados (cobrindo F5 e navegação de volta)
+  useEffect(() => {
+    if (!loading) {
+      const saved = sessionStorage.getItem(SCROLL_KEY)
+      if (saved) {
+        sessionStorage.removeItem(SCROLL_KEY)
+        requestAnimationFrame(() => window.scrollTo({ top: parseInt(saved), behavior: 'instant' }))
+      }
+    }
+  }, [loading])
+
+  // Recargas após salvar — preservando posição de scroll
+  useEffect(() => { if (stateGeral.success)  loadData(true) }, [stateGeral.success])
+  useEffect(() => { if (stateMeta.success)   loadData(true) }, [stateMeta.success])
+  useEffect(() => { if (stateTwilio.success) loadData(true) }, [stateTwilio.success])
 
   const previewEmail = data?.domain && localPart
     ? `${sanitizarLocalPart(localPart)}@${data.domain}`
@@ -202,7 +234,7 @@ export default function ConfiguracoesPage() {
                       const fd = new FormData()
                       fd.append('ativo', String(novo))
                       await toggleMetaApiAction({ error: null }, fd)
-                      await loadData()
+                      await loadData(true)
                       setOverrideMetaAtivo(null)
                     })
                   }}
@@ -333,7 +365,7 @@ export default function ConfiguracoesPage() {
                       const fd = new FormData()
                       fd.append('ativo', String(novo))
                       await toggleTwilioAction({ error: null }, fd)
-                      await loadData()
+                      await loadData(true)
                       setOverrideTwilioAtivo(null)
                     })
                   }}
