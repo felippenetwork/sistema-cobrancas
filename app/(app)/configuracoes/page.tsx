@@ -2,7 +2,7 @@
 
 import { useActionState, useState, useEffect } from 'react'
 import { Loader2, CheckCircle, Eye, EyeOff, ExternalLink } from 'lucide-react'
-import { salvarConfiguracoesAction, salvarMetaApiAction, salvarTwilioAction } from './_actions/configuracoes'
+import { salvarConfiguracoesAction, salvarMetaApiAction, salvarTwilioAction, toggleMetaApiAction, toggleTwilioAction } from './_actions/configuracoes'
 import { sanitizarLocalPart } from '@/lib/email/template'
 import { createClient } from '@/lib/supabase/client'
 
@@ -16,9 +16,11 @@ type Data = {
     endereco?: string | null
     nome_comercial?: string | null
     meta_access_token?: string | null
+    meta_api_ativo?: boolean | null
     meta_phone_number_id?: string | null
     meta_waba_id?: string | null
     twilio_account_sid?: string | null
+    twilio_ativo?: boolean | null
     twilio_auth_token?: string | null
     twilio_from_number?: string | null
   } | null
@@ -31,7 +33,9 @@ export const dynamic = 'force-dynamic'
 export default function ConfiguracoesPage() {
   const [stateGeral,  formActionGeral,  isPendingGeral]  = useActionState(salvarConfiguracoesAction, { error: null })
   const [stateMeta,   formActionMeta,   isPendingMeta]   = useActionState(salvarMetaApiAction,       { error: null })
-  const [stateTwilio, formActionTwilio, isPendingTwilio] = useActionState(salvarTwilioAction,        { error: null })
+  const [stateTwilio,      formActionTwilio,      isPendingTwilio]      = useActionState(salvarTwilioAction,    { error: null })
+  const [, formActionToggleMeta]   = useActionState(toggleMetaApiAction, { error: null })
+  const [, formActionToggleTwilio] = useActionState(toggleTwilioAction,  { error: null })
 
   const [data, setData]                   = useState<Data | null>(null)
   const [localPart, setLocalPart]         = useState('')
@@ -52,7 +56,7 @@ export default function ConfiguracoesPage() {
 
     const [{ data: cfg }, { data: rem }] = await Promise.all([
       sb.from('configuracoes')
-        .select('contato, cpf_cnpj, endereco, nome_comercial, meta_access_token, meta_phone_number_id, meta_waba_id, twilio_account_sid, twilio_auth_token, twilio_from_number')
+        .select('contato, cpf_cnpj, endereco, nome_comercial, meta_access_token, meta_api_ativo, meta_phone_number_id, meta_waba_id, twilio_account_sid, twilio_ativo, twilio_auth_token, twilio_from_number')
         .eq('conta_id', conta.id)
         .maybeSingle(),
       sb.from('email_remetente').select('local_part, from_name').eq('conta_id', conta.id).maybeSingle(),
@@ -72,8 +76,10 @@ export default function ConfiguracoesPage() {
     ? `${sanitizarLocalPart(localPart)}@${data.domain}`
     : null
 
-  const metaConfigurado    = !!(data?.cfg?.meta_access_token && data?.cfg?.meta_phone_number_id && data?.cfg?.meta_waba_id)
-  const twilioConfigurado  = !!(data?.cfg?.twilio_account_sid && data?.cfg?.twilio_auth_token && data?.cfg?.twilio_from_number)
+  const metaConfigurado   = !!(data?.cfg?.meta_access_token && data?.cfg?.meta_phone_number_id && data?.cfg?.meta_waba_id)
+  const twilioConfigurado = !!(data?.cfg?.twilio_account_sid && data?.cfg?.twilio_auth_token && data?.cfg?.twilio_from_number)
+  const metaAtivo         = data?.cfg?.meta_api_ativo !== false
+  const twilioAtivo       = data?.cfg?.twilio_ativo !== false
 
   if (loading) return (
     <div className="flex min-h-[40vh] items-center justify-center p-8">
@@ -181,16 +187,27 @@ export default function ConfiguracoesPage() {
                 API oficial Meta Cloud — envio, recebimento e templates aprovados.
               </p>
             </div>
-            {metaConfigurado ? (
-              <span className="flex items-center gap-1 rounded-full bg-green-500/15 px-2.5 py-1 text-[11px] font-medium text-green-500">
-                <CheckCircle className="h-3 w-3" />
-                Configurado
-              </span>
-            ) : (
-              <span className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
-                Não configurado
-              </span>
-            )}
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {metaConfigurado && (
+                <form action={formActionToggleMeta}>
+                  <input type="hidden" name="ativo" value={metaAtivo ? 'false' : 'true'} />
+                  <button type="submit" title={metaAtivo ? 'Desativar' : 'Ativar'}
+                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${metaAtivo ? 'bg-green-500' : 'bg-muted'}`}>
+                    <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${metaAtivo ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
+                  </button>
+                </form>
+              )}
+              {metaConfigurado ? (
+                <span className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium ${metaAtivo ? 'bg-green-500/15 text-green-500' : 'bg-muted text-muted-foreground'}`}>
+                  <CheckCircle className="h-3 w-3" />
+                  {metaAtivo ? 'Ativo' : 'Desativado'}
+                </span>
+              ) : (
+                <span className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
+                  Não configurado
+                </span>
+              )}
+            </div>
           </div>
 
           {/* Guia de onde encontrar as credenciais */}
@@ -290,16 +307,27 @@ export default function ConfiguracoesPage() {
                 Alternativa à Meta API — sandbox para testes ou número próprio em produção.
               </p>
             </div>
-            {twilioConfigurado ? (
-              <span className="flex items-center gap-1 rounded-full bg-green-500/15 px-2.5 py-1 text-[11px] font-medium text-green-500">
-                <CheckCircle className="h-3 w-3" />
-                Configurado
-              </span>
-            ) : (
-              <span className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
-                Não configurado
-              </span>
-            )}
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {twilioConfigurado && (
+                <form action={formActionToggleTwilio}>
+                  <input type="hidden" name="ativo" value={twilioAtivo ? 'false' : 'true'} />
+                  <button type="submit" title={twilioAtivo ? 'Desativar' : 'Ativar'}
+                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${twilioAtivo ? 'bg-green-500' : 'bg-muted'}`}>
+                    <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${twilioAtivo ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
+                  </button>
+                </form>
+              )}
+              {twilioConfigurado ? (
+                <span className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium ${twilioAtivo ? 'bg-green-500/15 text-green-500' : 'bg-muted text-muted-foreground'}`}>
+                  <CheckCircle className="h-3 w-3" />
+                  {twilioAtivo ? 'Ativo' : 'Desativado'}
+                </span>
+              ) : (
+                <span className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
+                  Não configurado
+                </span>
+              )}
+            </div>
           </div>
 
           <div className="rounded-xl border border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground space-y-1">

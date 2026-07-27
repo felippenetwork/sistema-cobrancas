@@ -252,10 +252,12 @@ export type Database = {
           intervalo_max_seg: number
           intervalo_min_seg: number
           meta_access_token: string | null
+          meta_api_ativo: boolean
           meta_phone_number_id: string | null
           meta_waba_id: string | null
           nome_comercial: string | null
           twilio_account_sid: string | null
+          twilio_ativo: boolean
           twilio_auth_token: string | null
           twilio_from_number: string | null
           updated_at: string
@@ -270,10 +272,12 @@ export type Database = {
           intervalo_max_seg?: number
           intervalo_min_seg?: number
           meta_access_token?: string | null
+          meta_api_ativo?: boolean
           meta_phone_number_id?: string | null
           meta_waba_id?: string | null
           nome_comercial?: string | null
           twilio_account_sid?: string | null
+          twilio_ativo?: boolean
           twilio_auth_token?: string | null
           twilio_from_number?: string | null
           updated_at?: string
@@ -288,10 +292,12 @@ export type Database = {
           intervalo_max_seg?: number
           intervalo_min_seg?: number
           meta_access_token?: string | null
+          meta_api_ativo?: boolean
           meta_phone_number_id?: string | null
           meta_waba_id?: string | null
           nome_comercial?: string | null
           twilio_account_sid?: string | null
+          twilio_ativo?: boolean
           twilio_auth_token?: string | null
           twilio_from_number?: string | null
           updated_at?: string

@@ -24,7 +24,7 @@ export async function enviarRespostaAction(
     const [{ data: cfg }, { data: conexao }] = await Promise.all([
       supabase
         .from('configuracoes')
-        .select('meta_access_token, meta_phone_number_id, twilio_account_sid, twilio_auth_token, twilio_from_number')
+        .select('meta_access_token, meta_phone_number_id, meta_api_ativo, twilio_account_sid, twilio_auth_token, twilio_from_number, twilio_ativo')
         .eq('conta_id', contaId)
         .maybeSingle(),
       supabase
@@ -34,8 +34,8 @@ export async function enviarRespostaAction(
         .maybeSingle(),
     ])
 
-    const usarMeta   = !!(cfg?.meta_access_token && cfg?.meta_phone_number_id)
-    const usarTwilio = !!(cfg?.twilio_account_sid && cfg?.twilio_auth_token && cfg?.twilio_from_number)
+    const usarMeta   = !!(cfg?.meta_api_ativo !== false && cfg?.meta_access_token && cfg?.meta_phone_number_id)
+    const usarTwilio = !!(cfg?.twilio_ativo !== false && cfg?.twilio_account_sid && cfg?.twilio_auth_token && cfg?.twilio_from_number)
 
     if (usarMeta) {
       // ── Envio via Meta Cloud API ────────────────────────────────────────────

@@ -16,6 +16,37 @@ async function getConta() {
   return { supabase, contaId: conta.id as string }
 }
 
+// ── Toggles de provedor ──────────────────────────────────────────────────────
+export async function toggleMetaApiAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  try {
+    const { supabase, contaId } = await getConta()
+    const ativo = formData.get('ativo') === 'true'
+    const { error } = await supabase
+      .from('configuracoes')
+      .upsert({ conta_id: contaId, meta_api_ativo: ativo }, { onConflict: 'conta_id' })
+    if (error) return { error: error.message }
+    revalidatePath('/configuracoes')
+    return { error: null, success: true }
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'Erro desconhecido.' }
+  }
+}
+
+export async function toggleTwilioAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  try {
+    const { supabase, contaId } = await getConta()
+    const ativo = formData.get('ativo') === 'true'
+    const { error } = await supabase
+      .from('configuracoes')
+      .upsert({ conta_id: contaId, twilio_ativo: ativo }, { onConflict: 'conta_id' })
+    if (error) return { error: error.message }
+    revalidatePath('/configuracoes')
+    return { error: null, success: true }
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'Erro desconhecido.' }
+  }
+}
+
 // ── Salvar credenciais Twilio WhatsApp ───────────────────────────────────────
 export async function salvarTwilioAction(
   _prev: ActionState,
