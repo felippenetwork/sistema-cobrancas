@@ -1,6 +1,6 @@
 'use client'
 
-import { useActionState, useState, useEffect } from 'react'
+import { useActionState, useState, useEffect, useTransition } from 'react'
 import { Loader2, CheckCircle, Eye, EyeOff, ExternalLink } from 'lucide-react'
 import { salvarConfiguracoesAction, salvarMetaApiAction, salvarTwilioAction, toggleMetaApiAction, toggleTwilioAction } from './_actions/configuracoes'
 import { sanitizarLocalPart } from '@/lib/email/template'
@@ -34,14 +34,16 @@ export default function ConfiguracoesPage() {
   const [stateGeral,  formActionGeral,  isPendingGeral]  = useActionState(salvarConfiguracoesAction, { error: null })
   const [stateMeta,   formActionMeta,   isPendingMeta]   = useActionState(salvarMetaApiAction,       { error: null })
   const [stateTwilio,      formActionTwilio,      isPendingTwilio]      = useActionState(salvarTwilioAction,    { error: null })
-  const [stateToggleMeta,   formActionToggleMeta]   = useActionState(toggleMetaApiAction, { error: null })
-  const [stateToggleTwilio, formActionToggleTwilio] = useActionState(toggleTwilioAction,  { error: null })
+  const [, startToggleMeta]   = useTransition()
+  const [, startToggleTwilio] = useTransition()
 
   const [data, setData]                   = useState<Data | null>(null)
   const [localPart, setLocalPart]         = useState('')
   const [loading, setLoading]             = useState(true)
   const [showToken, setShowToken]         = useState(false)
   const [showTwilioToken, setShowTwilioToken] = useState(false)
+  const [overrideMetaAtivo, setOverrideMetaAtivo]     = useState<boolean | null>(null)
+  const [overrideTwilioAtivo, setOverrideTwilioAtivo] = useState<boolean | null>(null)
 
   const loadData = async () => {
     const sb = createClient()
@@ -68,11 +70,9 @@ export default function ConfiguracoesPage() {
   }
 
   useEffect(() => { loadData() }, [])
-  useEffect(() => { if (stateGeral.success)        loadData() }, [stateGeral.success])
-  useEffect(() => { if (stateMeta.success)         loadData() }, [stateMeta.success])
-  useEffect(() => { if (stateTwilio.success)       loadData() }, [stateTwilio.success])
-  useEffect(() => { if (stateToggleMeta.success)   loadData() }, [stateToggleMeta.success])
-  useEffect(() => { if (stateToggleTwilio.success) loadData() }, [stateToggleTwilio.success])
+  useEffect(() => { if (stateGeral.success)  loadData() }, [stateGeral.success])
+  useEffect(() => { if (stateMeta.success)   loadData() }, [stateMeta.success])
+  useEffect(() => { if (stateTwilio.success) loadData() }, [stateTwilio.success])
 
   const previewEmail = data?.domain && localPart
     ? `${sanitizarLocalPart(localPart)}@${data.domain}`
@@ -80,8 +80,8 @@ export default function ConfiguracoesPage() {
 
   const metaConfigurado   = !!(data?.cfg?.meta_access_token && data?.cfg?.meta_phone_number_id && data?.cfg?.meta_waba_id)
   const twilioConfigurado = !!(data?.cfg?.twilio_account_sid && data?.cfg?.twilio_auth_token && data?.cfg?.twilio_from_number)
-  const metaAtivo         = data?.cfg?.meta_api_ativo !== false
-  const twilioAtivo       = data?.cfg?.twilio_ativo !== false
+  const metaAtivo         = overrideMetaAtivo   !== null ? overrideMetaAtivo   : (data?.cfg?.meta_api_ativo !== false)
+  const twilioAtivo       = overrideTwilioAtivo !== null ? overrideTwilioAtivo : (data?.cfg?.twilio_ativo   !== false)
 
   if (loading) return (
     <div className="flex min-h-[40vh] items-center justify-center p-8">
@@ -179,13 +179,6 @@ export default function ConfiguracoesPage() {
         </button>
       </form>
 
-      {/* Forms de toggle fora dos forms de credenciais (forms aninhados são inválidos em HTML) */}
-      <form id="form-toggle-meta" action={formActionToggleMeta} className="hidden">
-        <input type="hidden" name="ativo" value={metaAtivo ? 'false' : 'true'} />
-      </form>
-      <form id="form-toggle-twilio" action={formActionToggleTwilio} className="hidden">
-        <input type="hidden" name="ativo" value={twilioAtivo ? 'false' : 'true'} />
-      </form>
 
       {/* ── WhatsApp Business API (Meta) ────────────────────────────────────── */}
       <form action={formActionMeta} className="space-y-6">
@@ -199,8 +192,22 @@ export default function ConfiguracoesPage() {
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
               {metaConfigurado && (
-                <button type="submit" form="form-toggle-meta" title={metaAtivo ? 'Desativar' : 'Ativar'}
-                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${metaAtivo ? 'bg-green-500' : 'bg-muted'}`}>
+                <button
+                  type="button"
+                  title={metaAtivo ? 'Desativar' : 'Ativar'}
+                  onClick={() => {
+                    const novo = !metaAtivo
+                    setOverrideMetaAtivo(novo)
+                    startToggleMeta(async () => {
+                      const fd = new FormData()
+                      fd.append('ativo', String(novo))
+                      await toggleMetaApiAction({ error: null }, fd)
+                      await loadData()
+                      setOverrideMetaAtivo(null)
+                    })
+                  }}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${metaAtivo ? 'bg-green-500' : 'bg-muted'}`}
+                >
                   <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${metaAtivo ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
                 </button>
               )}
@@ -316,8 +323,22 @@ export default function ConfiguracoesPage() {
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
               {twilioConfigurado && (
-                <button type="submit" form="form-toggle-twilio" title={twilioAtivo ? 'Desativar' : 'Ativar'}
-                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${twilioAtivo ? 'bg-green-500' : 'bg-muted'}`}>
+                <button
+                  type="button"
+                  title={twilioAtivo ? 'Desativar' : 'Ativar'}
+                  onClick={() => {
+                    const novo = !twilioAtivo
+                    setOverrideTwilioAtivo(novo)
+                    startToggleTwilio(async () => {
+                      const fd = new FormData()
+                      fd.append('ativo', String(novo))
+                      await toggleTwilioAction({ error: null }, fd)
+                      await loadData()
+                      setOverrideTwilioAtivo(null)
+                    })
+                  }}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${twilioAtivo ? 'bg-green-500' : 'bg-muted'}`}
+                >
                   <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${twilioAtivo ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
                 </button>
               )}
