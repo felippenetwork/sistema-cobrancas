@@ -58,10 +58,12 @@ export async function POST(req: NextRequest) {
 
           // Resolve a conta pelo phone_number_id do metadata da Meta
           const phoneId = value.metadata?.phone_number_id as string | undefined
+          console.log('[webhook/meta] phone_number_id recebido:', phoneId, '| from:', msgs[0]?.from)
           const cid     = phoneId
             ? await resolverContaPorMetaPhoneId(supabase, phoneId)
             : (contaId ?? await resolverContaPorCelular(supabase, msgs[0]?.from ?? ''))
 
+          console.log('[webhook/meta] conta resolvida:', cid)
           if (!cid) continue
 
           for (const msg of msgs) {
