@@ -10,15 +10,47 @@ export const maxDuration = 300
 const TIPOS_SEM_JANELA = new Set(['pagamento_confirmado', 'boasvindas', 'manual', 'agendada'])
 
 // Templates aprovados na Meta — mapeados por tipo de notificação
-const META_TEMPLATES: Record<string, { nome: string; idioma: string; params: 2 | 3 }> = {
-  '5d':                   { nome: 'cobranca_5d',          idioma: 'pt_BR', params: 3 },
-  '3d':                   { nome: 'cobranca_3d',          idioma: 'en',    params: 3 },
-  '2d':                   { nome: 'cobranca_2d',          idioma: 'pt_BR', params: 3 },
-  '1d':                   { nome: 'cobranca_1d',          idioma: 'pt_BR', params: 3 },
-  'dia':                  { nome: 'cobranca_dia',         idioma: 'pt_BR', params: 3 },
-  'vencido1d':            { nome: 'cobranca_vencido',     idioma: 'pt_BR', params: 3 },
-  'pagamento_confirmado': { nome: 'pagamento_confirmado', idioma: 'pt_BR', params: 2 },
-  'boasvindas':           { nome: 'boasvindas',           idioma: 'pt_BR', params: 3 },
+// `corpo` é usado para reconstruir o texto legível salvo em mensagens_wa
+const META_TEMPLATES: Record<string, { nome: string; idioma: string; params: 2 | 3; corpo: string }> = {
+  '5d': {
+    nome: 'cobranca_5d', idioma: 'pt_BR', params: 3,
+    corpo: 'Olá, *{{1}}*! Sua fatura de *{{2}}* vence em *5 dias* ({{3}}). Para dúvidas, responda esta mensagem.',
+  },
+  '3d': {
+    nome: 'cobranca_3d', idioma: 'en', params: 3,
+    corpo: 'Olá, *{{1}}*! Sua fatura de *{{2}}* vence em *3 dias* ({{3}}). Para dúvidas, responda esta mensagem.',
+  },
+  '2d': {
+    nome: 'cobranca_2d', idioma: 'pt_BR', params: 3,
+    corpo: 'Olá, *{{1}}*! Sua fatura de *{{2}}* vence em *2 dias* ({{3}}). Não se esqueça de pagar!',
+  },
+  '1d': {
+    nome: 'cobranca_1d', idioma: 'pt_BR', params: 3,
+    corpo: 'Olá, *{{1}}*! Sua fatura de *{{2}}* vence *amanhã* ({{3}}). Pague hoje para evitar juros.',
+  },
+  'dia': {
+    nome: 'cobranca_dia', idioma: 'pt_BR', params: 3,
+    corpo: 'Olá, *{{1}}*! Sua fatura de *{{2}}* vence *hoje* ({{3}}). Pague agora para evitar juros.',
+  },
+  'vencido1d': {
+    nome: 'cobranca_vencido', idioma: 'pt_BR', params: 3,
+    corpo: 'Olá, *{{1}}*! Sua fatura de *{{2}}* venceu ontem ({{3}}). Regularize o quanto antes para evitar cobrança adicional.',
+  },
+  'pagamento_confirmado': {
+    nome: 'pagamento_confirmado', idioma: 'pt_BR', params: 2,
+    corpo: '🥳 Renovado com sucesso 🥳\n\nMuito obrigado Sr.(Sra.) *{{1}}*! Recebemos seu pagamento de *{{2}}*.\n\n🥳 Qualquer dúvida ou problema só me enviar mensagem. 🥳',
+  },
+  'boasvindas': {
+    nome: 'boasvindas', idioma: 'pt_BR', params: 3,
+    corpo: '🎉 Ativado com sucesso 🎉\n\nMuito obrigado Sr.(Sra.) *{{1}}*! Sua primeira fatura de *{{2}}* vence em *{{3}}*.\n\n🤩 Estaremos sempre à disposição para melhor lhe atender. 🤩',
+  },
+}
+
+function reconstruirTexto(corpo: string, parametros: string[]): string {
+  return corpo
+    .replace('{{1}}', parametros[0] ?? '')
+    .replace('{{2}}', parametros[1] ?? '')
+    .replace('{{3}}', parametros[2] ?? '')
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -174,14 +206,45 @@ async function processarNotificacao(
   const nome = ((cliente as any).nome as string) || 'Cliente'
   const parametros = tmpl.params === 2 ? [nome, valor] : [nome, valor, data]
 
+  const textoMensagem = reconstruirTexto(tmpl.corpo, parametros)
+
   try {
     await enviarTemplate(metaPhoneId, metaToken, celular, tmpl.nome, tmpl.idioma, parametros)
 
+    const agora = new Date().toISOString()
+
+    // Marcar notificação como enviada
     await supabase.from('notificacoes_enviadas').update({
       status:         'enviado',
-      mensagem_final: parametros.join(' | '),
-      enviado_em:     new Date().toISOString(),
+      mensagem_final: textoMensagem,
+      enviado_em:     agora,
     }).eq('id', notif.id).eq('status', 'fila')
+
+    // Salvar em mensagens_wa para aparecer no atendimento
+    const { data: atendimento } = await supabase
+      .from('atendimentos')
+      .select('id')
+      .eq('conta_id', notif.conta_id)
+      .eq('celular', celular)
+      .neq('status', 'finalizado')
+      .maybeSingle()
+
+    await supabase.from('mensagens_wa').insert({
+      conta_id:       notif.conta_id,
+      cliente_id:     notif.cliente_id,
+      atendimento_id: atendimento?.id ?? null,
+      celular,
+      direcao:        'out',
+      texto:          textoMensagem,
+      lida:           true,
+    })
+
+    // Atualizar última mensagem do atendimento se existir
+    if (atendimento?.id) {
+      await supabase.from('atendimentos')
+        .update({ ultima_mensagem: textoMensagem, ultima_msg_em: agora })
+        .eq('id', atendimento.id)
+    }
 
     return 'enviado'
 
