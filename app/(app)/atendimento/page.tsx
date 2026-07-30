@@ -6,7 +6,7 @@ import {
 import {
   ArrowLeft, Send, MessageSquare, Clock, CheckCircle, XCircle,
   ArrowRightLeft, Inbox, History, Plus, Search, User, Pencil,
-  ChevronRight, Phone, Mail, X, Loader2,
+  ChevronRight, Phone, Mail, X, Loader2, RefreshCw,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import {
@@ -214,13 +214,14 @@ function ModalTransferir({
 
 function ModalTemplatePicker({
   templates, carregandoTemplates, erroTemplates,
-  onEnviar, onFechar, carregandoEnvio, erroEnvio,
+  onEnviar, onFechar, onAtualizar, carregandoEnvio, erroEnvio,
 }: {
   templates: MetaTemplate[]
   carregandoTemplates: boolean
   erroTemplates: string | null
   onEnviar: (tmpl: MetaTemplate) => void
   onFechar: () => void
+  onAtualizar: () => void
   carregandoEnvio: boolean
   erroEnvio: string | null
 }) {
@@ -240,9 +241,19 @@ function ModalTemplatePicker({
             <h2 className="text-sm font-semibold text-foreground">Iniciar conversa</h2>
             <p className="text-xs text-muted-foreground">Cobrado pela Meta por conversa iniciada</p>
           </div>
-          <button onClick={onFechar} className="rounded p-1.5 text-muted-foreground hover:text-foreground">
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={onAtualizar}
+              disabled={carregandoTemplates}
+              title="Atualizar templates da Meta"
+              className="rounded p-1.5 text-muted-foreground hover:text-foreground disabled:opacity-40"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${carregandoTemplates ? 'animate-spin' : ''}`} />
+            </button>
+            <button onClick={onFechar} className="rounded p-1.5 text-muted-foreground hover:text-foreground">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
         <div className="max-h-64 overflow-y-auto space-y-1 p-3">
@@ -252,7 +263,15 @@ function ModalTemplatePicker({
               Carregando templates…
             </div>
           ) : erroTemplates ? (
-            <p className="py-6 text-center text-xs text-destructive">{erroTemplates}</p>
+            <div className="py-4 text-center">
+              <p className="text-xs text-destructive">{erroTemplates}</p>
+              <button
+                onClick={onAtualizar}
+                className="mt-3 flex items-center gap-1.5 mx-auto rounded-xl border border-border px-3 py-2 text-xs text-muted-foreground hover:bg-accent"
+              >
+                <RefreshCw className="h-3 w-3" /> Tentar novamente
+              </button>
+            </div>
           ) : templates.length === 0 ? (
             <p className="py-6 text-center text-xs text-muted-foreground">
               Nenhum template aprovado encontrado.
@@ -318,12 +337,14 @@ function ModalNovaConversa({
   carregandoTemplates,
   onEnviar,
   onFechar,
+  onAtualizar,
 }: {
   contaId: string
   templates: MetaTemplate[]
   carregandoTemplates: boolean
   onEnviar: (celular: string, clienteId: string | null, tmpl: MetaTemplate) => void
   onFechar: () => void
+  onAtualizar: () => void
 }) {
   const sb = createClient()
 
@@ -405,9 +426,21 @@ function ModalNovaConversa({
               )}
             </div>
           </div>
-          <button onClick={onFechar} className="rounded p-1.5 text-muted-foreground hover:text-foreground">
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex items-center gap-1">
+            {step === 2 && (
+              <button
+                onClick={onAtualizar}
+                disabled={carregandoTemplates}
+                title="Atualizar templates da Meta"
+                className="rounded p-1.5 text-muted-foreground hover:text-foreground disabled:opacity-40"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${carregandoTemplates ? 'animate-spin' : ''}`} />
+              </button>
+            )}
+            <button onClick={onFechar} className="rounded p-1.5 text-muted-foreground hover:text-foreground">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
         {/* Etapa 1: Busca */}
@@ -794,12 +827,12 @@ export default function AtendimentoPage() {
 
   // ── Carregar templates da Meta ────────────────────────────────────────────────
 
-  async function carregarTemplates() {
-    if (metaTemplates.length > 0) return  // já carregados
+  async function carregarTemplates(force = false) {
+    if (!force && metaTemplates.length > 0) return  // já carregados
     setCarregandoTemplates(true)
     setErroTemplates(null)
     try {
-      const res  = await fetch('/api/meta/templates')
+      const res  = await fetch('/api/meta/templates?status=APPROVED', { cache: 'no-store' })
       const json = await res.json()
       if (json.templates) setMetaTemplates(json.templates)
       else setErroTemplates(json.error ?? 'Erro ao carregar templates.')
@@ -1031,6 +1064,7 @@ export default function AtendimentoPage() {
           erroTemplates={erroTemplates}
           onEnviar={handleEnviarTemplate}
           onFechar={() => { setMostrarTemplatePicker(false); setTemplateErro(null) }}
+          onAtualizar={() => { setMetaTemplates([]); carregarTemplates(true) }}
           carregandoEnvio={enviandoTemplate}
           erroEnvio={templateErro}
         />
@@ -1053,6 +1087,7 @@ export default function AtendimentoPage() {
           carregandoTemplates={carregandoTemplates || iniciandoConversa}
           onEnviar={handleIniciarConversa}
           onFechar={() => setMostrarNovaConversa(false)}
+          onAtualizar={() => { setMetaTemplates([]); carregarTemplates(true) }}
         />
       )}
 
