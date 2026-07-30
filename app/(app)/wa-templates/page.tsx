@@ -30,11 +30,20 @@ export default async function WaTemplatesPage() {
 
   if (!contaId) redirect('/login')
 
-  const { data: modelos } = await supabase
-    .from('modelos_wa')
-    .select('id, nome, categoria, idioma, corpo, cabecalho, rodape, status, meta_template_id, criado_em, atualizado_em')
-    .eq('conta_id', contaId)
-    .order('criado_em', { ascending: false })
+  const [{ data: modelos }, { data: cfg }] = await Promise.all([
+    supabase
+      .from('modelos_wa')
+      .select('id, nome, categoria, idioma, corpo, cabecalho, rodape, status, meta_template_id, criado_em, atualizado_em')
+      .eq('conta_id', contaId)
+      .order('criado_em', { ascending: false }),
+    supabase
+      .from('configuracoes')
+      .select('meta_api_ativo, meta_access_token, meta_phone_number_id')
+      .eq('conta_id', contaId)
+      .maybeSingle(),
+  ])
 
-  return <TemplatesClient modelos={modelos ?? []} />
+  const metaConfigurada = !!(cfg?.meta_api_ativo && cfg?.meta_access_token && cfg?.meta_phone_number_id)
+
+  return <TemplatesClient modelos={modelos ?? []} metaConfigurada={metaConfigurada} />
 }

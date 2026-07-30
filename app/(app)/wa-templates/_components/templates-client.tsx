@@ -275,7 +275,7 @@ function ModalVerTemplate({ modelo, onFechar }: { modelo: Modelo; onFechar: () =
 
 // ── Componente principal ──────────────────────────────────────────────────────
 
-export function TemplatesClient({ modelos }: { modelos: Modelo[] }) {
+export function TemplatesClient({ modelos, metaConfigurada }: { modelos: Modelo[]; metaConfigurada: boolean }) {
   const [modalNovo, setModalNovo] = useState(false)
   const [modeloVer, setModeloVer] = useState<Modelo | null>(null)
 
@@ -306,12 +306,17 @@ export function TemplatesClient({ modelos }: { modelos: Modelo[] }) {
           </button>
         </div>
 
-        {/* Aviso */}
-        <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 px-4 py-3.5">
-          <p className="text-sm text-amber-600 dark:text-amber-400">
-            <strong>API Meta não configurada.</strong> Configure em Configurações → WhatsApp Business API.
-          </p>
-        </div>
+        {/* Aviso — só aparece quando Meta não está configurada */}
+        {!metaConfigurada && (
+          <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 px-4 py-3.5">
+            <p className="text-sm text-amber-600 dark:text-amber-400">
+              <strong>API Meta não configurada.</strong>{' '}
+              <a href="/configuracoes" className="underline underline-offset-2 hover:opacity-80">
+                Configure em Configurações → WhatsApp Business API.
+              </a>
+            </p>
+          </div>
+        )}
 
         {/* Lista */}
         {modelos.length === 0 ? (
