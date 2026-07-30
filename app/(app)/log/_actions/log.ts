@@ -179,17 +179,30 @@ export async function forcarEnvioAction(id: string): Promise<{ error?: string }>
       .update({ status: 'enviado', mensagem_final: texto, enviado_em: agora })
       .eq('id', id)
 
-    const { data: atend } = await admin.from('atendimentos').select('id')
+    // Garantir que existe um atendimento para a mensagem aparecer no painel
+    let { data: atend } = await admin.from('atendimentos').select('id')
       .eq('conta_id', contaId).eq('celular', celular).neq('status', 'finalizado').maybeSingle()
-    await admin.from('mensagens_wa').insert({
-      conta_id: contaId, cliente_id: notif.cliente_id, atendimento_id: (atend as any)?.id ?? null,
-      celular, direcao: 'out', texto, lida: true,
-    })
-    if ((atend as any)?.id) {
+
+    if (!atend) {
+      const { data: novoAtend } = await admin.from('atendimentos').insert({
+        conta_id:        contaId,
+        celular,
+        cliente_id:      notif.cliente_id as string | null,
+        status:          'aguardando',
+        ultima_mensagem: texto,
+        ultima_msg_em:   agora,
+      }).select('id').maybeSingle()
+      atend = novoAtend
+    } else {
       await admin.from('atendimentos')
         .update({ ultima_mensagem: texto, ultima_msg_em: agora })
         .eq('id', (atend as any).id)
     }
+
+    await admin.from('mensagens_wa').insert({
+      conta_id: contaId, cliente_id: notif.cliente_id, atendimento_id: (atend as any)?.id ?? null,
+      celular, direcao: 'out', texto, lida: true,
+    })
 
     revalidatePath('/log')
     return {}

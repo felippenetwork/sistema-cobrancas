@@ -227,14 +227,30 @@ async function processarNotificacao(
       enviado_em:     agora,
     }).eq('id', notif.id).eq('status', 'fila')
 
-    // Salvar em mensagens_wa para aparecer no atendimento
-    const { data: atendimento } = await supabase
+    // Garantir que existe um atendimento para a mensagem aparecer no painel
+    let { data: atendimento } = await supabase
       .from('atendimentos')
       .select('id')
       .eq('conta_id', notif.conta_id)
       .eq('celular', celular)
       .neq('status', 'finalizado')
       .maybeSingle()
+
+    if (!atendimento) {
+      const { data: novo } = await supabase.from('atendimentos').insert({
+        conta_id:        notif.conta_id,
+        celular,
+        cliente_id:      notif.cliente_id,
+        status:          'aguardando',
+        ultima_mensagem: textoMensagem,
+        ultima_msg_em:   agora,
+      }).select('id').maybeSingle()
+      atendimento = novo
+    } else {
+      await supabase.from('atendimentos')
+        .update({ ultima_mensagem: textoMensagem, ultima_msg_em: agora })
+        .eq('id', atendimento.id)
+    }
 
     await supabase.from('mensagens_wa').insert({
       conta_id:       notif.conta_id,
@@ -245,13 +261,6 @@ async function processarNotificacao(
       texto:          textoMensagem,
       lida:           true,
     })
-
-    // Atualizar última mensagem do atendimento se existir
-    if (atendimento?.id) {
-      await supabase.from('atendimentos')
-        .update({ ultima_mensagem: textoMensagem, ultima_msg_em: agora })
-        .eq('id', atendimento.id)
-    }
 
     return 'enviado'
 
