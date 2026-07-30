@@ -145,52 +145,16 @@ export async function enviarRespostaAction(
 
 // ── Enviar template Meta para iniciar conversa (janela expirada) ─────────────
 
-const TEMPLATES_META: Record<string, { nome: string; idioma: string; params: 2 | 3; corpo: string }> = {
-  '5d': {
-    nome: 'cobranca_5d', idioma: 'pt_BR', params: 3,
-    corpo: 'Olá, *{{1}}*! Sua fatura de *{{2}}* vence em *5 dias* ({{3}}). Para dúvidas, responda esta mensagem.',
-  },
-  '3d': {
-    nome: 'cobranca_3d', idioma: 'en', params: 3,
-    corpo: 'Olá, *{{1}}*! Sua fatura de *{{2}}* vence em *3 dias* ({{3}}). Para dúvidas, responda esta mensagem.',
-  },
-  '2d': {
-    nome: 'cobranca_2d', idioma: 'pt_BR', params: 3,
-    corpo: 'Olá, *{{1}}*! Sua fatura de *{{2}}* vence em *2 dias* ({{3}}). Não se esqueça de pagar!',
-  },
-  '1d': {
-    nome: 'cobranca_1d', idioma: 'pt_BR', params: 3,
-    corpo: 'Olá, *{{1}}*! Sua fatura de *{{2}}* vence *amanhã* ({{3}}). Pague hoje para evitar juros.',
-  },
-  'dia': {
-    nome: 'cobranca_dia', idioma: 'pt_BR', params: 3,
-    corpo: 'Olá, *{{1}}*! Sua fatura de *{{2}}* vence *hoje* ({{3}}). Pague agora para evitar juros.',
-  },
-  'vencido1d': {
-    nome: 'cobranca_vencido', idioma: 'pt_BR', params: 3,
-    corpo: 'Olá, *{{1}}*! Sua fatura de *{{2}}* venceu ontem ({{3}}). Regularize o quanto antes para evitar cobrança adicional.',
-  },
-  'pagamento_confirmado': {
-    nome: 'pagamento_confirmado', idioma: 'pt_BR', params: 2,
-    corpo: '🥳 Renovado com sucesso! Muito obrigado *{{1}}*! Recebemos seu pagamento de *{{2}}*. Qualquer dúvida só me enviar mensagem.',
-  },
-  'boasvindas': {
-    nome: 'boasvindas', idioma: 'pt_BR', params: 3,
-    corpo: '🎉 Ativado com sucesso! Muito obrigado *{{1}}*! Sua fatura de *{{2}}* vence em *{{3}}*. Estaremos sempre à disposição!',
-  },
-}
-
 export async function enviarTemplateAction(
   atendimentoId: string,
   celular: string,
   clienteId: string | null,
-  templateTipo: string,
+  templateNome: string,
+  templateIdioma: string,
+  templateCorpo: string,
 ): Promise<ActionState> {
   try {
     const { supabase, contaId } = await getConta()
-
-    const tmpl = TEMPLATES_META[templateTipo]
-    if (!tmpl) return { error: 'Template inválido.' }
 
     // Credenciais Meta
     const { data: cfg } = await supabase
@@ -212,7 +176,7 @@ export async function enviarTemplateAction(
     }
 
     // Parcela aberta mais próxima (para valor e data)
-    let valor = ''
+    let valor    = ''
     let dataVenc = ''
     if (clienteId) {
       const { data: cobs } = await supabase
@@ -244,7 +208,9 @@ export async function enviarTemplateAction(
       }
     }
 
-    const parametros = tmpl.params === 2 ? [nome, valor] : [nome, valor, dataVenc]
+    // Determinar quantidade de parâmetros pelo corpo do template
+    const maxParam = templateCorpo.includes('{{3}}') ? 3 : templateCorpo.includes('{{2}}') ? 2 : 1
+    const parametros = maxParam === 2 ? [nome, valor] : [nome, valor, dataVenc]
 
     // Enviar via Meta API
     const res = await fetch(
@@ -260,8 +226,8 @@ export async function enviarTemplateAction(
           to:   celular,
           type: 'template',
           template: {
-            name:     tmpl.nome,
-            language: { code: tmpl.idioma },
+            name:     templateNome,
+            language: { code: templateIdioma },
             components: [{
               type:       'body',
               parameters: parametros.map(text => ({ type: 'text', text })),
@@ -277,7 +243,7 @@ export async function enviarTemplateAction(
     }
 
     // Reconstruir texto legível para salvar no histórico
-    const texto = tmpl.corpo
+    const texto = templateCorpo
       .replace('{{1}}', parametros[0] ?? '')
       .replace('{{2}}', parametros[1] ?? '')
       .replace('{{3}}', parametros[2] ?? '')
@@ -319,4 +285,156 @@ export async function marcarLidaAction(celular: string): Promise<void> {
   } catch {
     // não crítico
   }
+}
+
+// ── Iniciar nova conversa via template (cria atendimento se não existir) ──────
+export async function iniciarConversaAction(
+  celular: string,
+  clienteId: string | null,
+  templateNome: string,
+  templateIdioma: string,
+  templateCorpo: string,
+): Promise<{ error: string | null; atendimentoId?: string }> {
+  try {
+    const { supabase, contaId } = await getConta()
+
+    // Credenciais Meta
+    const { data: cfg } = await supabase
+      .from('configuracoes')
+      .select('meta_access_token, meta_phone_number_id, meta_api_ativo')
+      .eq('conta_id', contaId)
+      .maybeSingle()
+
+    if (!cfg?.meta_api_ativo || !cfg.meta_access_token || !cfg.meta_phone_number_id) {
+      return { error: 'Meta API não configurada. Ative em Configurações.' }
+    }
+
+    // Verificar atendimento aberto existente
+    const { data: atendExistente } = await supabase
+      .from('atendimentos')
+      .select('id')
+      .eq('conta_id', contaId)
+      .eq('celular', celular)
+      .neq('status', 'finalizado')
+      .maybeSingle()
+
+    let atendimentoId = (atendExistente as any)?.id as string | undefined
+    let criouNovo = false
+
+    if (!atendimentoId) {
+      const { data: novoAt, error: atErr } = await supabase
+        .from('atendimentos')
+        .insert({ conta_id: contaId, celular, cliente_id: clienteId, status: 'aguardando' })
+        .select('id')
+        .single()
+
+      if (atErr) return { error: atErr.message }
+      atendimentoId = (novoAt as any).id as string
+      criouNovo = true
+    }
+
+    // Buscar nome do cliente para parâmetros
+    let nome = 'Cliente'
+    let valor = ''
+    let dataVenc = ''
+
+    if (clienteId) {
+      const { data: cli } = await supabase
+        .from('clientes').select('nome').eq('id', clienteId).maybeSingle()
+      if (cli) nome = (cli as any).nome || 'Cliente'
+
+      const { data: cobs } = await supabase
+        .from('cobrancas').select('id')
+        .eq('conta_id', contaId).eq('cliente_id', clienteId).eq('status', 'ativa')
+
+      const cobIds = (cobs ?? []).map((c: any) => c.id as string)
+      if (cobIds.length > 0) {
+        const { data: parc } = await supabase
+          .from('parcelas').select('valor, data_vencimento')
+          .eq('conta_id', contaId).in('cobranca_id', cobIds)
+          .eq('status', 'aberta').order('data_vencimento', { ascending: true })
+          .limit(1).maybeSingle()
+
+        if (parc) {
+          valor = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })
+            .format(Number((parc as any).valor ?? 0))
+          const [a, m, d] = ((parc as any).data_vencimento as string).split('-')
+          dataVenc = `${d}/${m}/${a}`
+        }
+      }
+    }
+
+    const maxParam   = templateCorpo.includes('{{3}}') ? 3 : templateCorpo.includes('{{2}}') ? 2 : 1
+    const parametros = maxParam === 2 ? [nome, valor] : [nome, valor, dataVenc]
+
+    // Enviar template via Meta
+    const res = await fetch(
+      `https://graph.facebook.com/v20.0/${cfg.meta_phone_number_id}/messages`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.meta_access_token}` },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          to:   celular,
+          type: 'template',
+          template: {
+            name:     templateNome,
+            language: { code: templateIdioma },
+            components: [{ type: 'body', parameters: parametros.map(text => ({ type: 'text', text })) }],
+          },
+        }),
+      },
+    )
+
+    if (!res.ok) {
+      if (criouNovo) {
+        await supabase.from('atendimentos').delete().eq('id', atendimentoId)
+      }
+      const body = await res.json().catch(() => ({}))
+      return { error: (body as any)?.error?.message ?? `Erro Meta API: ${res.status}` }
+    }
+
+    const texto = templateCorpo
+      .replace('{{1}}', parametros[0] ?? '')
+      .replace('{{2}}', parametros[1] ?? '')
+      .replace('{{3}}', parametros[2] ?? '')
+
+    await supabase.from('mensagens_wa').insert({
+      conta_id: contaId, cliente_id: clienteId,
+      atendimento_id: atendimentoId, celular,
+      direcao: 'out', texto, lida: true,
+    })
+
+    await supabase.from('atendimentos')
+      .update({ ultima_mensagem: texto, ultima_msg_em: new Date().toISOString() })
+      .eq('id', atendimentoId)
+
+    revalidatePath('/atendimento')
+    return { error: null, atendimentoId }
+  } catch (e: unknown) {
+    return { error: e instanceof Error ? e.message : 'Erro desconhecido.' }
+  }
+}
+
+// ── Atualizar dados básicos do cliente ────────────────────────────────────────
+export async function atualizarClienteAction(
+  clienteId: string,
+  nome: string,
+  sobrenome: string,
+): Promise<ActionState> {
+  try {
+    const { supabase, contaId } = await getConta()
+    const { error } = await supabase
+      .from('clientes')
+      .update({ nome: nome.trim(), sobrenome: sobrenome.trim() || null })
+      .eq('id', clienteId)
+      .eq('conta_id', contaId)
+
+    if (error) return { error: error.message }
+  } catch (e: unknown) {
+    return { error: e instanceof Error ? e.message : 'Erro desconhecido.' }
+  }
+
+  revalidatePath('/atendimento')
+  return { error: null }
 }

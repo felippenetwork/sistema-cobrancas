@@ -4,11 +4,13 @@ import { useActionState, useState, useEffect, useCallback, useRef } from 'react'
 import {
   Loader2, Pencil, X, MessageSquare, Mail,
   ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, Search,
-  Copy, Check, Hash,
+  Copy, Check, Hash, Zap,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { NOTIF_DEFAULTS } from '@/lib/notificacao/tipos'
 import { toggleCanalAction, salvarTemplateAction, seedNotificacoesAction } from './_actions/notificacao'
+
+type MetaTemplate = { id: string; name: string; language: string; body: string; category: string }
 
 const TEXTAREA = 'w-full rounded-md border border-border bg-input px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary resize-none'
 const INPUT    = 'w-full rounded-md border border-border bg-input px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary'
@@ -18,6 +20,7 @@ type Config = {
   tipo: string; horario: string
   ativo_whatsapp: boolean; ativo_email: boolean
   template_whatsapp: string | null; assunto_email: string | null; template_email: string | null
+  meta_template_nome: string | null; meta_template_idioma: string | null; meta_template_corpo: string | null
 }
 
 const PER_PAGE_OPTIONS = [10, 25, 50]
@@ -133,6 +136,43 @@ function EditSheet({
 }) {
   const [state, formAction, isPending] = useActionState(salvarTemplateAction, { error: null })
 
+  // Template Meta selecionado
+  const [metaTemplates, setMetaTemplates]     = useState<MetaTemplate[]>([])
+  const [carregandoMeta, setCarregandoMeta]   = useState(false)
+  const [erroMeta, setErroMeta]               = useState<string | null>(null)
+  const [tmplSel, setTmplSel]                 = useState<MetaTemplate | null>(null)
+
+  // Inicializa seleção a partir do cfg
+  useEffect(() => {
+    if (cfg.meta_template_nome) {
+      setTmplSel({
+        id: cfg.meta_template_nome,
+        name: cfg.meta_template_nome,
+        language: cfg.meta_template_idioma ?? 'pt_BR',
+        body: cfg.meta_template_corpo ?? '',
+        category: '',
+      })
+    }
+    // Carregar templates ao abrir
+    setCarregandoMeta(true)
+    fetch('/api/meta/templates')
+      .then(r => r.json())
+      .then(json => {
+        if (json.templates) {
+          setMetaTemplates(json.templates)
+          // Re-selecionar com dados completos se nome bater
+          if (cfg.meta_template_nome) {
+            const found = (json.templates as MetaTemplate[]).find(t => t.name === cfg.meta_template_nome)
+            if (found) setTmplSel(found)
+          }
+        } else {
+          setErroMeta(json.error ?? 'Erro ao carregar templates Meta.')
+        }
+      })
+      .catch(() => setErroMeta('Sem conexão com a Meta API.'))
+      .finally(() => setCarregandoMeta(false))
+  }, [cfg.meta_template_nome, cfg.meta_template_idioma, cfg.meta_template_corpo])
+
   useEffect(() => {
     if (state.success) { onSaved(); onClose() }
   }, [state.success, onSaved, onClose])
@@ -152,8 +192,12 @@ function EditSheet({
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 py-5">
-          <form id="edit-notif-form" action={formAction} className="space-y-4">
+          <form id="edit-notif-form" action={formAction} className="space-y-5">
             <input type="hidden" name="tipo" value={cfg.tipo} />
+            {/* Campos ocultos para o template Meta selecionado */}
+            <input type="hidden" name="meta_template_nome"   value={tmplSel?.name   ?? ''} />
+            <input type="hidden" name="meta_template_idioma" value={tmplSel?.language ?? ''} />
+            <input type="hidden" name="meta_template_corpo"  value={tmplSel?.body   ?? ''} />
 
             <div className="space-y-1.5">
               <label className={LABEL}>
@@ -165,15 +209,58 @@ function EditSheet({
               <input type="time" name="horario" defaultValue={cfg.horario} className={INPUT} />
             </div>
 
-            {/* WhatsApp template + botão atalhos */}
+            {/* Template Meta (WhatsApp Business API) */}
+            <div className="space-y-2 rounded-lg border border-border p-4">
+              <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-foreground">
+                <Zap className="h-3.5 w-3.5 text-primary" />
+                Template Meta (WhatsApp API)
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Selecione qual template aprovado usar para este tipo de notificação. Se não selecionado, o sistema usa o padrão.
+              </p>
+
+              {carregandoMeta ? (
+                <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Carregando templates…
+                </div>
+              ) : erroMeta ? (
+                <p className="text-xs text-destructive">{erroMeta}</p>
+              ) : (
+                <select
+                  value={tmplSel?.name ?? ''}
+                  onChange={e => {
+                    const found = metaTemplates.find(t => t.name === e.target.value)
+                    setTmplSel(found ?? null)
+                  }}
+                  className={INPUT}
+                >
+                  <option value="">— Usar template padrão —</option>
+                  {metaTemplates.map(t => (
+                    <option key={t.id} value={t.name}>
+                      {t.name} ({t.language}) {t.category === 'MARKETING' ? '· MARKETING' : ''}
+                    </option>
+                  ))}
+                </select>
+              )}
+
+              {tmplSel?.body && (
+                <div className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">Prévia: </span>
+                  {tmplSel.body.substring(0, 120)}{tmplSel.body.length > 120 ? '…' : ''}
+                </div>
+              )}
+            </div>
+
+            {/* WhatsApp template legado + botão atalhos */}
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <label className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  <MessageSquare className="h-3.5 w-3.5" /> Template WhatsApp
+                  <MessageSquare className="h-3.5 w-3.5" /> Texto WhatsApp (legado/SMS)
                 </label>
                 <AtalhosTrigger posClass="right-0 top-full mt-1" />
               </div>
-              <textarea name="template_whatsapp" rows={5}
+              <textarea name="template_whatsapp" rows={4}
                 defaultValue={cfg.template_whatsapp ?? ''} className={TEXTAREA} />
             </div>
 
@@ -193,7 +280,7 @@ function EditSheet({
                 </label>
                 <AtalhosTrigger posClass="right-0 top-full mt-1" />
               </div>
-              <textarea name="template_email" rows={5}
+              <textarea name="template_email" rows={4}
                 defaultValue={cfg.template_email ?? ''} className={TEXTAREA} />
             </div>
 
@@ -237,18 +324,20 @@ export default function NotificacaoPage() {
     const { data: conta } = await sb.from('contas').select('id').eq('owner_user_id', user.id).single()
     if (!conta) return
 
+    const SELECT = 'tipo, horario, ativo_whatsapp, ativo_email, template_whatsapp, template_email, assunto_email, meta_template_nome, meta_template_idioma, meta_template_corpo'
+
     let { data } = await sb.from('notificacoes_config')
-      .select('tipo, horario, ativo_whatsapp, ativo_email, template_whatsapp, template_email, assunto_email')
+      .select(SELECT)
       .eq('conta_id', conta.id).order('created_at')
 
     if (!data?.length || data.length < NOTIF_DEFAULTS.length) {
       await seedNotificacoesAction()
       const { data: seeded } = await sb.from('notificacoes_config')
-        .select('tipo, horario, ativo_whatsapp, ativo_email, template_whatsapp, template_email, assunto_email')
+        .select(SELECT)
         .eq('conta_id', conta.id)
       data = seeded
     }
-    setConfigs(data ?? [])
+    setConfigs((data ?? []) as unknown as Config[])
     setLoading(false)
   }, [])
 
@@ -328,6 +417,7 @@ export default function NotificacaoPage() {
               <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Status</th>
               <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Horário</th>
               <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Prévia</th>
+              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Template Meta</th>
               <th className="px-4 py-3 text-center text-xs font-medium uppercase tracking-wide text-muted-foreground">Ativo/Inativo</th>
               <th className="px-4 py-3 text-center text-xs font-medium uppercase tracking-wide text-muted-foreground">Editar</th>
             </tr>
@@ -335,7 +425,7 @@ export default function NotificacaoPage() {
           <tbody className="divide-y divide-border">
             {pagina.length === 0 ? (
               <tr>
-                <td colSpan={7} className="py-12 text-center text-sm text-muted-foreground">
+                <td colSpan={8} className="py-12 text-center text-sm text-muted-foreground">
                   Nenhum resultado.
                 </td>
               </tr>
@@ -374,6 +464,17 @@ export default function NotificacaoPage() {
 
                     <td className="max-w-xs px-4 py-3 text-muted-foreground">
                       <span className="block truncate text-xs">{preview}</span>
+                    </td>
+
+                    <td className="px-4 py-3">
+                      {cfg.meta_template_nome ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
+                          <Zap className="h-3 w-3" />
+                          {cfg.meta_template_nome}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground/50">—</span>
+                      )}
                     </td>
 
                     <td className="px-4 py-3 text-center">

@@ -68,14 +68,23 @@ export async function salvarTemplateAction(
     const horario          = (formData.get('horario') as string).trim().slice(0, 5)
     if (!/^\d{2}:\d{2}$/.test(horario)) return { error: 'Horário inválido. Use o formato HH:MM.' }
 
-    const templateWhatsapp = (formData.get('template_whatsapp') as string).trim()
-    const assuntoEmail     = (formData.get('assunto_email')     as string).trim()
-    const templateEmail    = (formData.get('template_email')    as string).trim()
+    const templateWhatsapp   = (formData.get('template_whatsapp')   as string).trim()
+    const assuntoEmail       = (formData.get('assunto_email')       as string).trim()
+    const templateEmail      = (formData.get('template_email')      as string).trim()
+    const metaTemplateNome   = ((formData.get('meta_template_nome')   as string | null) ?? '').trim() || null
+    const metaTemplateIdioma = ((formData.get('meta_template_idioma') as string | null) ?? '').trim() || null
+    const metaTemplateCorpo  = ((formData.get('meta_template_corpo')  as string | null) ?? '').trim() || null
 
-    const { error } = await supabase.from('notificacoes_config').update({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const updatePayload: any = {
       horario, template_whatsapp: templateWhatsapp,
       assunto_email: assuntoEmail, template_email: templateEmail,
-    }).eq('conta_id', contaId).eq('tipo', tipo as NotifTipo)
+      meta_template_nome: metaTemplateNome,
+      meta_template_idioma: metaTemplateIdioma,
+      meta_template_corpo: metaTemplateCorpo,
+    }
+    const { error } = await supabase.from('notificacoes_config').update(updatePayload)
+      .eq('conta_id', contaId).eq('tipo', tipo as NotifTipo)
 
     if (error) return { error: error.message }
   } catch (e: unknown) {

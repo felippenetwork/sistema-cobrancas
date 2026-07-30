@@ -139,6 +139,7 @@ async function processarNotificacao(
   metaPhoneId: string,
   hInicio: string,
   hFim: string,
+  tmplOverride?: Map<string, { nome: string; idioma: string; corpo: string }>,
 ): Promise<'enviado' | 'fora_janela' | 'sem_template' | 'erro'> {
 
   // Verificar janela horária
@@ -146,7 +147,13 @@ async function processarNotificacao(
     return 'fora_janela'
   }
 
-  const tmpl = META_TEMPLATES[notif.tipo]
+  // Template customizado do DB tem prioridade sobre o hardcoded
+  const override = tmplOverride?.get(`${notif.conta_id}:${notif.tipo}`)
+  const tmplBase = META_TEMPLATES[notif.tipo]
+  const tmpl = override
+    ? { nome: override.nome, idioma: override.idioma, params: (override.corpo?.includes('{{3}}') ? 3 : override.corpo?.includes('{{2}}') ? 2 : 1) as 2 | 3, corpo: override.corpo }
+    : tmplBase
+
   if (!tmpl) {
     await supabase.from('notificacoes_enviadas')
       .update({ status: 'falhou' }).eq('id', notif.id)
@@ -292,13 +299,29 @@ export async function GET(req: NextRequest) {
 
   // Carregar credenciais Meta e config de horário para todas as contas (1 query)
   const contaIds = [...new Set(pendentes.map(n => n.conta_id as string))]
-  const { data: configs } = await supabase
-    .from('configuracoes')
-    .select('conta_id, meta_api_ativo, meta_access_token, meta_phone_number_id, horario_inicio, horario_fim')
-    .in('conta_id', contaIds)
+  const [{ data: configs }, { data: notifConfigs }] = await Promise.all([
+    supabase
+      .from('configuracoes')
+      .select('conta_id, meta_api_ativo, meta_access_token, meta_phone_number_id, horario_inicio, horario_fim')
+      .in('conta_id', contaIds),
+    // Templates customizados por conta+tipo
+    supabase
+      .from('notificacoes_config')
+      .select('conta_id, tipo, meta_template_nome, meta_template_idioma, meta_template_corpo')
+      .in('conta_id', contaIds)
+      .not('meta_template_nome', 'is', null),
+  ])
 
   const cfgMap = new Map(
     (configs ?? []).map((c: any) => [c.conta_id as string, c])
+  )
+
+  // Mapa de override de template: `${contaId}:${tipo}` → {nome, idioma, corpo}
+  const tmplOverride = new Map(
+    (notifConfigs ?? []).map((nc: any) => [
+      `${nc.conta_id}:${nc.tipo}`,
+      { nome: nc.meta_template_nome, idioma: nc.meta_template_idioma, corpo: nc.meta_template_corpo },
+    ])
   )
 
   let enviadas    = 0
@@ -318,11 +341,12 @@ export async function GET(req: NextRequest) {
       cfg.meta_phone_number_id as string,
       (cfg.horario_inicio as string) ?? '09:00',
       (cfg.horario_fim    as string) ?? '20:00',
+      tmplOverride,
     )
 
-    if (resultado === 'enviado')      enviadas++
+    if (resultado === 'enviado')          enviadas++
     else if (resultado === 'fora_janela') foraJanela++
-    else                              erros++
+    else                                  erros++
   }
 
   console.log(`[cron/whatsapp] enviadas=${enviadas} fora_janela=${foraJanela} erros=${erros}`)
