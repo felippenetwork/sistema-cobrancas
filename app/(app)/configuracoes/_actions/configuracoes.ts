@@ -103,6 +103,33 @@ export async function salvarMetaApiAction(
   }
 }
 
+// ── Salvar credenciais LookDefense IPTV ─────────────────────────────────────
+export async function salvarLookDefenseAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const { supabase, contaId } = await getConta()
+
+    const username = (formData.get('ld_username') as string)?.trim() || null
+    const password = (formData.get('ld_password') as string)?.trim() || null
+
+    const { error } = await supabase
+      .from('configuracoes')
+      .upsert(
+        { conta_id: contaId, ld_username: username, ld_password: password },
+        { onConflict: 'conta_id' },
+      )
+
+    if (error) return { error: error.message }
+
+    revalidatePath('/configuracoes')
+    return { error: null, success: true }
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'Erro desconhecido.' }
+  }
+}
+
 // ── Salvar dados da empresa + remetente de e-mail ────────────────────────────
 export async function salvarConfiguracoesAction(
   _prev: ActionState,

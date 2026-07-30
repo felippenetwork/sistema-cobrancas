@@ -251,6 +251,8 @@ export type Database = {
           horario_inicio: string
           intervalo_max_seg: number
           intervalo_min_seg: number
+          ld_password: string | null
+          ld_username: string | null
           meta_access_token: string | null
           meta_api_ativo: boolean
           meta_phone_number_id: string | null
@@ -271,6 +273,8 @@ export type Database = {
           horario_inicio?: string
           intervalo_max_seg?: number
           intervalo_min_seg?: number
+          ld_password?: string | null
+          ld_username?: string | null
           meta_access_token?: string | null
           meta_api_ativo?: boolean
           meta_phone_number_id?: string | null
@@ -291,6 +295,8 @@ export type Database = {
           horario_inicio?: string
           intervalo_max_seg?: number
           intervalo_min_seg?: number
+          ld_password?: string | null
+          ld_username?: string | null
           meta_access_token?: string | null
           meta_api_ativo?: boolean
           meta_phone_number_id?: string | null

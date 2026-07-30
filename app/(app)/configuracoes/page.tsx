@@ -2,7 +2,7 @@
 
 import { useActionState, useState, useEffect, useTransition, useRef } from 'react'
 import { Loader2, CheckCircle, Eye, EyeOff, ExternalLink } from 'lucide-react'
-import { salvarConfiguracoesAction, salvarMetaApiAction, salvarTwilioAction, toggleMetaApiAction, toggleTwilioAction } from './_actions/configuracoes'
+import { salvarConfiguracoesAction, salvarMetaApiAction, salvarTwilioAction, salvarLookDefenseAction, toggleMetaApiAction, toggleTwilioAction } from './_actions/configuracoes'
 import { sanitizarLocalPart } from '@/lib/email/template'
 import { createClient } from '@/lib/supabase/client'
 
@@ -23,6 +23,8 @@ type Data = {
     twilio_ativo?: boolean | null
     twilio_auth_token?: string | null
     twilio_from_number?: string | null
+    ld_username?: string | null
+    ld_password?: string | null
   } | null
   rem:    { local_part?: string | null; from_name?: string | null } | null
   domain: string | null
@@ -34,6 +36,7 @@ export default function ConfiguracoesPage() {
   const [stateGeral,  formActionGeral,  isPendingGeral]  = useActionState(salvarConfiguracoesAction, { error: null })
   const [stateMeta,   formActionMeta,   isPendingMeta]   = useActionState(salvarMetaApiAction,       { error: null })
   const [stateTwilio,      formActionTwilio,      isPendingTwilio]      = useActionState(salvarTwilioAction,    { error: null })
+  const [stateLookDefense, formActionLookDefense, isPendingLookDefense] = useActionState(salvarLookDefenseAction, { error: null })
   const [, startToggleMeta]   = useTransition()
   const [, startToggleTwilio] = useTransition()
 
@@ -42,6 +45,7 @@ export default function ConfiguracoesPage() {
   const [loading, setLoading]             = useState(true)
   const [showToken, setShowToken]         = useState(false)
   const [showTwilioToken, setShowTwilioToken] = useState(false)
+  const [showLdPassword, setShowLdPassword]   = useState(false)
   const [overrideMetaAtivo, setOverrideMetaAtivo]     = useState<boolean | null>(null)
   const [overrideTwilioAtivo, setOverrideTwilioAtivo] = useState<boolean | null>(null)
   const scrollSaveRef = useRef(0)
@@ -65,7 +69,7 @@ export default function ConfiguracoesPage() {
 
     const [{ data: cfg }, { data: rem }] = await Promise.all([
       sb.from('configuracoes')
-        .select('contato, cpf_cnpj, endereco, nome_comercial, meta_access_token, meta_api_ativo, meta_phone_number_id, meta_waba_id, twilio_account_sid, twilio_ativo, twilio_auth_token, twilio_from_number')
+        .select('contato, cpf_cnpj, endereco, nome_comercial, meta_access_token, meta_api_ativo, meta_phone_number_id, meta_waba_id, twilio_account_sid, twilio_ativo, twilio_auth_token, twilio_from_number, ld_username, ld_password')
         .eq('conta_id', conta.id)
         .maybeSingle(),
       sb.from('email_remetente').select('local_part, from_name').eq('conta_id', conta.id).maybeSingle(),
@@ -104,7 +108,8 @@ export default function ConfiguracoesPage() {
   // Recargas após salvar — preservando posição de scroll
   useEffect(() => { if (stateGeral.success)  loadData(true) }, [stateGeral.success])
   useEffect(() => { if (stateMeta.success)   loadData(true) }, [stateMeta.success])
-  useEffect(() => { if (stateTwilio.success) loadData(true) }, [stateTwilio.success])
+  useEffect(() => { if (stateTwilio.success)      loadData(true) }, [stateTwilio.success])
+  useEffect(() => { if (stateLookDefense.success) loadData(true) }, [stateLookDefense.success])
 
   const previewEmail = data?.domain && localPart
     ? `${sanitizarLocalPart(localPart)}@${data.domain}`
@@ -456,6 +461,91 @@ export default function ConfiguracoesPage() {
         >
           {isPendingTwilio && <Loader2 className="h-4 w-4 animate-spin" />}
           {isPendingTwilio ? 'Salvando…' : 'Salvar credenciais Twilio'}
+        </button>
+      </form>
+
+      {/* ── LookDefense IPTV ────────────────────────────────────────────────── */}
+      <form action={formActionLookDefense} className="space-y-6">
+        <section className="rounded-2xl border border-border bg-card p-6 space-y-5">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-foreground">LookDefense IPTV</h2>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Renovação automática de planos IPTV ao baixar parcelas de clientes vinculados.
+              </p>
+            </div>
+            {(data?.cfg?.ld_username && data?.cfg?.ld_password) ? (
+              <span className="flex items-center gap-1 rounded-full bg-green-500/15 px-2.5 py-1 text-[11px] font-medium text-green-500">
+                <CheckCircle className="h-3 w-3" />
+                Configurado
+              </span>
+            ) : (
+              <span className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
+                Não configurado
+              </span>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground space-y-1">
+            <p className="font-medium text-foreground">Como funciona:</p>
+            <ol className="list-decimal list-inside space-y-0.5">
+              <li>Informe o login e senha da sua conta revendedor no painel LookDefense</li>
+              <li>No cadastro de cada cliente IPTV, preencha o campo <strong>Login externo</strong> com o username dele no painel</li>
+              <li>Ao baixar uma parcela, o sistema agenda a renovação automaticamente</li>
+            </ol>
+          </div>
+
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <label className={LABEL}>Usuário (login do revendedor)</label>
+              <input
+                name="ld_username"
+                defaultValue={data?.cfg?.ld_username ?? ''}
+                placeholder="seu.usuario"
+                autoComplete="off"
+                className={INPUT}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className={LABEL}>Senha</label>
+              <div className="relative">
+                <input
+                  name="ld_password"
+                  type={showLdPassword ? 'text' : 'password'}
+                  defaultValue={data?.cfg?.ld_password ?? ''}
+                  placeholder="••••••••"
+                  autoComplete="new-password"
+                  className={INPUT + ' pr-10'}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowLdPassword(v => !v)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {showLdPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {stateLookDefense.error && (
+          <p className="rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">{stateLookDefense.error}</p>
+        )}
+        {stateLookDefense.success && (
+          <p className="flex items-center gap-2 rounded-xl bg-success-bg px-3 py-2 text-sm text-success">
+            <CheckCircle className="h-4 w-4" />
+            Credenciais LookDefense salvas.
+          </p>
+        )}
+
+        <button
+          type="submit" disabled={isPendingLookDefense}
+          className="flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
+        >
+          {isPendingLookDefense && <Loader2 className="h-4 w-4 animate-spin" />}
+          {isPendingLookDefense ? 'Salvando…' : 'Salvar credenciais LookDefense'}
         </button>
       </form>
     </div>
