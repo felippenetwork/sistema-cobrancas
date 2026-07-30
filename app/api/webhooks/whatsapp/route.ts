@@ -65,10 +65,10 @@ export async function POST(req: NextRequest) {
           if (!cid) continue
 
           for (const msg of msgs) {
-            if (msg.type !== 'text') continue
             const celular = msg.from as string
-            const texto   = (msg.text?.body ?? '') as string
             const waId    = msg.id as string
+            const texto   = extrairTextoMeta(msg)
+            if (!celular || !texto) continue
 
             await salvarMensagem(supabase, { contaId: cid, celular, texto, waId, direcao: 'in' })
           }
@@ -149,6 +149,24 @@ export async function POST(req: NextRequest) {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+function extrairTextoMeta(msg: any): string {
+  switch (msg?.type) {
+    case 'text':     return msg.text?.body ?? ''
+    case 'image':    return msg.image?.caption    ? `[Imagem] ${msg.image.caption}`    : '[Imagem]'
+    case 'video':    return msg.video?.caption    ? `[Vídeo] ${msg.video.caption}`     : '[Vídeo]'
+    case 'document': return msg.document?.caption ? `[Arquivo] ${msg.document.caption}` : `[Arquivo${msg.document?.filename ? ': ' + msg.document.filename : ''}]`
+    case 'audio':    return '[Áudio]'
+    case 'sticker':  return '[Figurinha]'
+    case 'location': return `[Localização: ${msg.location?.latitude},${msg.location?.longitude}]`
+    case 'contacts': return '[Contato]'
+    case 'interactive': {
+      const reply = msg.interactive?.button_reply ?? msg.interactive?.list_reply
+      return reply?.title ?? '[Resposta interativa]'
+    }
+    default: return `[${msg?.type ?? 'Mensagem'}]`
+  }
+}
 
 async function encontrarOuCriarAtendimento(
   supabase: ReturnType<typeof createAdminClient>,
