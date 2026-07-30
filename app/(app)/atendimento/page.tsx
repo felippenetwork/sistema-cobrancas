@@ -6,7 +6,7 @@ import {
   XCircle, ArrowRightLeft, Inbox, History,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { enviarRespostaAction, marcarLidaAction } from './_actions/mensagens'
+import { enviarRespostaAction, marcarLidaAction, enviarTemplateAction } from './_actions/mensagens'
 import {
   aceitarAtendimentoAction,
   finalizarAtendimentoAction,
@@ -202,6 +202,100 @@ function ModalTransferir({
   )
 }
 
+// ── Modal: picker de templates para janela expirada ───────────────────────────
+
+const TEMPLATE_OPTIONS = [
+  { tipo: '5d',                   emoji: '📅', label: 'Vence em 5 dias',      desc: 'Lembrete de fatura próxima do vencimento' },
+  { tipo: '3d',                   emoji: '📅', label: 'Vence em 3 dias',      desc: 'Lembrete de fatura próxima do vencimento' },
+  { tipo: '2d',                   emoji: '📅', label: 'Vence em 2 dias',      desc: 'Lembrete urgente de vencimento' },
+  { tipo: '1d',                   emoji: '⚠️', label: 'Vence amanhã',         desc: 'Último lembrete antes do vencimento' },
+  { tipo: 'dia',                  emoji: '🚨', label: 'Vence hoje',            desc: 'Aviso de vencimento no dia' },
+  { tipo: 'vencido1d',            emoji: '🔴', label: 'Venceu ontem',         desc: 'Cobrança de fatura vencida' },
+  { tipo: 'pagamento_confirmado', emoji: '✅', label: 'Pagamento confirmado',  desc: 'Confirmação de recebimento' },
+  { tipo: 'boasvindas',           emoji: '🎉', label: 'Boas-vindas',          desc: 'Mensagem de ativação do plano' },
+]
+
+function ModalTemplatePicker({
+  onEnviar,
+  onFechar,
+  carregando,
+  erro,
+}: {
+  onEnviar: (tipo: string) => void
+  onFechar: () => void
+  carregando: boolean
+  erro: string | null
+}) {
+  const [selecionado, setSelecionado] = useState('')
+
+  return (
+    <div
+      className="fixed inset-0 z-[70] flex flex-col justify-end bg-black/60 md:items-center md:justify-center md:p-4"
+      onClick={e => e.target === e.currentTarget && onFechar()}
+    >
+      <div className="w-full rounded-t-2xl border border-border bg-card shadow-2xl md:max-w-sm md:rounded-xl">
+        <div className="flex justify-center pt-3 md:hidden">
+          <div className="h-1 w-10 rounded-full bg-border" />
+        </div>
+
+        <div className="flex items-center justify-between border-b border-border px-5 py-4">
+          <div>
+            <h2 className="text-sm font-semibold text-foreground">Iniciar conversa</h2>
+            <p className="text-xs text-muted-foreground">Cobrado pela Meta por conversa iniciada</p>
+          </div>
+          <button onClick={onFechar} className="rounded p-1.5 text-muted-foreground hover:text-foreground">
+            <XCircle className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="max-h-64 overflow-y-auto space-y-1.5 p-3">
+          {TEMPLATE_OPTIONS.map(t => (
+            <button
+              key={t.tipo}
+              onClick={() => setSelecionado(t.tipo)}
+              className={[
+                'flex w-full items-start gap-3 rounded-xl p-3 text-left transition',
+                selecionado === t.tipo
+                  ? 'bg-primary/10 ring-1 ring-primary'
+                  : 'hover:bg-accent',
+              ].join(' ')}
+            >
+              <span className="text-lg leading-none">{t.emoji}</span>
+              <div>
+                <p className="text-sm font-medium text-foreground">{t.label}</p>
+                <p className="text-xs text-muted-foreground">{t.desc}</p>
+              </div>
+            </button>
+          ))}
+        </div>
+
+        {erro && (
+          <p className="px-5 pb-1 text-xs text-destructive">{erro}</p>
+        )}
+
+        <div
+          className="flex gap-2 border-t border-border px-5 py-4"
+          style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom, 0px))' }}
+        >
+          <button
+            onClick={onFechar}
+            className="flex-1 rounded-xl border border-border px-3 py-3 text-sm text-muted-foreground transition hover:bg-accent"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={() => selecionado && onEnviar(selecionado)}
+            disabled={!selecionado || carregando}
+            className="flex-1 rounded-xl bg-primary px-3 py-3 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
+          >
+            {carregando ? 'Enviando…' : 'Enviar template'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Página ────────────────────────────────────────────────────────────────────
 
 export default function AtendimentoPage() {
@@ -213,11 +307,14 @@ export default function AtendimentoPage() {
   const [selecionado, setSelecionado]     = useState<Atendimento | null>(null)
   const [mensagens, setMensagens]         = useState<Mensagem[]>([])
   const [mostrarChat, setMostrarChat]     = useState(false)
-  const [mostrarModal, setMostrarModal]   = useState(false)
-  const [departamentos, setDepartamentos] = useState<Departamento[]>([])
-  const [membros, setMembros]             = useState<Membro[]>([])
-  const [acao, setAcao]                   = useState<string | null>(null)
-  const [ultimaMsgIn, setUltimaMsgIn]     = useState<Date | null>(null)
+  const [mostrarModal, setMostrarModal]             = useState(false)
+  const [mostrarTemplatePicker, setMostrarTemplate] = useState(false)
+  const [enviandoTemplate, setEnviandoTemplate]     = useState(false)
+  const [templateErro, setTemplateErro]             = useState<string | null>(null)
+  const [departamentos, setDepartamentos]           = useState<Departamento[]>([])
+  const [membros, setMembros]                       = useState<Membro[]>([])
+  const [acao, setAcao]                             = useState<string | null>(null)
+  const [ultimaMsgIn, setUltimaMsgIn]               = useState<Date | null>(null)
 
   const bottomRef   = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -381,9 +478,42 @@ export default function AtendimentoPage() {
     setSelecionado(null)
   }
 
+  async function handleEnviarTemplate(tipo: string) {
+    if (!selecionado || !contaId) return
+    setEnviandoTemplate(true)
+    setTemplateErro(null)
+    const r = await enviarTemplateAction(
+      selecionado.id,
+      selecionado.celular,
+      selecionado.cliente_id,
+      tipo,
+    )
+    setEnviandoTemplate(false)
+    if (r.error) {
+      setTemplateErro(r.error)
+    } else {
+      setMostrarTemplate(false)
+      carregarMensagens(selecionado.celular, contaId)
+    }
+  }
+
+  // Janela de 24h: aberta se o cliente enviou mensagem nas últimas 24h
+  const janelaAberta = ultimaMsgIn
+    ? ultimaMsgIn.getTime() + 86_400_000 > Date.now()
+    : false
+
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <>
+      {mostrarTemplatePicker && selecionado && (
+        <ModalTemplatePicker
+          onEnviar={handleEnviarTemplate}
+          onFechar={() => { setMostrarTemplate(false); setTemplateErro(null) }}
+          carregando={enviandoTemplate}
+          erro={templateErro}
+        />
+      )}
+
       {mostrarModal && selecionado && (
         <ModalTransferir
           departamentos={departamentos}
@@ -634,6 +764,24 @@ export default function AtendimentoPage() {
                 <p className="py-2 text-center text-xs text-muted-foreground">
                   Aceite o atendimento para responder.
                 </p>
+              ) : !janelaAberta ? (
+                <div className="flex flex-col items-center gap-2 py-2">
+                  <div className="flex items-center gap-1.5 rounded-full bg-amber-500/10 px-3 py-1.5 text-xs text-amber-600 dark:text-amber-400">
+                    <Clock className="h-3 w-3" />
+                    Janela de 24h expirada
+                  </div>
+                  <p className="px-4 text-center text-xs text-muted-foreground">
+                    Para enviar mensagens use um template aprovado.{' '}
+                    <span className="text-amber-600/80 dark:text-amber-400/80">Cobrado pela Meta.</span>
+                  </p>
+                  <button
+                    onClick={() => { setMostrarTemplate(true); setTemplateErro(null) }}
+                    className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition hover:opacity-90"
+                  >
+                    <MessageSquare className="h-4 w-4" />
+                    Iniciar conversa com template
+                  </button>
+                </div>
               ) : (
                 <>
                   {sendState.error && (
