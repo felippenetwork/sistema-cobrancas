@@ -52,16 +52,31 @@ export async function reenviarNotificacaoAction(id: string) {
   revalidatePath('/log')
 }
 
-// Força o envio imediato chamando o uazapi diretamente, sem passar pelo worker.
-// Requer UAZAPI_URL e UAZAPI_GLOBAL_TOKEN no ambiente do Next.js.
+// Templates Meta aprovados — espelho do cron/whatsapp para envio imediato via Forçar.
+const META_TMPL: Record<string, { nome: string; idioma: string; params: 2 | 3; corpo: string }> = {
+  '5d':                  { nome: 'cobranca_5d',         idioma: 'pt_BR', params: 3, corpo: 'Olá, *{{1}}*! Sua fatura de *{{2}}* vence em *5 dias* ({{3}}). Para dúvidas, responda esta mensagem.' },
+  '3d':                  { nome: 'cobranca_3d',         idioma: 'en',    params: 3, corpo: 'Olá, *{{1}}*! Sua fatura de *{{2}}* vence em *3 dias* ({{3}}). Para dúvidas, responda esta mensagem.' },
+  '2d':                  { nome: 'cobranca_2d',         idioma: 'pt_BR', params: 3, corpo: 'Olá, *{{1}}*! Sua fatura de *{{2}}* vence em *2 dias* ({{3}}). Não se esqueça de pagar!' },
+  '1d':                  { nome: 'cobranca_1d',         idioma: 'pt_BR', params: 3, corpo: 'Olá, *{{1}}*! Sua fatura de *{{2}}* vence *amanhã* ({{3}}). Pague hoje para evitar juros.' },
+  'dia':                 { nome: 'cobranca_dia',        idioma: 'pt_BR', params: 3, corpo: 'Olá, *{{1}}*! Sua fatura de *{{2}}* vence *hoje* ({{3}}). Pague agora para evitar juros.' },
+  'vencido1d':           { nome: 'cobranca_vencido',    idioma: 'pt_BR', params: 3, corpo: 'Olá, *{{1}}*! Sua fatura de *{{2}}* venceu ontem ({{3}}). Regularize o quanto antes para evitar cobrança adicional.' },
+  'pagamento_confirmado':{ nome: 'pagamento_confirmado',idioma: 'pt_BR', params: 2, corpo: 'Muito obrigado, *{{1}}*! Recebemos seu pagamento de *{{2}}*. Qualquer dúvida ou problema só me enviar mensagem.' },
+  'boasvindas':          { nome: 'boasvindas',          idioma: 'pt_BR', params: 3, corpo: 'Muito obrigado, *{{1}}*! Sua primeira fatura de *{{2}}* vence em *{{3}}*. Estaremos sempre à disposição para melhor lhe atender.' },
+}
+
+function _fmtBRL(v: number) {
+  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v)
+}
+function _fmtData(iso: string) {
+  const [a, m, d] = iso.split('-'); return `${d}/${m}/${a}`
+}
+
+// Força o envio imediato usando Meta Cloud API (se configurada) ou UazAPI como fallback.
 export async function forcarEnvioAction(id: string): Promise<{ error?: string }> {
   const { contaId } = await getContaId()
   const admin = createAdminClient()
 
   // ── 1. Claim atômico ─────────────────────────────────────────────────────
-  // UPDATE retorna a linha somente se o status ainda era fila|cancelado.
-  // Muda para 'cancelado' para o worker não pegar a mesma linha concorrentemente.
-  // Em caso de sucesso o status é atualizado para 'enviado' no passo 5.
   const { data: notif } = await admin
     .from('notificacoes_enviadas')
     .update({ status: 'cancelado' })
@@ -85,7 +100,102 @@ export async function forcarEnvioAction(id: string): Promise<{ error?: string }>
   const celular = cliente.celular
   if (!celular) return { error: 'Cliente sem celular cadastrado.' }
 
-  // ── 3. Resolver mensagem ─────────────────────────────────────────────────
+  // ── 3. Verificar provedor ativo ──────────────────────────────────────────
+  const { data: cfgConta } = await admin
+    .from('configuracoes')
+    .select('meta_api_ativo, meta_access_token, meta_phone_number_id')
+    .eq('conta_id', contaId)
+    .maybeSingle()
+
+  const usarMeta = !!(cfgConta?.meta_api_ativo && cfgConta?.meta_access_token && cfgConta?.meta_phone_number_id)
+
+  // ── 4a. Envio via Meta Cloud API ─────────────────────────────────────────
+  if (usarMeta) {
+    const tmpl = META_TMPL[notif.tipo as string]
+    if (!tmpl) {
+      await admin.from('notificacoes_enviadas').update({ status: 'fila' }).eq('id', id)
+      return { error: `Tipo "${notif.tipo}" não possui template Meta configurado.` }
+    }
+
+    let parcelaId = notif.parcela_id as string | null
+    if (!parcelaId && notif.cobranca_id) {
+      const { data: p } = await admin
+        .from('parcelas').select('id')
+        .eq('cobranca_id', notif.cobranca_id as string)
+        .order('numero', { ascending: true }).limit(1).maybeSingle()
+      parcelaId = (p as any)?.id ?? null
+    }
+
+    let valor = ''
+    let data  = ''
+    if (parcelaId) {
+      const { data: parcela } = await admin
+        .from('parcelas').select('valor, data_vencimento')
+        .eq('id', parcelaId).maybeSingle()
+      if (parcela) {
+        valor = _fmtBRL(Number((parcela as any).valor ?? 0))
+        data  = _fmtData((parcela as any).data_vencimento ?? '')
+      }
+    }
+
+    const nome       = (cliente.nome as string) || 'Cliente'
+    const parametros = tmpl.params === 2 ? [nome, valor] : [nome, valor, data]
+    const texto      = tmpl.corpo
+      .replace('{{1}}', parametros[0] ?? '')
+      .replace('{{2}}', parametros[1] ?? '')
+      .replace('{{3}}', parametros[2] ?? '')
+
+    try {
+      const res = await fetch(
+        `https://graph.facebook.com/v20.0/${cfgConta!.meta_phone_number_id}/messages`,
+        {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfgConta!.meta_access_token}` },
+          body: JSON.stringify({
+            messaging_product: 'whatsapp',
+            to:       celular,
+            type:     'template',
+            template: {
+              name:     tmpl.nome,
+              language: { code: tmpl.idioma },
+              components: [{ type: 'body', parameters: parametros.map(text => ({ type: 'text', text })) }],
+            },
+          }),
+        },
+      )
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        const msg = (err as any)?.error?.message ?? `Meta erro ${res.status}`
+        await admin.from('notificacoes_enviadas').update({ status: 'fila' }).eq('id', id)
+        return { error: `Falha ao enviar via Meta: ${msg}` }
+      }
+    } catch {
+      await admin.from('notificacoes_enviadas').update({ status: 'fila' }).eq('id', id)
+      return { error: 'Erro de rede ao chamar a Meta API.' }
+    }
+
+    const agora = new Date().toISOString()
+    await admin.from('notificacoes_enviadas')
+      .update({ status: 'enviado', mensagem_final: texto, enviado_em: agora })
+      .eq('id', id)
+
+    const { data: atend } = await admin.from('atendimentos').select('id')
+      .eq('conta_id', contaId).eq('celular', celular).neq('status', 'finalizado').maybeSingle()
+    await admin.from('mensagens_wa').insert({
+      conta_id: contaId, cliente_id: notif.cliente_id, atendimento_id: (atend as any)?.id ?? null,
+      celular, direcao: 'out', texto, lida: true,
+    })
+    if ((atend as any)?.id) {
+      await admin.from('atendimentos')
+        .update({ ultima_mensagem: texto, ultima_msg_em: agora })
+        .eq('id', (atend as any).id)
+    }
+
+    revalidatePath('/log')
+    return {}
+  }
+
+  // ── 4b. Fallback: UazAPI ─────────────────────────────────────────────────
   let mensagem: string
 
   if (notif.tipo === 'agendada') {
@@ -97,14 +207,14 @@ export async function forcarEnvioAction(id: string): Promise<{ error?: string }>
       template:  corpo,
     })
   } else {
-    const { data: cfg } = await admin
+    const { data: cfgNotif } = await admin
       .from('notificacoes_config')
       .select('template_whatsapp')
       .eq('conta_id', contaId)
       .eq('tipo', notif.tipo)
       .maybeSingle()
 
-    const template = cfg?.template_whatsapp?.trim()
+    const template = cfgNotif?.template_whatsapp?.trim()
     if (!template) return { error: 'Template WhatsApp não configurado para este tipo.' }
 
     let parcelaId = notif.parcela_id as string | null
@@ -129,21 +239,17 @@ export async function forcarEnvioAction(id: string): Promise<{ error?: string }>
     })
   }
 
-  // ── 4. Chamar uazapi diretamente ─────────────────────────────────────────
   const uazapiUrl   = (process.env.UAZAPI_URL ?? '').replace(/\/$/, '')
   const globalToken = process.env.UAZAPI_ADMIN_TOKEN ?? process.env.UAZAPI_GLOBAL_TOKEN ?? ''
 
   if (!uazapiUrl || !globalToken) {
-    return { error: 'UAZAPI_URL / UAZAPI_ADMIN_TOKEN não configurados no servidor.' }
+    return { error: 'Nenhum provedor WhatsApp configurado (Meta API ou UazAPI).' }
   }
 
   const instName = `quita${(contaId).replace(/-/g, '').slice(0, 10)}`
-
   let instanceToken: string | null = null
   try {
-    const resp = await fetch(`${uazapiUrl}/instance/all`, {
-      headers: { admintoken: globalToken },
-    })
+    const resp = await fetch(`${uazapiUrl}/instance/all`, { headers: { admintoken: globalToken } })
     if (resp.ok) {
       const all = await resp.json()
       if (Array.isArray(all)) {
@@ -173,7 +279,6 @@ export async function forcarEnvioAction(id: string): Promise<{ error?: string }>
     return { error: 'Erro de rede ao enviar a mensagem.' }
   }
 
-  // ── 5. Marcar como enviado ───────────────────────────────────────────────
   await admin
     .from('notificacoes_enviadas')
     .update({ status: 'enviado', mensagem_final: mensagem, enviado_em: new Date().toISOString() })
