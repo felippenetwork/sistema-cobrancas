@@ -10,6 +10,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { calcularVencimento } from '@/lib/utils/parcelas'
+import { enviarWhatsAppImediato } from '@/lib/whatsapp/enviar-imediato'
 
 const schemaId = z.string().uuid()
 
@@ -121,9 +122,14 @@ export async function baixarParcelaAction(formData: FormData) {
     }
 
     if (cfgPag?.ativo_whatsapp) {
-      const { error: confWaErr } = await supabase
-        .from('notificacoes_enviadas').insert({ ...baseNotif, canal: 'whatsapp' as const })
+      const { data: notifWa, error: confWaErr } = await supabase
+        .from('notificacoes_enviadas')
+        .insert({ ...baseNotif, canal: 'whatsapp' as const })
+        .select('id').single()
       if (confWaErr) console.error('[baixarParcela] pagamento_confirmado.whatsapp', confWaErr)
+      else if (notifWa?.id) {
+        await enviarWhatsAppImediato(contaIdDaParcela, notifWa.id, parcelaId, cobrancaId, clienteId, 'pagamento_confirmado')
+      }
     }
     if (cfgPag?.ativo_email) {
       const { error: confEmErr } = await supabase
@@ -265,8 +271,14 @@ export async function baixarParcelaComConfirmacaoAction(
       agendado_para: agora,
     }
     if (cfgPag?.ativo_whatsapp) {
-      const { error: e } = await supabase.from('notificacoes_enviadas').insert({ ...baseNotif, canal: 'whatsapp' as const })
+      const { data: notifWa, error: e } = await supabase
+        .from('notificacoes_enviadas')
+        .insert({ ...baseNotif, canal: 'whatsapp' as const })
+        .select('id').single()
       if (e) console.error('[baixarComConfirmacao] notif.whatsapp', e)
+      else if (notifWa?.id) {
+        await enviarWhatsAppImediato(contaIdFinal, notifWa.id, parcelaId, cobrancaIdFinal, clienteId, 'pagamento_confirmado')
+      }
     }
     if (cfgPag?.ativo_email) {
       const { error: e } = await supabase.from('notificacoes_enviadas').insert({ ...baseNotif, canal: 'email' as const })
