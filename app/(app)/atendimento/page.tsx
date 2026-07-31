@@ -777,6 +777,7 @@ export default function AtendimentoPage() {
   const [mensagens, setMensagens]     = useState<Mensagem[]>([])
   const [ultimaMsgIn, setUltimaMsgIn] = useState<Date | null>(null)
   const [busca, setBusca]             = useState('')
+  const [contadorPendentes, setContadorPendentes] = useState(0)
 
   // Painéis mobile
   const [mostrarChat, setMostrarChat] = useState(false)
@@ -859,6 +860,15 @@ export default function AtendimentoPage() {
 
   // ── Carregar atendimentos ─────────────────────────────────────────────────────
 
+  const carregarContadorPendentes = useCallback(async (cid: string) => {
+    const { count } = await sb
+      .from('atendimentos')
+      .select('*', { count: 'exact', head: true })
+      .eq('conta_id', cid)
+      .eq('status', 'aguardando')
+    setContadorPendentes(count ?? 0)
+  }, [sb])
+
   const carregarAtendimentos = useCallback(async (cid: string, status: AtendimentoStatus) => {
     const { data } = await sb
       .from('atendimentos')
@@ -880,10 +890,11 @@ export default function AtendimentoPage() {
   useEffect(() => {
     if (!contaId) return
     carregarAtendimentos(contaId, tab)
+    carregarContadorPendentes(contaId)
     setSelecionado(null)
     setMostrarChat(false)
     setMostrarPerfil(false)
-  }, [contaId, tab, carregarAtendimentos])
+  }, [contaId, tab, carregarAtendimentos, carregarContadorPendentes])
 
   // ── Carregar mensagens ────────────────────────────────────────────────────────
 
@@ -928,7 +939,7 @@ export default function AtendimentoPage() {
       .on('postgres_changes', {
         event: '*', schema: 'public', table: 'atendimentos',
         filter: `conta_id=eq.${contaId}`,
-      }, () => carregarAtendimentos(contaId, tab))
+      }, () => { carregarAtendimentos(contaId, tab); carregarContadorPendentes(contaId) })
       .on('postgres_changes', {
         event: 'INSERT', schema: 'public', table: 'mensagens_wa',
         filter: `conta_id=eq.${contaId}`,
@@ -945,7 +956,7 @@ export default function AtendimentoPage() {
       })
       .subscribe()
     return () => { sb.removeChannel(ch) }
-  }, [contaId, tab, selecionado, sb, carregarAtendimentos])
+  }, [contaId, tab, selecionado, sb, carregarAtendimentos, carregarContadorPendentes])
 
   // ── Ações ─────────────────────────────────────────────────────────────────────
 
@@ -1150,7 +1161,12 @@ export default function AtendimentoPage() {
                 >
                   <Icon className="h-4 w-4" />
                   <span>{labelCurto}</span>
-                  {status !== 'finalizado' && tab === status && atendimentos.length > 0 && (
+                  {status === 'aguardando' && contadorPendentes > 0 && (
+                    <span className="rounded-full bg-amber-500 px-1.5 text-[9px] font-bold text-white leading-4">
+                      {contadorPendentes}
+                    </span>
+                  )}
+                  {status === 'em_atendimento' && tab === status && atendimentos.length > 0 && (
                     <span className="rounded-full bg-primary px-1.5 text-[9px] font-bold text-primary-foreground leading-4">
                       {atendimentos.length}
                     </span>
