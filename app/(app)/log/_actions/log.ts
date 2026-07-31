@@ -5,6 +5,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { formatBRL, formatData } from '@/lib/utils/format'
 import { substituirVariaveis } from '@/lib/utils/variaveis'
 import { revalidatePath } from 'next/cache'
+import { encontrarOuCriarAtendimento } from '@/lib/atendimento/encontrar-ou-criar'
 
 async function getContaId() {
   const supabase = await createClient()
@@ -179,30 +180,23 @@ export async function forcarEnvioAction(id: string): Promise<{ error?: string }>
       .update({ status: 'enviado', mensagem_final: texto, enviado_em: agora })
       .eq('id', id)
 
-    // Garantir que existe um atendimento para a mensagem aparecer no painel
-    let { data: atend } = await admin.from('atendimentos').select('id')
-      .eq('conta_id', contaId).eq('celular', celular).neq('status', 'finalizado').maybeSingle()
+    // Garantir que existe um atendimento e salvar a mensagem
+    const atendimentoId = await encontrarOuCriarAtendimento(
+      admin, contaId, celular,
+      notif.cliente_id as string | null,
+      texto,
+    )
 
-    if (!atend) {
-      const { data: novoAtend } = await admin.from('atendimentos').insert({
-        conta_id:        contaId,
-        celular,
-        cliente_id:      notif.cliente_id as string | null,
-        status:          'aguardando',
-        ultima_mensagem: texto,
-        ultima_msg_em:   agora,
-      }).select('id').maybeSingle()
-      atend = novoAtend
-    } else {
-      await admin.from('atendimentos')
-        .update({ ultima_mensagem: texto, ultima_msg_em: agora })
-        .eq('id', (atend as any).id)
-    }
-
-    await admin.from('mensagens_wa').insert({
-      conta_id: contaId, cliente_id: notif.cliente_id, atendimento_id: (atend as any)?.id ?? null,
-      celular, direcao: 'out', texto, lida: true,
+    const { error: mwaErr } = await admin.from('mensagens_wa').insert({
+      conta_id:       contaId,
+      cliente_id:     notif.cliente_id,
+      atendimento_id: atendimentoId,
+      celular,
+      direcao:        'out',
+      texto,
+      lida:           true,
     })
+    if (mwaErr) console.error('[forcarEnvio] mensagens_wa.insert', mwaErr)
 
     revalidatePath('/log')
     return {}

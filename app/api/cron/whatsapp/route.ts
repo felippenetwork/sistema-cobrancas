@@ -3,6 +3,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { encontrarOuCriarAtendimento } from '@/lib/atendimento/encontrar-ou-criar'
 
 export const maxDuration = 300
 
@@ -227,40 +228,23 @@ async function processarNotificacao(
       enviado_em:     agora,
     }).eq('id', notif.id).eq('status', 'fila')
 
-    // Garantir que existe um atendimento para a mensagem aparecer no painel
-    let { data: atendimento } = await supabase
-      .from('atendimentos')
-      .select('id')
-      .eq('conta_id', notif.conta_id)
-      .eq('celular', celular)
-      .neq('status', 'finalizado')
-      .maybeSingle()
+    // Garantir que existe um atendimento e salvar a mensagem
+    const atendimentoId = await encontrarOuCriarAtendimento(
+      supabase, notif.conta_id, celular,
+      notif.cliente_id,
+      textoMensagem,
+    )
 
-    if (!atendimento) {
-      const { data: novo } = await supabase.from('atendimentos').insert({
-        conta_id:        notif.conta_id,
-        celular,
-        cliente_id:      notif.cliente_id,
-        status:          'aguardando',
-        ultima_mensagem: textoMensagem,
-        ultima_msg_em:   agora,
-      }).select('id').maybeSingle()
-      atendimento = novo
-    } else {
-      await supabase.from('atendimentos')
-        .update({ ultima_mensagem: textoMensagem, ultima_msg_em: agora })
-        .eq('id', atendimento.id)
-    }
-
-    await supabase.from('mensagens_wa').insert({
+    const { error: mwaErr } = await supabase.from('mensagens_wa').insert({
       conta_id:       notif.conta_id,
       cliente_id:     notif.cliente_id,
-      atendimento_id: atendimento?.id ?? null,
+      atendimento_id: atendimentoId,
       celular,
       direcao:        'out',
       texto:          textoMensagem,
       lida:           true,
     })
+    if (mwaErr) console.error('[cron/whatsapp] mensagens_wa.insert', mwaErr)
 
     return 'enviado'
 
