@@ -11,6 +11,7 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { calcularVencimento } from '@/lib/utils/parcelas'
 import { enviarWhatsAppImediato } from '@/lib/whatsapp/enviar-imediato'
+import { renovarLookDefenseImediato } from '@/lib/lookdefense/renovar-imediato'
 
 const schemaId = z.string().uuid()
 
@@ -295,14 +296,20 @@ export async function baixarParcelaComConfirmacaoAction(
       .maybeSingle()
 
     if ((integ as any)?.login_externo && (integ as any)?.tipo_integracao) {
-      const { error: integErr } = await supabase.from('baixas_externas').insert({
+      const { data: baixaExt, error: integErr } = await supabase.from('baixas_externas').insert({
         conta_id:        contaIdFinal,
         cliente_id:      clienteId,
         parcela_id:      parcelaId,
         login_externo:   (integ as any).login_externo,
         tipo_integracao: (integ as any).tipo_integracao,
-      })
+      }).select('id').single()
       if (integErr) console.error('[baixarComConfirmacao] baixa_externa', integErr)
+      else if (baixaExt?.id) {
+        await renovarLookDefenseImediato(
+          contaIdFinal, baixaExt.id,
+          (integ as any).login_externo as string, 0,
+        )
+      }
     }
   }
 
