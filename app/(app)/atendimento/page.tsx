@@ -20,7 +20,9 @@ import {
   transferirAtendimentoAction, buscarDepartamentosEMembrosAction,
 } from './_actions/atendimentos'
 import {
-  buscarParcelaClienteAction, renovarParcelaAction,
+  buscarDadosPainelAction, renovarParcelaAction,
+  atualizarClienteCompletoAction, atualizarCobrancaValorAction,
+  type DadosPainel,
 } from './_actions/renovar'
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
@@ -583,7 +585,7 @@ function ModalNovaConversa({
   )
 }
 
-// ── PainelCliente — painel direito com info editável do cliente ───────────────
+// ── PainelCliente — painel com edição inline completa ────────────────────────
 
 function PainelCliente({
   atendimento,
@@ -594,77 +596,97 @@ function PainelCliente({
   onFechar: () => void
   onClienteAtualizado: () => void
 }) {
-  const [editando, setEditando]     = useState(false)
-  const [nome, setNome]             = useState(atendimento.clientes?.nome ?? '')
-  const [sobrenome, setSobrenome]   = useState(atendimento.clientes?.sobrenome ?? '')
-  const [salvando, setSalvando]     = useState(false)
-  const [erroSalvar, setErroSalvar] = useState<string | null>(null)
+  const [dados, setDados]                         = useState<DadosPainel | null>(null)
+  const [carregando, setCarregando]               = useState(false)
 
-  // Parcela + renovar
-  const [cobrancaId, setCobrancaId]               = useState<string | null>(null)
-  const [parcelaAberta, setParcelaAberta]         = useState<{ id: string; valor: number; dataVencimento: string } | null>(null)
-  const [carregandoParcela, setCarregandoParcela] = useState(false)
+  // Edição cliente
+  const [editandoCliente, setEditandoCliente]     = useState(false)
+  const [nome, setNome]                           = useState('')
+  const [sobrenome, setSobrenome]                 = useState('')
+  const [celular, setCelular]                     = useState('')
+  const [email, setEmail]                         = useState('')
+  const [loginExterno, setLoginExterno]           = useState('')
+  const [tipoIntegracao, setTipoIntegracao]       = useState('')
+  const [salvandoCliente, setSalvandoCliente]     = useState(false)
+  const [erroCliente, setErroCliente]             = useState<string | null>(null)
+
+  // Edição cobrança
+  const [editandoCob, setEditandoCob]             = useState(false)
+  const [valorCob, setValorCob]                   = useState('')
+  const [salvandoCob, setSalvandoCob]             = useState(false)
+  const [erroCob, setErroCob]                     = useState<string | null>(null)
+
+  // Renovação
   const [mostrarModalRenovar, setMostrarModalRenovar] = useState(false)
   const [renovando, setRenovando]                 = useState(false)
   const [erroRenovar, setErroRenovar]             = useState<string | null>(null)
   const [renovadoOk, setRenovadoOk]               = useState(false)
 
-  // Sincroniza quando atendimento muda
+  function popularCampos(d: DadosPainel) {
+    setNome(d.cliente?.nome ?? '')
+    setSobrenome(d.cliente?.sobrenome ?? '')
+    setCelular(d.cliente?.celular ?? '')
+    setEmail(d.cliente?.email ?? '')
+    setLoginExterno(d.cliente?.loginExterno ?? '')
+    setTipoIntegracao(d.cliente?.tipoIntegracao ?? '')
+    setValorCob(d.cobranca ? String(d.cobranca.valorMensalidade) : '')
+  }
+
+  const recarregarDados = () => {
+    if (!atendimento.cliente_id) return
+    setCarregando(true)
+    buscarDadosPainelAction(atendimento.cliente_id).then(d => {
+      setDados(d)
+      if (d) popularCampos(d)
+      setCarregando(false)
+    })
+  }
+
   useEffect(() => {
-    setNome(atendimento.clientes?.nome ?? '')
-    setSobrenome(atendimento.clientes?.sobrenome ?? '')
-    setEditando(false)
-    setErroSalvar(null)
+    setEditandoCliente(false)
+    setEditandoCob(false)
     setRenovadoOk(false)
     setMostrarModalRenovar(false)
-  }, [atendimento.id, atendimento.clientes])
+    recarregarDados()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [atendimento.id])
 
-  // Carrega parcela aberta do cliente
-  useEffect(() => {
-    if (!atendimento.cliente_id) return
-    setCarregandoParcela(true)
-    buscarParcelaClienteAction(atendimento.cliente_id).then(data => {
-      setCobrancaId(data?.cobrancaId ?? null)
-      setParcelaAberta(data?.parcela ?? null)
-      setCarregandoParcela(false)
+  async function salvarCliente() {
+    if (!atendimento.cliente_id || !nome.trim()) return
+    setSalvandoCliente(true); setErroCliente(null)
+    const r = await atualizarClienteCompletoAction(atendimento.cliente_id, {
+      nome, sobrenome, celular, email, loginExterno, tipoIntegracao,
     })
-  }, [atendimento.cliente_id])
+    setSalvandoCliente(false)
+    if (r.error) { setErroCliente(r.error) } else { setEditandoCliente(false); recarregarDados(); onClienteAtualizado() }
+  }
 
-  async function salvar() {
-    if (!atendimento.cliente_id) return
-    setSalvando(true)
-    setErroSalvar(null)
-    const r = await atualizarClienteAction(atendimento.cliente_id, nome, sobrenome)
-    setSalvando(false)
-    if (r.error) { setErroSalvar(r.error) } else { setEditando(false); onClienteAtualizado() }
+  async function salvarCobranca() {
+    if (!dados?.cobranca?.id) return
+    const v = parseFloat(valorCob.replace(',', '.'))
+    if (isNaN(v) || v <= 0) { setErroCob('Valor inválido.'); return }
+    setSalvandoCob(true); setErroCob(null)
+    const r = await atualizarCobrancaValorAction(dados.cobranca.id, v)
+    setSalvandoCob(false)
+    if (r.error) { setErroCob(r.error) } else { setEditandoCob(false); recarregarDados() }
   }
 
   async function handleRenovar() {
-    if (!parcelaAberta || !cobrancaId) return
-    setRenovando(true)
-    setErroRenovar(null)
-    const r = await renovarParcelaAction(parcelaAberta.id, cobrancaId)
+    const parcela   = dados?.parcela
+    const cobrancaId = dados?.cobranca?.id
+    if (!parcela || !cobrancaId) return
+    setRenovando(true); setErroRenovar(null)
+    const r = await renovarParcelaAction(parcela.id, cobrancaId)
     setRenovando(false)
-    if (r.error) {
-      setErroRenovar(r.error)
-    } else {
-      setRenovadoOk(true)
-      setMostrarModalRenovar(false)
-      // Recarrega parcela (próxima pode ter sido gerada)
-      if (atendimento.cliente_id) {
-        buscarParcelaClienteAction(atendimento.cliente_id).then(data => {
-          setCobrancaId(data?.cobrancaId ?? null)
-          setParcelaAberta(data?.parcela ?? null)
-          setRenovadoOk(false)
-        })
-      }
+    if (r.error) { setErroRenovar(r.error) } else {
+      setRenovadoOk(true); setMostrarModalRenovar(false)
+      setTimeout(() => { setRenovadoOk(false); recarregarDados() }, 3000)
       onClienteAtualizado()
     }
   }
 
-  const nomeExibido = [
-    atendimento.clientes?.nome, atendimento.clientes?.sobrenome,
-  ].filter(Boolean).join(' ') || atendimento.celular
+  const nomeExibido = [dados?.cliente?.nome ?? atendimento.clientes?.nome, dados?.cliente?.sobrenome ?? atendimento.clientes?.sobrenome]
+    .filter(Boolean).join(' ') || atendimento.celular
 
   const statusConfig: Record<AtendimentoStatus, { label: string; cls: string }> = {
     aguardando:     { label: 'Aguardando',     cls: 'bg-amber-500/15 text-amber-500' },
@@ -672,25 +694,25 @@ function PainelCliente({
     finalizado:     { label: 'Finalizado',     cls: 'bg-muted text-muted-foreground' },
   }
   const st = statusConfig[atendimento.status]
+  const fmtMoeda = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v)
+  const inputCls = 'w-full rounded-xl border border-border bg-input px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20'
+  const labelCls = 'mb-1 block text-xs font-medium text-muted-foreground'
 
-  const formatarMoeda = (v: number) =>
-    new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v)
+  const parcela    = dados?.parcela
+  const cobrancaId = dados?.cobranca?.id ?? null
 
   return (
     <div className="relative flex h-full flex-col">
       {/* Header */}
       <div className="flex shrink-0 items-center justify-between border-b border-border px-5 py-4">
         <h2 className="text-sm font-semibold text-foreground">Perfil</h2>
-        <button
-          onClick={onFechar}
-          className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-accent hover:text-foreground"
-        >
+        <button onClick={onFechar} className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-accent hover:text-foreground">
           <X className="h-4 w-4" />
         </button>
       </div>
 
       <div className="flex-1 overflow-y-auto p-5 space-y-5">
-        {/* Avatar + nome */}
+        {/* Avatar */}
         <div className="flex flex-col items-center gap-3 text-center">
           <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 text-xl font-bold text-primary">
             {iniciais(nomeExibido)}
@@ -701,65 +723,26 @@ function PainelCliente({
           </div>
         </div>
 
-        {/* Atalhos: cadastro + cobranças */}
-        {atendimento.cliente_id && (
-          <div className="grid grid-cols-2 gap-2">
-            <Link
-              href={`/clientes/${atendimento.cliente_id}`}
-              className="flex items-center justify-center gap-1.5 rounded-xl border border-border px-3 py-2.5 text-xs text-muted-foreground transition hover:border-primary hover:text-primary"
-            >
-              <User className="h-3.5 w-3.5" />
-              Ver cadastro
-            </Link>
-            {cobrancaId ? (
-              <Link
-                href={`/cobrancas/${cobrancaId}`}
-                className="flex items-center justify-center gap-1.5 rounded-xl border border-border px-3 py-2.5 text-xs text-muted-foreground transition hover:border-primary hover:text-primary"
-              >
-                <CreditCard className="h-3.5 w-3.5" />
-                Ver cobrança
-              </Link>
-            ) : (
-              <Link
-                href="/cobrancas/nova"
-                className="flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-border px-3 py-2.5 text-xs text-muted-foreground transition hover:border-primary hover:text-primary"
-              >
-                <CreditCard className="h-3.5 w-3.5" />
-                Nova cobrança
-              </Link>
-            )}
-          </div>
-        )}
-
-        {/* Renovação */}
+        {/* Renovação rápida */}
         {atendimento.cliente_id && (
           <div className="rounded-xl border border-border p-4 space-y-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Renovação rápida
-            </p>
-
-            {carregandoParcela ? (
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                Buscando parcela…
-              </div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Renovação rápida</p>
+            {carregando ? (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" />Carregando…</div>
             ) : renovadoOk ? (
               <div className="flex items-center gap-2 rounded-xl bg-green-500/10 px-3 py-2.5 text-xs font-medium text-green-600 dark:text-green-400">
-                <CheckCircle className="h-3.5 w-3.5" />
-                Renovado com sucesso! WhatsApp enviado.
+                <CheckCircle className="h-3.5 w-3.5" />Renovado! WhatsApp enviado.
               </div>
-            ) : parcelaAberta ? (
+            ) : parcela ? (
               <>
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between text-xs">
                     <span className="text-muted-foreground">Valor</span>
-                    <span className="font-semibold text-foreground">{formatarMoeda(parcelaAberta.valor)}</span>
+                    <span className="font-semibold text-foreground">{fmtMoeda(parcela.valor)}</span>
                   </div>
                   <div className="flex items-center justify-between text-xs">
                     <span className="text-muted-foreground">Vencimento</span>
-                    <span className="text-foreground">
-                      {parcelaAberta.dataVencimento.split('-').reverse().join('/')}
-                    </span>
+                    <span className="text-foreground">{parcela.dataVencimento.split('-').reverse().join('/')}</span>
                   </div>
                 </div>
                 {erroRenovar && <p className="text-xs text-destructive">{erroRenovar}</p>}
@@ -767,121 +750,167 @@ function PainelCliente({
                   onClick={() => { setMostrarModalRenovar(true); setErroRenovar(null) }}
                   className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-3 py-2.5 text-xs font-medium text-primary-foreground transition hover:opacity-90"
                 >
-                  <RefreshCw className="h-3.5 w-3.5" />
-                  Renovar mensalidade
+                  <RefreshCw className="h-3.5 w-3.5" />Renovar mensalidade
                 </button>
               </>
             ) : (
-              <p className="text-xs text-muted-foreground">
-                Nenhuma parcela em aberto.{' '}
-                {cobrancaId && (
-                  <Link href={`/cobrancas/${cobrancaId}`} className="text-primary underline-offset-2 hover:underline">
-                    Ver cobranças
-                  </Link>
-                )}
-              </p>
+              <p className="text-xs text-muted-foreground">Nenhuma parcela em aberto.</p>
             )}
           </div>
         )}
 
-        {/* Número + status */}
+        {/* Dados da cobrança — editável inline */}
+        {atendimento.cliente_id && (
+          <div className="rounded-xl border border-border p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Cobrança</p>
+              {!editandoCob && dados?.cobranca && (
+                <button onClick={() => setEditandoCob(true)} className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-muted-foreground transition hover:bg-accent hover:text-foreground">
+                  <Pencil className="h-3 w-3" />Editar
+                </button>
+              )}
+            </div>
+
+            {carregando ? (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" />Carregando…</div>
+            ) : !dados?.cobranca ? (
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-muted-foreground">Sem cobrança ativa.</p>
+                <Link href="/cobrancas/nova" className="flex items-center gap-1 text-xs text-primary hover:underline underline-offset-2">
+                  <CreditCard className="h-3.5 w-3.5" />Nova
+                </Link>
+              </div>
+            ) : editandoCob ? (
+              <div className="space-y-3">
+                <div>
+                  <label className={labelCls}>Valor da mensalidade (R$)</label>
+                  <input
+                    value={valorCob}
+                    onChange={e => setValorCob(e.target.value)}
+                    className={inputCls}
+                    placeholder="0,00"
+                    inputMode="decimal"
+                  />
+                </div>
+                {erroCob && <p className="text-xs text-destructive">{erroCob}</p>}
+                <div className="flex gap-2">
+                  <button onClick={() => { setEditandoCob(false); setErroCob(null); setValorCob(String(dados.cobranca!.valorMensalidade)) }} className="flex-1 rounded-xl border border-border py-2 text-xs text-muted-foreground transition hover:bg-accent">Cancelar</button>
+                  <button onClick={salvarCobranca} disabled={salvandoCob} className="flex-1 rounded-xl bg-primary py-2 text-xs font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50">{salvandoCob ? 'Salvando…' : 'Salvar'}</button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-muted-foreground">Mensalidade</span>
+                  <span className="font-semibold text-foreground">{fmtMoeda(dados.cobranca.valorMensalidade)}</span>
+                </div>
+                {cobrancaId && (
+                  <Link href={`/cobrancas/${cobrancaId}`} className="flex items-center gap-1 text-xs text-primary hover:underline underline-offset-2 mt-1">
+                    <ExternalLink className="h-3 w-3" />Ver todas as parcelas
+                  </Link>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Info do atendimento */}
         <div className="rounded-xl border border-border bg-muted/30 p-4 space-y-3">
           <div className="flex items-center justify-between text-xs">
             <span className="text-muted-foreground">Atendimento</span>
-            <span className="font-mono font-semibold text-foreground">
-              #{String(atendimento.numero).padStart(4, '0')}
-            </span>
+            <span className="font-mono font-semibold text-foreground">#{String(atendimento.numero).padStart(4, '0')}</span>
           </div>
           <div className="flex items-center justify-between text-xs">
             <span className="text-muted-foreground">Status</span>
-            <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${st.cls}`}>
-              {st.label}
-            </span>
+            <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${st.cls}`}>{st.label}</span>
           </div>
           {atendimento.departamentos && (
             <div className="flex items-center justify-between text-xs">
               <span className="text-muted-foreground">Departamento</span>
-              <span
-                className="rounded-full px-2.5 py-0.5 text-[10px] font-semibold text-white"
-                style={{ backgroundColor: atendimento.departamentos.cor }}
-              >
+              <span className="rounded-full px-2.5 py-0.5 text-[10px] font-semibold text-white" style={{ backgroundColor: atendimento.departamentos.cor }}>
                 {atendimento.departamentos.nome}
               </span>
             </div>
           )}
           <div className="flex items-center justify-between text-xs">
             <span className="text-muted-foreground">Criado em</span>
-            <span className="text-foreground">
-              {new Date(atendimento.criado_em).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })}
-            </span>
+            <span className="text-foreground">{new Date(atendimento.criado_em).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })}</span>
           </div>
         </div>
 
-        {/* Edição dos dados do cliente */}
+        {/* Dados do cliente — editável inline */}
         {atendimento.cliente_id && (
           <div>
             <div className="mb-3 flex items-center justify-between">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Dados do cliente
-              </p>
-              {!editando && (
-                <button
-                  onClick={() => setEditando(true)}
-                  className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-muted-foreground transition hover:bg-accent hover:text-foreground"
-                >
-                  <Pencil className="h-3 w-3" />
-                  Editar
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Dados do cliente</p>
+              {!editandoCliente && (
+                <button onClick={() => setEditandoCliente(true)} className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-muted-foreground transition hover:bg-accent hover:text-foreground">
+                  <Pencil className="h-3 w-3" />Editar
                 </button>
               )}
             </div>
 
-            {editando ? (
+            {editandoCliente ? (
               <div className="space-y-3">
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-muted-foreground">Nome</label>
-                  <input
-                    value={nome}
-                    onChange={e => setNome(e.target.value)}
-                    className="w-full rounded-xl border border-border bg-input px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
-                  />
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className={labelCls}>Nome</label>
+                    <input value={nome} onChange={e => setNome(e.target.value)} className={inputCls} />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Sobrenome</label>
+                    <input value={sobrenome} onChange={e => setSobrenome(e.target.value)} className={inputCls} />
+                  </div>
                 </div>
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-muted-foreground">Sobrenome</label>
-                  <input
-                    value={sobrenome}
-                    onChange={e => setSobrenome(e.target.value)}
-                    className="w-full rounded-xl border border-border bg-input px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
-                  />
+                  <label className={labelCls}>Celular (com DDI)</label>
+                  <input value={celular} onChange={e => setCelular(e.target.value)} className={inputCls} placeholder="5511999999999" />
                 </div>
-                {erroSalvar && <p className="text-xs text-destructive">{erroSalvar}</p>}
+                <div>
+                  <label className={labelCls}>E-mail</label>
+                  <input value={email} onChange={e => setEmail(e.target.value)} className={inputCls} type="email" />
+                </div>
+                <div>
+                  <label className={labelCls}>Integração IPTV</label>
+                  <select value={tipoIntegracao} onChange={e => setTipoIntegracao(e.target.value)} className={inputCls}>
+                    <option value="">Nenhuma</option>
+                    <option value="lookdefense_iptv">LookDefense IPTV</option>
+                    <option value="lookdefense_p2p">LookDefense P2P</option>
+                  </select>
+                </div>
+                {tipoIntegracao && (
+                  <div>
+                    <label className={labelCls}>Login externo (usuário no painel)</label>
+                    <input value={loginExterno} onChange={e => setLoginExterno(e.target.value)} className={inputCls} />
+                  </div>
+                )}
+                {erroCliente && <p className="text-xs text-destructive">{erroCliente}</p>}
                 <div className="flex gap-2">
-                  <button
-                    onClick={() => { setEditando(false); setErroSalvar(null) }}
-                    className="flex-1 rounded-xl border border-border py-2 text-xs text-muted-foreground transition hover:bg-accent"
-                  >Cancelar</button>
-                  <button
-                    onClick={salvar}
-                    disabled={salvando || !nome.trim()}
-                    className="flex-1 rounded-xl bg-primary py-2 text-xs font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
-                  >{salvando ? 'Salvando…' : 'Salvar'}</button>
+                  <button onClick={() => { setEditandoCliente(false); setErroCliente(null); if (dados) popularCampos(dados) }} className="flex-1 rounded-xl border border-border py-2 text-xs text-muted-foreground transition hover:bg-accent">Cancelar</button>
+                  <button onClick={salvarCliente} disabled={salvandoCliente || !nome.trim()} className="flex-1 rounded-xl bg-primary py-2 text-xs font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50">{salvandoCliente ? 'Salvando…' : 'Salvar'}</button>
                 </div>
               </div>
             ) : (
               <div className="space-y-2">
                 <div className="flex items-center gap-2 rounded-xl border border-border px-3 py-2.5">
                   <User className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                  <span className="truncate text-sm text-foreground">
-                    {[atendimento.clientes?.nome, atendimento.clientes?.sobrenome].filter(Boolean).join(' ') || '—'}
-                  </span>
+                  <span className="truncate text-sm text-foreground">{[dados?.cliente?.nome, dados?.cliente?.sobrenome].filter(Boolean).join(' ') || '—'}</span>
                 </div>
                 <div className="flex items-center gap-2 rounded-xl border border-border px-3 py-2.5">
                   <Phone className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                  <span className="truncate text-sm text-foreground">{atendimento.celular}</span>
+                  <span className="truncate text-sm text-foreground">{dados?.cliente?.celular || atendimento.celular}</span>
                 </div>
-                {atendimento.clientes?.email && (
+                {dados?.cliente?.email && (
                   <div className="flex items-center gap-2 rounded-xl border border-border px-3 py-2.5">
                     <Mail className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                    <span className="truncate text-sm text-foreground">{atendimento.clientes.email}</span>
+                    <span className="truncate text-sm text-foreground">{dados.cliente.email}</span>
+                  </div>
+                )}
+                {dados?.cliente?.loginExterno && (
+                  <div className="flex items-center gap-2 rounded-xl border border-border px-3 py-2.5">
+                    <CreditCard className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <span className="truncate text-sm text-foreground">{dados.cliente.loginExterno}</span>
+                    <span className="ml-auto shrink-0 rounded bg-muted px-1.5 py-0.5 text-[9px] font-semibold uppercase text-muted-foreground">{dados.cliente.tipoIntegracao?.replace('lookdefense_', '') ?? ''}</span>
                   </div>
                 )}
               </div>
@@ -891,11 +920,8 @@ function PainelCliente({
       </div>
 
       {/* Modal confirmação de renovação */}
-      {mostrarModalRenovar && parcelaAberta && (
-        <div
-          className="absolute inset-0 z-10 flex items-center justify-center bg-black/60 p-4"
-          onClick={e => e.target === e.currentTarget && setMostrarModalRenovar(false)}
-        >
+      {mostrarModalRenovar && parcela && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/60 p-4" onClick={e => e.target === e.currentTarget && setMostrarModalRenovar(false)}>
           <div className="w-full max-w-xs rounded-2xl border border-border bg-card p-6 shadow-2xl space-y-4">
             <h3 className="text-sm font-semibold text-foreground">Confirmar Renovação</h3>
             <div className="rounded-xl bg-muted/30 p-3 space-y-2">
@@ -905,28 +931,18 @@ function PainelCliente({
               </div>
               <div className="flex justify-between text-xs">
                 <span className="text-muted-foreground">Valor</span>
-                <span className="font-semibold text-foreground">{formatarMoeda(parcelaAberta.valor)}</span>
+                <span className="font-semibold text-foreground">{fmtMoeda(parcela.valor)}</span>
               </div>
               <div className="flex justify-between text-xs">
                 <span className="text-muted-foreground">Vencimento</span>
-                <span className="text-foreground">{parcelaAberta.dataVencimento.split('-').reverse().join('/')}</span>
+                <span className="text-foreground">{parcela.dataVencimento.split('-').reverse().join('/')}</span>
               </div>
             </div>
-            <p className="text-xs text-muted-foreground">
-              A mensagem de confirmação de pagamento será enviada automaticamente via WhatsApp.
-            </p>
+            <p className="text-xs text-muted-foreground">WhatsApp de confirmação será enviado automaticamente.</p>
             {erroRenovar && <p className="text-xs text-destructive">{erroRenovar}</p>}
             <div className="flex gap-2">
-              <button
-                onClick={() => setMostrarModalRenovar(false)}
-                disabled={renovando}
-                className="flex-1 rounded-xl border border-border py-2.5 text-xs text-muted-foreground transition hover:bg-accent disabled:opacity-50"
-              >Cancelar</button>
-              <button
-                onClick={handleRenovar}
-                disabled={renovando}
-                className="flex-1 rounded-xl bg-primary py-2.5 text-xs font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
-              >{renovando ? 'Renovando…' : 'Confirmar'}</button>
+              <button onClick={() => setMostrarModalRenovar(false)} disabled={renovando} className="flex-1 rounded-xl border border-border py-2.5 text-xs text-muted-foreground transition hover:bg-accent disabled:opacity-50">Cancelar</button>
+              <button onClick={handleRenovar} disabled={renovando} className="flex-1 rounded-xl bg-primary py-2.5 text-xs font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50">{renovando ? 'Renovando…' : 'Confirmar'}</button>
             </div>
           </div>
         </div>

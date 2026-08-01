@@ -8,6 +8,111 @@ import { renovarLookDefenseImediato } from '@/lib/lookdefense/renovar-imediato'
 
 export type ActionState = { error: string | null; success?: boolean }
 
+export type DadosPainel = {
+  cliente: {
+    nome: string; sobrenome: string; celular: string
+    email: string | null; loginExterno: string | null; tipoIntegracao: string | null
+  } | null
+  cobranca: { id: string; valorMensalidade: number; diaPagamento: number | null } | null
+  parcela:  { id: string; valor: number; dataVencimento: string } | null
+}
+
+// Busca todos os dados necessários para o painel numa única chamada
+export async function buscarDadosPainelAction(clienteId: string): Promise<DadosPainel | null> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return null
+
+  const contaId = await resolverContaId(supabase, user.id)
+  if (!contaId) return null
+
+  const [{ data: cliente }, { data: cobrancas }] = await Promise.all([
+    supabase.from('clientes')
+      .select('nome, sobrenome, celular, email, login_externo, tipo_integracao')
+      .eq('id', clienteId).eq('conta_id', contaId).maybeSingle(),
+    supabase.from('cobrancas')
+      .select('id, valor_mensalidade, dia_pagamento')
+      .eq('conta_id', contaId).eq('cliente_id', clienteId).neq('status', 'cancelada')
+      .order('created_at', { ascending: false }).limit(1),
+  ])
+
+  const cob = (cobrancas?.[0] as any) ?? null
+
+  let parcela = null
+  if (cob?.id) {
+    const { data: p } = await supabase.from('parcelas')
+      .select('id, valor, data_vencimento')
+      .eq('conta_id', contaId).eq('cobranca_id', cob.id).eq('status', 'aberta')
+      .order('data_vencimento', { ascending: true }).limit(1).maybeSingle()
+    if (p) parcela = { id: (p as any).id, valor: Number((p as any).valor), dataVencimento: (p as any).data_vencimento as string }
+  }
+
+  return {
+    cliente: cliente ? {
+      nome:            (cliente as any).nome          ?? '',
+      sobrenome:       (cliente as any).sobrenome     ?? '',
+      celular:         (cliente as any).celular       ?? '',
+      email:           (cliente as any).email         ?? null,
+      loginExterno:    (cliente as any).login_externo ?? null,
+      tipoIntegracao:  (cliente as any).tipo_integracao ?? null,
+    } : null,
+    cobranca: cob ? { id: cob.id, valorMensalidade: Number(cob.valor_mensalidade ?? 0), diaPagamento: cob.dia_pagamento ?? null } : null,
+    parcela,
+  }
+}
+
+// Atualiza todos os dados editáveis do cliente
+export async function atualizarClienteCompletoAction(
+  clienteId: string,
+  dados: { nome: string; sobrenome: string; celular: string; email: string; loginExterno: string; tipoIntegracao: string },
+): Promise<ActionState> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Não autenticado.' }
+
+  const contaId = await resolverContaId(supabase, user.id)
+  if (!contaId) return { error: 'Conta não encontrada.' }
+
+  const { error } = await supabase.from('clientes').update({
+    nome:            dados.nome.trim(),
+    sobrenome:       dados.sobrenome.trim() || null,
+    celular:         dados.celular.trim(),
+    email:           dados.email.trim() || null,
+    login_externo:   dados.loginExterno.trim() || null,
+    tipo_integracao: dados.tipoIntegracao || null,
+  }).eq('id', clienteId).eq('conta_id', contaId)
+
+  if (error) return { error: error.message }
+  return { error: null, success: true }
+}
+
+// Atualiza o valor da mensalidade na cobrança (e cascateia para parcelas abertas)
+export async function atualizarCobrancaValorAction(
+  cobrancaId: string,
+  valorMensalidade: number,
+): Promise<ActionState> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Não autenticado.' }
+
+  const contaId = await resolverContaId(supabase, user.id)
+  if (!contaId) return { error: 'Conta não encontrada.' }
+
+  if (isNaN(valorMensalidade) || valorMensalidade <= 0) return { error: 'Valor inválido.' }
+
+  const { error: e1 } = await supabase.from('cobrancas')
+    .update({ valor_mensalidade: valorMensalidade })
+    .eq('id', cobrancaId).eq('conta_id', contaId)
+  if (e1) return { error: e1.message }
+
+  // Cascateia para parcelas abertas
+  await supabase.from('parcelas')
+    .update({ valor: valorMensalidade })
+    .eq('cobranca_id', cobrancaId).eq('conta_id', contaId).eq('status', 'aberta')
+
+  return { error: null, success: true }
+}
+
 async function resolverContaId(supabase: Awaited<ReturnType<typeof createClient>>, userId: string): Promise<string | null> {
   const { data: conta } = await supabase.from('contas').select('id').eq('owner_user_id', userId).maybeSingle()
   if (conta?.id) return conta.id as string
