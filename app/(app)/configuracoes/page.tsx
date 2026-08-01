@@ -2,7 +2,7 @@
 
 import { useActionState, useState, useEffect, useTransition, useRef } from 'react'
 import { Loader2, CheckCircle, Eye, EyeOff, ExternalLink } from 'lucide-react'
-import { salvarConfiguracoesAction, salvarMetaApiAction, salvarTwilioAction, salvarLookDefenseAction, toggleMetaApiAction, toggleTwilioAction } from './_actions/configuracoes'
+import { salvarConfiguracoesAction, salvarMetaApiAction, salvarTwilioAction, salvarLookDefenseAction, toggleMetaApiAction, toggleTwilioAction, salvarEfiBankAction } from './_actions/configuracoes'
 import { sanitizarLocalPart } from '@/lib/email/template'
 import { createClient } from '@/lib/supabase/client'
 
@@ -25,6 +25,11 @@ type Data = {
     twilio_from_number?: string | null
     ld_username?: string | null
     ld_password?: string | null
+    efi_client_id?:     string | null
+    efi_client_secret?: string | null
+    efi_pix_key?:       string | null
+    efi_cert_base64?:   string | null
+    efi_sandbox?:       boolean | null
   } | null
   rem:    { local_part?: string | null; from_name?: string | null } | null
   domain: string | null
@@ -37,6 +42,7 @@ export default function ConfiguracoesPage() {
   const [stateMeta,   formActionMeta,   isPendingMeta]   = useActionState(salvarMetaApiAction,       { error: null })
   const [stateTwilio,      formActionTwilio,      isPendingTwilio]      = useActionState(salvarTwilioAction,    { error: null })
   const [stateLookDefense, formActionLookDefense, isPendingLookDefense] = useActionState(salvarLookDefenseAction, { error: null })
+  const [stateEfi,         formActionEfi,         isPendingEfi]         = useActionState(salvarEfiBankAction,    { error: null })
   const [, startToggleMeta]   = useTransition()
   const [, startToggleTwilio] = useTransition()
 
@@ -46,6 +52,8 @@ export default function ConfiguracoesPage() {
   const [showToken, setShowToken]         = useState(false)
   const [showTwilioToken, setShowTwilioToken] = useState(false)
   const [showLdPassword, setShowLdPassword]   = useState(false)
+  const [showEfiSecret, setShowEfiSecret]     = useState(false)
+  const [efiSandbox, setEfiSandbox]           = useState(false)
   const [overrideMetaAtivo, setOverrideMetaAtivo]     = useState<boolean | null>(null)
   const [overrideTwilioAtivo, setOverrideTwilioAtivo] = useState<boolean | null>(null)
   const scrollSaveRef = useRef(0)
@@ -67,16 +75,18 @@ export default function ConfiguracoesPage() {
     ])
     if (!conta) return
 
-    const [{ data: cfg }, { data: rem }] = await Promise.all([
-      sb.from('configuracoes')
-        .select('contato, cpf_cnpj, endereco, nome_comercial, meta_access_token, meta_api_ativo, meta_phone_number_id, meta_waba_id, twilio_account_sid, twilio_ativo, twilio_auth_token, twilio_from_number, ld_username, ld_password')
+    const [{ data: cfgRaw }, { data: rem }] = await Promise.all([
+      (sb.from('configuracoes') as any)
+        .select('contato, cpf_cnpj, endereco, nome_comercial, meta_access_token, meta_api_ativo, meta_phone_number_id, meta_waba_id, twilio_account_sid, twilio_ativo, twilio_auth_token, twilio_from_number, ld_username, ld_password, efi_client_id, efi_client_secret, efi_pix_key, efi_cert_base64, efi_sandbox')
         .eq('conta_id', conta.id)
         .maybeSingle(),
       sb.from('email_remetente').select('local_part, from_name').eq('conta_id', conta.id).maybeSingle(),
     ])
 
+    const cfg = cfgRaw as Data['cfg']
     setData({ cfg, rem, domain: plat?.dominio_email_operador ?? null })
     setLocalPart(rem?.local_part ?? '')
+    setEfiSandbox(!!(cfg as any)?.efi_sandbox)
     setLoading(false)
 
     if (preserveScroll && scrollSaveRef.current > 0) {
@@ -110,6 +120,7 @@ export default function ConfiguracoesPage() {
   useEffect(() => { if (stateMeta.success)   loadData(true) }, [stateMeta.success])
   useEffect(() => { if (stateTwilio.success)      loadData(true) }, [stateTwilio.success])
   useEffect(() => { if (stateLookDefense.success) loadData(true) }, [stateLookDefense.success])
+  useEffect(() => { if (stateEfi.success)         loadData(true) }, [stateEfi.success])
 
   const previewEmail = data?.domain && localPart
     ? `${sanitizarLocalPart(localPart)}@${data.domain}`
@@ -546,6 +557,116 @@ export default function ConfiguracoesPage() {
         >
           {isPendingLookDefense && <Loader2 className="h-4 w-4 animate-spin" />}
           {isPendingLookDefense ? 'Salvando…' : 'Salvar credenciais LookDefense'}
+        </button>
+      </form>
+
+      {/* ── EfiBanK PIX ─────────────────────────────────────────────────────── */}
+      <form action={formActionEfi} className="space-y-6">
+        <section className="rounded-2xl border border-border bg-card p-6 space-y-4">
+          <h2 className="text-sm font-semibold text-foreground">EfiBanK PIX</h2>
+
+          <div className="rounded-xl border border-border bg-muted/30 p-4 text-xs text-muted-foreground space-y-2">
+            <p className="font-medium text-foreground">Como configurar:</p>
+            <ol className="list-decimal list-inside space-y-1">
+              <li>Acesse <strong>developers.efipay.com.br</strong> → Aplicações → Nova Aplicação → marque <strong>API Pix</strong></li>
+              <li>Copie o <strong>Client ID</strong> e o <strong>Client Secret</strong></li>
+              <li>Baixe o certificado <strong>.p12</strong> em Meus Certificados</li>
+              <li>Converta para Base64: <code className="bg-muted px-1 rounded">base64 -i certificado.p12</code> (Mac/Linux) ou use um conversor online</li>
+              <li>Informe sua chave PIX (CPF/CNPJ, telefone, e-mail ou chave aleatória)</li>
+              <li>Configure o webhook na EfiBanK: URL → <code className="bg-muted px-1 rounded">https://www.cobranx.site/api/webhooks/efibank?token=SEU_CRON_SECRET</code></li>
+            </ol>
+          </div>
+
+          <div className="space-y-4">
+            {/* Ambiente */}
+            <div className="flex items-center justify-between rounded-xl border border-border px-4 py-3">
+              <div>
+                <p className="text-sm font-medium text-foreground">Ambiente sandbox (homologação)</p>
+                <p className="text-xs text-muted-foreground">Ative apenas para testes. Desative em produção.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEfiSandbox(v => !v)}
+                className={[
+                  'relative h-6 w-11 rounded-full transition-colors focus:outline-none',
+                  efiSandbox ? 'bg-amber-500' : 'bg-muted',
+                ].join(' ')}
+              >
+                <span className={['absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform', efiSandbox ? 'translate-x-5' : 'translate-x-0.5'].join(' ')} />
+              </button>
+              <input type="hidden" name="efi_sandbox" value={String(efiSandbox)} />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className={LABEL}>Client ID</label>
+              <input
+                name="efi_client_id"
+                defaultValue={data?.cfg?.efi_client_id ?? ''}
+                placeholder="Client_Id_..."
+                autoComplete="off"
+                className={INPUT}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className={LABEL}>Client Secret</label>
+              <div className="relative">
+                <input
+                  name="efi_client_secret"
+                  type={showEfiSecret ? 'text' : 'password'}
+                  defaultValue={data?.cfg?.efi_client_secret ?? ''}
+                  placeholder="Client_Secret_..."
+                  autoComplete="new-password"
+                  className={INPUT + ' pr-10'}
+                />
+                <button type="button" onClick={() => setShowEfiSecret(v => !v)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                  {showEfiSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className={LABEL}>Chave PIX (recebimento)</label>
+              <input
+                name="efi_pix_key"
+                defaultValue={data?.cfg?.efi_pix_key ?? ''}
+                placeholder="CPF, CNPJ, e-mail, telefone ou chave aleatória"
+                className={INPUT}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className={LABEL}>Certificado .p12 em Base64</label>
+              <textarea
+                name="efi_cert_base64"
+                defaultValue={data?.cfg?.efi_cert_base64 ?? ''}
+                placeholder="Cole aqui o conteúdo base64 do arquivo .p12..."
+                rows={4}
+                className={INPUT + ' resize-none font-mono text-xs'}
+              />
+              <p className="text-xs text-muted-foreground">
+                {data?.cfg?.efi_cert_base64 ? '✓ Certificado salvo.' : 'Nenhum certificado salvo.'}
+              </p>
+            </div>
+          </div>
+        </section>
+
+        {stateEfi.error && (
+          <p className="rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">{stateEfi.error}</p>
+        )}
+        {stateEfi.success && (
+          <p className="flex items-center gap-2 rounded-xl bg-success-bg px-3 py-2 text-sm text-success">
+            <CheckCircle className="h-4 w-4" />
+            Credenciais EfiBanK salvas.
+          </p>
+        )}
+
+        <button
+          type="submit" disabled={isPendingEfi}
+          className="flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
+        >
+          {isPendingEfi && <Loader2 className="h-4 w-4 animate-spin" />}
+          {isPendingEfi ? 'Salvando…' : 'Salvar credenciais EfiBanK'}
         </button>
       </form>
     </div>

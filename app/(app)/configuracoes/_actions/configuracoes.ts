@@ -130,6 +130,40 @@ export async function salvarLookDefenseAction(
   }
 }
 
+// ── Salvar credenciais EfiBanK PIX ──────────────────────────────────────────
+export async function salvarEfiBankAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const { supabase, contaId } = await getConta()
+
+    const clientId     = (formData.get('efi_client_id')     as string)?.trim() || null
+    const clientSecret = (formData.get('efi_client_secret') as string)?.trim() || null
+    const pixKey       = (formData.get('efi_pix_key')       as string)?.trim() || null
+    const certBase64   = (formData.get('efi_cert_base64')   as string)?.trim() || null
+    const sandbox      = formData.get('efi_sandbox') === 'true'
+
+    const { error } = await (supabase.from('configuracoes') as any).upsert(
+      {
+        conta_id:          contaId,
+        efi_client_id:     clientId,
+        efi_client_secret: clientSecret,
+        efi_pix_key:       pixKey,
+        efi_cert_base64:   certBase64,
+        efi_sandbox:       sandbox,
+      },
+      { onConflict: 'conta_id' },
+    )
+
+    if (error) return { error: error.message }
+    revalidatePath('/configuracoes')
+    return { error: null, success: true }
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'Erro desconhecido.' }
+  }
+}
+
 // ── Salvar dados da empresa + remetente de e-mail ────────────────────────────
 export async function salvarConfiguracoesAction(
   _prev: ActionState,

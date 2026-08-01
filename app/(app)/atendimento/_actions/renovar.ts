@@ -5,6 +5,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { calcularVencimento } from '@/lib/utils/parcelas'
 import { enviarWhatsAppImediato } from '@/lib/whatsapp/enviar-imediato'
 import { renovarLookDefenseImediato } from '@/lib/lookdefense/renovar-imediato'
+import { criarCobrancaPix, type PixGerado } from '@/lib/efibank/pix'
 
 export type ActionState = { error: string | null; success?: boolean }
 
@@ -118,6 +119,24 @@ async function resolverContaId(supabase: Awaited<ReturnType<typeof createClient>
   if (conta?.id) return conta.id as string
   const { data: membro } = await supabase.from('membros_conta').select('conta_id').eq('user_id', userId).eq('ativo', true).maybeSingle()
   return (membro as any)?.conta_id ?? null
+}
+
+// Gera uma cobrança PIX via EfiBanK para a parcela aberta do cliente
+export async function gerarPixParcelaAction(
+  parcelaId: string,
+  valor: number,
+  descricao?: string,
+): Promise<(PixGerado & { error?: undefined }) | { error: string }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Não autenticado.' }
+
+  const contaId = await resolverContaId(supabase, user.id)
+  if (!contaId) return { error: 'Conta não encontrada.' }
+
+  const result = await criarCobrancaPix(contaId, parcelaId, valor, descricao)
+  if ('erro' in result) return { error: result.erro }
+  return result
 }
 
 // Retorna a próxima parcela aberta do cliente e o cobrancaId para links

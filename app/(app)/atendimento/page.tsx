@@ -22,8 +22,10 @@ import {
 import {
   buscarDadosPainelAction, renovarParcelaAction,
   atualizarClienteCompletoAction, atualizarCobrancaValorAction,
+  gerarPixParcelaAction,
   type DadosPainel,
 } from './_actions/renovar'
+import QRCode from 'react-qr-code'
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
 
@@ -717,6 +719,13 @@ function PainelCliente({
   const [erroRenovar, setErroRenovar]             = useState<string | null>(null)
   const [renovadoOk, setRenovadoOk]               = useState(false)
 
+  // PIX
+  type PixDados = { txid: string; pixCopiaCola: string; qrCodeBase64: string | null; linkPagamento: string | null; expiraEm: string }
+  const [pixDados, setPixDados]       = useState<PixDados | null>(null)
+  const [gerandoPix, setGerandoPix]   = useState(false)
+  const [erroPix, setErroPix]         = useState<string | null>(null)
+  const [pixCopiado, setPixCopiado]   = useState(false)
+
   function popularCampos(d: DadosPainel) {
     setNome(d.cliente?.nome ?? '')
     setSobrenome(d.cliente?.sobrenome ?? '')
@@ -742,6 +751,8 @@ function PainelCliente({
     setEditandoCob(false)
     setRenovadoOk(false)
     setMostrarModalRenovar(false)
+    setPixDados(null)
+    setErroPix(null)
     recarregarDados()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [atendimento.id])
@@ -778,6 +789,23 @@ function PainelCliente({
       setTimeout(() => { setRenovadoOk(false); recarregarDados() }, 3000)
       onClienteAtualizado()
     }
+  }
+
+  async function handleGerarPix() {
+    const parcela = dados?.parcela
+    if (!parcela) return
+    setGerandoPix(true); setErroPix(null); setPixDados(null)
+    const r = await gerarPixParcelaAction(parcela.id, parcela.valor)
+    setGerandoPix(false)
+    if ('error' in r) { setErroPix(r.error ?? null) } else { setPixDados(r) }
+  }
+
+  function copiarPix() {
+    if (!pixDados) return
+    navigator.clipboard.writeText(pixDados.pixCopiaCola).then(() => {
+      setPixCopiado(true)
+      setTimeout(() => setPixCopiado(false), 2000)
+    })
   }
 
   const nomeExibido = [dados?.cliente?.nome ?? atendimento.clientes?.nome, dados?.cliente?.sobrenome ?? atendimento.clientes?.sobrenome]
@@ -841,12 +869,63 @@ function PainelCliente({
                   </div>
                 </div>
                 {erroRenovar && <p className="text-xs text-destructive">{erroRenovar}</p>}
-                <button
-                  onClick={() => { setMostrarModalRenovar(true); setErroRenovar(null) }}
-                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-3 py-2.5 text-xs font-medium text-primary-foreground transition hover:opacity-90"
-                >
-                  <RefreshCw className="h-3.5 w-3.5" />Renovar mensalidade
-                </button>
+                {erroPix    && <p className="text-xs text-destructive">{erroPix}</p>}
+
+                {/* Botões de ação */}
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => { setMostrarModalRenovar(true); setErroRenovar(null) }}
+                    className="flex items-center justify-center gap-1.5 rounded-xl bg-primary px-3 py-2.5 text-xs font-medium text-primary-foreground transition hover:opacity-90"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" />Renovar
+                  </button>
+                  <button
+                    onClick={handleGerarPix}
+                    disabled={gerandoPix}
+                    className="flex items-center justify-center gap-1.5 rounded-xl border border-primary px-3 py-2.5 text-xs font-medium text-primary transition hover:bg-primary/10 disabled:opacity-50"
+                  >
+                    {gerandoPix ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <span>PIX</span>}
+                    {gerandoPix ? 'Gerando…' : 'Cobrar PIX'}
+                  </button>
+                </div>
+
+                {/* QR Code PIX inline */}
+                {pixDados && (
+                  <div className="space-y-3 rounded-xl border border-border bg-muted/20 p-3">
+                    <div className="flex justify-center rounded-xl bg-white p-3">
+                      <QRCode value={pixDados.pixCopiaCola} size={160} />
+                    </div>
+                    <div className="rounded-xl border border-border bg-input px-3 py-2">
+                      <p className="break-all font-mono text-[10px] text-muted-foreground leading-relaxed select-all">
+                        {pixDados.pixCopiaCola}
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={copiarPix}
+                        className="flex-1 rounded-xl border border-border py-2 text-xs font-medium text-foreground transition hover:bg-accent"
+                      >
+                        {pixCopiado ? '✓ Copiado!' : 'Copiar PIX'}
+                      </button>
+                      {pixDados.linkPagamento && (
+                        <a
+                          href={pixDados.linkPagamento}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1 rounded-xl border border-border px-3 py-2 text-xs text-muted-foreground transition hover:bg-accent"
+                        >
+                          <ExternalLink className="h-3 w-3" />Link
+                        </a>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => setPixDados(null)}
+                      className="w-full rounded-xl border border-border py-1.5 text-xs text-muted-foreground transition hover:bg-accent"
+                    >
+                      Fechar
+                    </button>
+                  </div>
+                )}
               </>
             ) : (
               <p className="text-xs text-muted-foreground">Nenhuma parcela em aberto.</p>
