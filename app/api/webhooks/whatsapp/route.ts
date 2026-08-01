@@ -4,6 +4,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { processarMidiaMeta } from '@/lib/media/processar-midia-meta'
 
 // ── Meta Cloud API: verificação do webhook (GET) ─────────────────────────────
 export async function GET(req: NextRequest) {
@@ -52,25 +53,47 @@ export async function POST(req: NextRequest) {
     if (body?.object === 'whatsapp_business_account') {
       for (const entry of body.entry ?? []) {
         for (const change of entry.changes ?? []) {
-          const value   = change.value ?? {}
-          const msgs    = value.messages ?? []
-          if (!msgs.length) continue
+          const value = change.value ?? {}
 
-          // Resolve a conta pelo phone_number_id do metadata da Meta
+          // Resolve conta pelo phone_number_id do metadata
           const phoneId = value.metadata?.phone_number_id as string | undefined
-          const cid     = phoneId
+          const msgs    = value.messages ?? []
+          const firstCelular = msgs[0]?.from ?? ''
+          const cid = phoneId
             ? await resolverContaPorMetaPhoneId(supabase, phoneId)
-            : (contaId ?? await resolverContaPorCelular(supabase, msgs[0]?.from ?? ''))
+            : (contaId ?? (firstCelular ? await resolverContaPorCelular(supabase, firstCelular) : null))
 
           if (!cid) continue
 
+          // ── Status de entrega (enviado → entregue → lido / erro) ──────────
+          for (const st of (value.statuses ?? []) as any[]) {
+            const interno = metaStatusParaInterno(st.status as string)
+            if (interno && st.id) {
+              await supabase.from('mensagens_wa')
+                .update({ status: interno } as any)
+                .eq('wa_id', st.id)
+                .eq('conta_id', cid)
+            }
+          }
+
+          // ── Mensagens recebidas ───────────────────────────────────────────
           for (const msg of msgs) {
             const celular = msg.from as string
-            const waId    = msg.id as string
-            const texto   = extrairTextoMeta(msg)
-            if (!celular || !texto) continue
+            const waId    = msg.id   as string
+            if (!celular) continue
 
-            await salvarMensagem(supabase, { contaId: cid, celular, texto, waId, direcao: 'in' })
+            const info = extrairInfoMeta(msg)
+            if (!info.texto && !info.mediaId) continue
+
+            let midiaUrl: string | null = null
+            if (info.mediaId && info.mimeType) {
+              midiaUrl = await processarMidiaMeta(cid, info.mediaId, info.mimeType)
+            }
+
+            await salvarMensagem(supabase, {
+              contaId: cid, celular, texto: info.texto, waId, direcao: 'in',
+              tipo: info.tipo, midiaUrl,
+            })
           }
         }
       }
@@ -90,6 +113,7 @@ export async function POST(req: NextRequest) {
       if (!celular) return NextResponse.json({ ok: true })
 
       const texto = extrairTexto(msg) as string
+      const tipo  = detectarTipoUazapi(msg)
 
       const waId     = (msg?.id ?? msg?.key?.id ?? null) as string | null
       const cid      = contaId
@@ -97,7 +121,7 @@ export async function POST(req: NextRequest) {
                     ?? await resolverContaPorCelular(supabase, celular)
       if (!cid) return NextResponse.json({ ok: true })
 
-      await salvarMensagem(supabase, { contaId: cid, celular, texto, waId, direcao: 'in' })
+      await salvarMensagem(supabase, { contaId: cid, celular, texto, waId, direcao: 'in', tipo })
       return NextResponse.json({ ok: true })
     }
 
@@ -123,20 +147,14 @@ export async function POST(req: NextRequest) {
         const celular   = remoteJid.replace('@s.whatsapp.net', '').replace('@c.us', '').replace(/\D/g, '')
         if (!celular) continue
 
-        const texto = (
-          msg?.message?.conversation ??
-          msg?.message?.extendedTextMessage?.text ??
-          msg?.message?.imageMessage?.caption ??
-          msg?.body ??
-          msg?.text ??
-          '[Mídia não suportada]'
-        ) as string
+        const texto = extrairTexto(msg) as string
+        const tipo  = detectarTipoUazapi(msg)
 
         const waId     = (msg?.key?.id ?? msg?.id ?? null) as string | null
         const cidFinal = cid ?? await resolverContaPorCelular(supabase, celular)
         if (!cidFinal) continue
 
-        await salvarMensagem(supabase, { contaId: cidFinal, celular, texto, waId, direcao: 'in' })
+        await salvarMensagem(supabase, { contaId: cidFinal, celular, texto, waId, direcao: 'in', tipo })
       }
     }
 
@@ -150,22 +168,86 @@ export async function POST(req: NextRequest) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function extrairTextoMeta(msg: any): string {
-  switch (msg?.type) {
-    case 'text':     return msg.text?.body ?? ''
-    case 'image':    return msg.image?.caption    ? `[Imagem] ${msg.image.caption}`    : '[Imagem]'
-    case 'video':    return msg.video?.caption    ? `[Vídeo] ${msg.video.caption}`     : '[Vídeo]'
-    case 'document': return msg.document?.caption ? `[Arquivo] ${msg.document.caption}` : `[Arquivo${msg.document?.filename ? ': ' + msg.document.filename : ''}]`
-    case 'audio':    return '[Áudio]'
-    case 'sticker':  return '[Figurinha]'
-    case 'location': return `[Localização: ${msg.location?.latitude},${msg.location?.longitude}]`
-    case 'contacts': return '[Contato]'
+type MetaMsgInfo = { texto: string; tipo: string; mediaId: string | null; mimeType: string | null }
+
+function extrairInfoMeta(msg: any): MetaMsgInfo {
+  const tipo = (msg?.type ?? 'text') as string
+  switch (tipo) {
+    case 'text':
+      return { texto: msg.text?.body ?? '', tipo: 'text', mediaId: null, mimeType: null }
+    case 'image':
+      return {
+        texto:    msg.image?.caption ? `[Imagem] ${msg.image.caption}` : '[Imagem]',
+        tipo:     'image',
+        mediaId:  msg.image?.id     ?? null,
+        mimeType: msg.image?.mime_type ?? 'image/jpeg',
+      }
+    case 'audio':
+      return {
+        texto:    '[Áudio]',
+        tipo:     'audio',
+        mediaId:  msg.audio?.id     ?? null,
+        mimeType: msg.audio?.mime_type ?? 'audio/ogg',
+      }
+    case 'video':
+      return {
+        texto:    msg.video?.caption ? `[Vídeo] ${msg.video.caption}` : '[Vídeo]',
+        tipo:     'video',
+        mediaId:  msg.video?.id     ?? null,
+        mimeType: msg.video?.mime_type ?? 'video/mp4',
+      }
+    case 'document':
+      return {
+        texto:    msg.document?.filename ?? msg.document?.caption ?? '[Arquivo]',
+        tipo:     'document',
+        mediaId:  msg.document?.id       ?? null,
+        mimeType: msg.document?.mime_type ?? 'application/octet-stream',
+      }
+    case 'sticker':
+      return {
+        texto:    '[Figurinha]',
+        tipo:     'sticker',
+        mediaId:  msg.sticker?.id     ?? null,
+        mimeType: msg.sticker?.mime_type ?? 'image/webp',
+      }
     case 'interactive': {
       const reply = msg.interactive?.button_reply ?? msg.interactive?.list_reply
-      return reply?.title ?? '[Resposta interativa]'
+      return { texto: reply?.title ?? '[Resposta interativa]', tipo: 'interactive', mediaId: null, mimeType: null }
     }
-    default: return `[${msg?.type ?? 'Mensagem'}]`
+    case 'location':
+      return {
+        texto:    `[Localização: ${msg.location?.latitude},${msg.location?.longitude}]`,
+        tipo:     'location', mediaId: null, mimeType: null,
+      }
+    case 'contacts':
+      return { texto: '[Contato]', tipo: 'contacts', mediaId: null, mimeType: null }
+    default:
+      return { texto: `[${tipo}]`, tipo, mediaId: null, mimeType: null }
   }
+}
+
+function detectarTipoUazapi(msg: any): string {
+  const m = msg?.message ?? {}
+  if (m.imageMessage)                      return 'image'
+  if (m.audioMessage || m.pttMessage)      return 'audio'
+  if (m.videoMessage)                      return 'video'
+  if (m.documentMessage)                   return 'document'
+  if (m.stickerMessage)                    return 'sticker'
+  // uazapiGO: mediaType field
+  const mt = (msg?.mediaType ?? '') as string
+  if (mt === 'image')    return 'image'
+  if (mt === 'audio')    return 'audio'
+  if (mt === 'video')    return 'video'
+  if (mt === 'document') return 'document'
+  return 'text'
+}
+
+function metaStatusParaInterno(s: string): string | null {
+  if (s === 'sent')      return 'enviado'
+  if (s === 'delivered') return 'entregue'
+  if (s === 'read')      return 'lido'
+  if (s === 'failed')    return 'erro'
+  return null
 }
 
 async function encontrarOuCriarAtendimento(
@@ -265,7 +347,10 @@ function extrairTexto(msg: any): string {
 
 async function salvarMensagem(
   supabase: ReturnType<typeof createAdminClient>,
-  params: { contaId: string; celular: string; texto: string; waId: string | null; direcao: 'in' | 'out' },
+  params: {
+    contaId: string; celular: string; texto: string; waId: string | null; direcao: 'in' | 'out'
+    tipo?: string; midiaUrl?: string | null
+  },
 ) {
   const { data: cliente } = await supabase
     .from('clientes')
@@ -293,9 +378,11 @@ async function salvarMensagem(
     celular:        params.celular,
     direcao:        params.direcao,
     texto:          params.texto,
+    tipo:           params.tipo ?? 'text',
+    midia_url:      params.midiaUrl ?? null,
     wa_id:          params.waId,
     lida:           false,
-  })
+  } as any)
 
   // Duplicata (wa_id já existe) → ignorar silenciosamente
   if (error && error.code !== '23505') {

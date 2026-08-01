@@ -7,7 +7,7 @@ import {
   ArrowLeft, Send, MessageSquare, Clock, CheckCircle, XCircle,
   ArrowRightLeft, Inbox, History, Plus, Search, User, Pencil,
   ChevronRight, Phone, Mail, X, Loader2, RefreshCw, ExternalLink,
-  CreditCard,
+  CreditCard, Check, CheckCheck, FileText, Volume2, Video, ImageIcon,
 } from 'lucide-react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
@@ -52,6 +52,9 @@ type Mensagem = {
   celular: string
   direcao: 'in' | 'out'
   texto: string
+  tipo: string
+  status: string
+  midia_url: string | null
   recebido_em: string
   lida: boolean
 }
@@ -585,6 +588,98 @@ function ModalNovaConversa({
   )
 }
 
+// ── TickStatus — indicador de entrega/leitura nas mensagens de saída ─────────
+
+function TickStatus({ status }: { status: string }) {
+  if (status === 'lido')     return <CheckCheck className="h-3.5 w-3.5 text-blue-300" />
+  if (status === 'entregue') return <CheckCheck className="h-3.5 w-3.5 opacity-60" />
+  if (status === 'erro')     return <XCircle    className="h-3.5 w-3.5 text-red-300" />
+  return <Check className="h-3.5 w-3.5 opacity-60" />
+}
+
+// ── BubbleMidia — conteúdo da bolha de mensagem (texto ou mídia) ──────────────
+
+function BubbleMidia({
+  tipo, midiaUrl, texto, isOut,
+}: { tipo: string; midiaUrl: string | null; texto: string; isOut: boolean }) {
+  const txtCls = isOut ? 'text-primary-foreground' : 'text-foreground'
+  const captionRaw = (s: string, prefix: string) => s.startsWith(prefix) ? s.slice(prefix.length).trim() : ''
+
+  if (tipo === 'image') {
+    if (midiaUrl) {
+      const caption = captionRaw(texto, '[Imagem]')
+      return (
+        <div>
+          <img
+            src={midiaUrl}
+            alt="Imagem"
+            className="block max-w-full"
+            style={{ maxHeight: 320, objectFit: 'cover', width: '100%' }}
+          />
+          {caption && <p className={`whitespace-pre-wrap break-words px-3 pt-1 ${txtCls}`}>{caption}</p>}
+        </div>
+      )
+    }
+    return (
+      <div className={`flex items-center gap-2 px-3 pt-2 ${txtCls} opacity-80`}>
+        <ImageIcon className="h-4 w-4 shrink-0" />
+        <span className="italic">{texto || '[Imagem]'}</span>
+      </div>
+    )
+  }
+
+  if (tipo === 'audio') {
+    if (midiaUrl) {
+      return <div className="px-3 pt-2"><audio controls src={midiaUrl} className="h-10 w-full max-w-xs" /></div>
+    }
+    return (
+      <div className={`flex items-center gap-2 px-3 pt-2 ${txtCls} opacity-80`}>
+        <Volume2 className="h-4 w-4 shrink-0" />
+        <span className="italic">[Áudio]</span>
+      </div>
+    )
+  }
+
+  if (tipo === 'video') {
+    if (midiaUrl) {
+      const caption = captionRaw(texto, '[Vídeo]')
+      return (
+        <div>
+          {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+          <video controls src={midiaUrl} className="block max-w-full" style={{ maxHeight: 320 }} />
+          {caption && <p className={`whitespace-pre-wrap break-words px-3 pt-1 ${txtCls}`}>{caption}</p>}
+        </div>
+      )
+    }
+    return (
+      <div className={`flex items-center gap-2 px-3 pt-2 ${txtCls} opacity-80`}>
+        <Video className="h-4 w-4 shrink-0" />
+        <span className="italic">{texto || '[Vídeo]'}</span>
+      </div>
+    )
+  }
+
+  if (tipo === 'document') {
+    return (
+      <div className={`flex items-center gap-2 px-3 pt-2 ${txtCls}`}>
+        <FileText className="h-6 w-6 shrink-0 opacity-80" />
+        {midiaUrl
+          ? <a href={midiaUrl} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 truncate max-w-[220px]">{texto || 'Arquivo'}</a>
+          : <span className="italic opacity-80">{texto || '[Arquivo]'}</span>
+        }
+      </div>
+    )
+  }
+
+  if (tipo === 'sticker') {
+    if (midiaUrl) return <img src={midiaUrl} alt="Figurinha" className="block h-28 w-28" />
+    return <span className={`px-3 pt-2 ${txtCls} opacity-80`}>😊</span>
+  }
+
+  // texto (default)
+  return <p className={`whitespace-pre-wrap break-words px-3 pt-2 ${txtCls}`}>{texto}</p>
+}
+
 // ── PainelCliente — painel com edição inline completa ────────────────────────
 
 function PainelCliente({
@@ -1088,13 +1183,13 @@ export default function AtendimentoPage() {
   const carregarMensagens = useCallback(async (celular: string, cid: string) => {
     const { data } = await sb
       .from('mensagens_wa')
-      .select('id, celular, direcao, texto, recebido_em, lida')
+      .select('id, celular, direcao, texto, tipo, status, midia_url, recebido_em, lida')
       .eq('conta_id', cid)
       .eq('celular', celular)
       .order('recebido_em', { ascending: true })
       .limit(300)
 
-    const lista = (data as Mensagem[]) ?? []
+    const lista = (data as unknown as Mensagem[]) ?? []
     setMensagens(lista)
     const inbound = lista.filter(m => m.direcao === 'in')
     setUltimaMsgIn(inbound.length ? new Date(inbound[inbound.length - 1].recebido_em) : null)
@@ -1140,6 +1235,15 @@ export default function AtendimentoPage() {
           }
         }
         carregarAtendimentos(contaId, tab)
+      })
+      .on('postgres_changes', {
+        event: 'UPDATE', schema: 'public', table: 'mensagens_wa',
+        filter: `conta_id=eq.${contaId}`,
+      }, (payload) => {
+        const atualizada = payload.new as Mensagem
+        setMensagens(prev =>
+          prev.map(m => m.id === atualizada.id ? { ...m, status: atualizada.status, midia_url: atualizada.midia_url } : m)
+        )
       })
       .subscribe()
     return () => { sb.removeChannel(ch) }
@@ -1564,27 +1668,25 @@ export default function AtendimentoPage() {
                   <p className="text-xs text-muted-foreground">Nenhuma mensagem ainda.</p>
                 </div>
               )}
-              {mensagens.map(msg => (
-                <div
-                  key={msg.id}
-                  className={['flex', msg.direcao === 'out' ? 'justify-end' : 'justify-start'].join(' ')}
-                >
-                  <div className={[
-                    'max-w-[78%] rounded-2xl px-3 py-2 text-sm shadow-sm',
-                    msg.direcao === 'out'
-                      ? 'rounded-br-sm bg-primary text-primary-foreground'
-                      : 'rounded-bl-sm border border-border bg-card text-foreground',
-                  ].join(' ')}>
-                    <p className="whitespace-pre-wrap break-words">{msg.texto}</p>
-                    <p className={[
-                      'mt-1 text-[10px]',
-                      msg.direcao === 'out' ? 'text-right text-primary-foreground/70' : 'text-muted-foreground',
+              {mensagens.map(msg => {
+                const isOut = msg.direcao === 'out'
+                return (
+                  <div key={msg.id} className={['flex', isOut ? 'justify-end' : 'justify-start'].join(' ')}>
+                    <div className={[
+                      'max-w-[78%] overflow-hidden rounded-2xl text-sm shadow-sm',
+                      isOut
+                        ? 'rounded-br-sm bg-primary text-primary-foreground'
+                        : 'rounded-bl-sm border border-border bg-card text-foreground',
                     ].join(' ')}>
-                      {formatarHora(msg.recebido_em)}
-                    </p>
+                      <BubbleMidia tipo={msg.tipo ?? 'text'} midiaUrl={msg.midia_url ?? null} texto={msg.texto} isOut={isOut} />
+                      <div className={['flex items-center gap-1 px-3 pb-2 pt-0.5 text-[10px]', isOut ? 'justify-end text-primary-foreground/70' : 'text-muted-foreground'].join(' ')}>
+                        <span>{formatarHora(msg.recebido_em)}</span>
+                        {isOut && <TickStatus status={msg.status ?? 'enviado'} />}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              ))}
+                )
+              })}
               <div ref={bottomRef} />
             </div>
 
