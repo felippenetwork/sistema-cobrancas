@@ -6,8 +6,10 @@ import {
 import {
   ArrowLeft, Send, MessageSquare, Clock, CheckCircle, XCircle,
   ArrowRightLeft, Inbox, History, Plus, Search, User, Pencil,
-  ChevronRight, Phone, Mail, X, Loader2, RefreshCw,
+  ChevronRight, Phone, Mail, X, Loader2, RefreshCw, ExternalLink,
+  CreditCard,
 } from 'lucide-react'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import {
   enviarRespostaAction, marcarLidaAction, enviarTemplateAction,
@@ -17,6 +19,9 @@ import {
   aceitarAtendimentoAction, finalizarAtendimentoAction,
   transferirAtendimentoAction, buscarDepartamentosEMembrosAction,
 } from './_actions/atendimentos'
+import {
+  buscarParcelaClienteAction, renovarParcelaAction,
+} from './_actions/renovar'
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
 
@@ -589,11 +594,20 @@ function PainelCliente({
   onFechar: () => void
   onClienteAtualizado: () => void
 }) {
-  const [editando, setEditando]   = useState(false)
-  const [nome, setNome]           = useState(atendimento.clientes?.nome ?? '')
-  const [sobrenome, setSobrenome] = useState(atendimento.clientes?.sobrenome ?? '')
-  const [salvando, setSalvando]   = useState(false)
+  const [editando, setEditando]     = useState(false)
+  const [nome, setNome]             = useState(atendimento.clientes?.nome ?? '')
+  const [sobrenome, setSobrenome]   = useState(atendimento.clientes?.sobrenome ?? '')
+  const [salvando, setSalvando]     = useState(false)
   const [erroSalvar, setErroSalvar] = useState<string | null>(null)
+
+  // Parcela + renovar
+  const [cobrancaId, setCobrancaId]               = useState<string | null>(null)
+  const [parcelaAberta, setParcelaAberta]         = useState<{ id: string; valor: number; dataVencimento: string } | null>(null)
+  const [carregandoParcela, setCarregandoParcela] = useState(false)
+  const [mostrarModalRenovar, setMostrarModalRenovar] = useState(false)
+  const [renovando, setRenovando]                 = useState(false)
+  const [erroRenovar, setErroRenovar]             = useState<string | null>(null)
+  const [renovadoOk, setRenovadoOk]               = useState(false)
 
   // Sincroniza quando atendimento muda
   useEffect(() => {
@@ -601,7 +615,20 @@ function PainelCliente({
     setSobrenome(atendimento.clientes?.sobrenome ?? '')
     setEditando(false)
     setErroSalvar(null)
+    setRenovadoOk(false)
+    setMostrarModalRenovar(false)
   }, [atendimento.id, atendimento.clientes])
+
+  // Carrega parcela aberta do cliente
+  useEffect(() => {
+    if (!atendimento.cliente_id) return
+    setCarregandoParcela(true)
+    buscarParcelaClienteAction(atendimento.cliente_id).then(data => {
+      setCobrancaId(data?.cobrancaId ?? null)
+      setParcelaAberta(data?.parcela ?? null)
+      setCarregandoParcela(false)
+    })
+  }, [atendimento.cliente_id])
 
   async function salvar() {
     if (!atendimento.cliente_id) return
@@ -609,10 +636,28 @@ function PainelCliente({
     setErroSalvar(null)
     const r = await atualizarClienteAction(atendimento.cliente_id, nome, sobrenome)
     setSalvando(false)
+    if (r.error) { setErroSalvar(r.error) } else { setEditando(false); onClienteAtualizado() }
+  }
+
+  async function handleRenovar() {
+    if (!parcelaAberta || !cobrancaId) return
+    setRenovando(true)
+    setErroRenovar(null)
+    const r = await renovarParcelaAction(parcelaAberta.id, cobrancaId)
+    setRenovando(false)
     if (r.error) {
-      setErroSalvar(r.error)
+      setErroRenovar(r.error)
     } else {
-      setEditando(false)
+      setRenovadoOk(true)
+      setMostrarModalRenovar(false)
+      // Recarrega parcela (próxima pode ter sido gerada)
+      if (atendimento.cliente_id) {
+        buscarParcelaClienteAction(atendimento.cliente_id).then(data => {
+          setCobrancaId(data?.cobrancaId ?? null)
+          setParcelaAberta(data?.parcela ?? null)
+          setRenovadoOk(false)
+        })
+      }
       onClienteAtualizado()
     }
   }
@@ -628,8 +673,11 @@ function PainelCliente({
   }
   const st = statusConfig[atendimento.status]
 
+  const formatarMoeda = (v: number) =>
+    new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v)
+
   return (
-    <div className="flex h-full flex-col">
+    <div className="relative flex h-full flex-col">
       {/* Header */}
       <div className="flex shrink-0 items-center justify-between border-b border-border px-5 py-4">
         <h2 className="text-sm font-semibold text-foreground">Perfil</h2>
@@ -641,7 +689,7 @@ function PainelCliente({
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-5 space-y-6">
+      <div className="flex-1 overflow-y-auto p-5 space-y-5">
         {/* Avatar + nome */}
         <div className="flex flex-col items-center gap-3 text-center">
           <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 text-xl font-bold text-primary">
@@ -652,6 +700,89 @@ function PainelCliente({
             <p className="text-xs text-muted-foreground">{atendimento.celular}</p>
           </div>
         </div>
+
+        {/* Atalhos: cadastro + cobranças */}
+        {atendimento.cliente_id && (
+          <div className="grid grid-cols-2 gap-2">
+            <Link
+              href={`/clientes/${atendimento.cliente_id}`}
+              className="flex items-center justify-center gap-1.5 rounded-xl border border-border px-3 py-2.5 text-xs text-muted-foreground transition hover:border-primary hover:text-primary"
+            >
+              <User className="h-3.5 w-3.5" />
+              Ver cadastro
+            </Link>
+            {cobrancaId ? (
+              <Link
+                href={`/cobrancas/${cobrancaId}`}
+                className="flex items-center justify-center gap-1.5 rounded-xl border border-border px-3 py-2.5 text-xs text-muted-foreground transition hover:border-primary hover:text-primary"
+              >
+                <CreditCard className="h-3.5 w-3.5" />
+                Ver cobrança
+              </Link>
+            ) : (
+              <Link
+                href="/cobrancas/nova"
+                className="flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-border px-3 py-2.5 text-xs text-muted-foreground transition hover:border-primary hover:text-primary"
+              >
+                <CreditCard className="h-3.5 w-3.5" />
+                Nova cobrança
+              </Link>
+            )}
+          </div>
+        )}
+
+        {/* Renovação */}
+        {atendimento.cliente_id && (
+          <div className="rounded-xl border border-border p-4 space-y-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Renovação rápida
+            </p>
+
+            {carregandoParcela ? (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Buscando parcela…
+              </div>
+            ) : renovadoOk ? (
+              <div className="flex items-center gap-2 rounded-xl bg-green-500/10 px-3 py-2.5 text-xs font-medium text-green-600 dark:text-green-400">
+                <CheckCircle className="h-3.5 w-3.5" />
+                Renovado com sucesso! WhatsApp enviado.
+              </div>
+            ) : parcelaAberta ? (
+              <>
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">Valor</span>
+                    <span className="font-semibold text-foreground">{formatarMoeda(parcelaAberta.valor)}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">Vencimento</span>
+                    <span className="text-foreground">
+                      {parcelaAberta.dataVencimento.split('-').reverse().join('/')}
+                    </span>
+                  </div>
+                </div>
+                {erroRenovar && <p className="text-xs text-destructive">{erroRenovar}</p>}
+                <button
+                  onClick={() => { setMostrarModalRenovar(true); setErroRenovar(null) }}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-3 py-2.5 text-xs font-medium text-primary-foreground transition hover:opacity-90"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  Renovar mensalidade
+                </button>
+              </>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Nenhuma parcela em aberto.{' '}
+                {cobrancaId && (
+                  <Link href={`/cobrancas/${cobrancaId}`} className="text-primary underline-offset-2 hover:underline">
+                    Ver cobranças
+                  </Link>
+                )}
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Número + status */}
         <div className="rounded-xl border border-border bg-muted/30 p-4 space-y-3">
@@ -722,9 +853,7 @@ function PainelCliente({
                     className="w-full rounded-xl border border-border bg-input px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
                   />
                 </div>
-                {erroSalvar && (
-                  <p className="text-xs text-destructive">{erroSalvar}</p>
-                )}
+                {erroSalvar && <p className="text-xs text-destructive">{erroSalvar}</p>}
                 <div className="flex gap-2">
                   <button
                     onClick={() => { setEditando(false); setErroSalvar(null) }}
@@ -760,6 +889,48 @@ function PainelCliente({
           </div>
         )}
       </div>
+
+      {/* Modal confirmação de renovação */}
+      {mostrarModalRenovar && parcelaAberta && (
+        <div
+          className="absolute inset-0 z-10 flex items-center justify-center bg-black/60 p-4"
+          onClick={e => e.target === e.currentTarget && setMostrarModalRenovar(false)}
+        >
+          <div className="w-full max-w-xs rounded-2xl border border-border bg-card p-6 shadow-2xl space-y-4">
+            <h3 className="text-sm font-semibold text-foreground">Confirmar Renovação</h3>
+            <div className="rounded-xl bg-muted/30 p-3 space-y-2">
+              <div className="flex justify-between text-xs">
+                <span className="text-muted-foreground">Cliente</span>
+                <span className="font-medium text-foreground truncate max-w-[160px]">{nomeExibido}</span>
+              </div>
+              <div className="flex justify-between text-xs">
+                <span className="text-muted-foreground">Valor</span>
+                <span className="font-semibold text-foreground">{formatarMoeda(parcelaAberta.valor)}</span>
+              </div>
+              <div className="flex justify-between text-xs">
+                <span className="text-muted-foreground">Vencimento</span>
+                <span className="text-foreground">{parcelaAberta.dataVencimento.split('-').reverse().join('/')}</span>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              A mensagem de confirmação de pagamento será enviada automaticamente via WhatsApp.
+            </p>
+            {erroRenovar && <p className="text-xs text-destructive">{erroRenovar}</p>}
+            <div className="flex gap-2">
+              <button
+                onClick={() => setMostrarModalRenovar(false)}
+                disabled={renovando}
+                className="flex-1 rounded-xl border border-border py-2.5 text-xs text-muted-foreground transition hover:bg-accent disabled:opacity-50"
+              >Cancelar</button>
+              <button
+                onClick={handleRenovar}
+                disabled={renovando}
+                className="flex-1 rounded-xl bg-primary py-2.5 text-xs font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
+              >{renovando ? 'Renovando…' : 'Confirmar'}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1193,51 +1364,68 @@ export default function AtendimentoPage() {
               </div>
             ) : (
               listaFiltrada.map(at => (
-                <button
+                <div
                   key={at.id}
-                  onClick={() => abrirAtendimento(at)}
                   className={[
-                    'flex w-full items-start gap-3 border-b border-border/40 px-4 py-3.5 text-left transition-colors',
+                    'flex w-full items-center border-b border-border/40 transition-colors',
                     selecionado?.id === at.id ? 'bg-accent' : 'hover:bg-accent/50',
                   ].join(' ')}
                 >
-                  {/* Avatar */}
-                  <div className="relative shrink-0">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
-                      {iniciais(nomeAtendimento(at))}
-                    </div>
-                    {at.status === 'aguardando' && (
-                      <span className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full bg-amber-500 ring-2 ring-card" />
-                    )}
-                  </div>
-
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between gap-1">
-                      <span className="truncate text-sm font-medium text-foreground">
-                        {nomeAtendimento(at)}
-                      </span>
-                      <span className="shrink-0 text-[10px] text-muted-foreground">
-                        {at.ultima_msg_em ? formatarTempo(at.ultima_msg_em) : ''}
-                      </span>
-                    </div>
-                    <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-                      {at.ultima_mensagem ?? at.celular}
-                    </p>
-                    <div className="mt-1 flex items-center gap-1.5">
-                      <span className="font-mono text-[9px] text-muted-foreground/60">
-                        #{String(at.numero).padStart(4, '0')}
-                      </span>
-                      {at.departamentos && (
-                        <span
-                          className="rounded px-1.5 py-0.5 text-[9px] font-semibold text-white"
-                          style={{ backgroundColor: at.departamentos.cor }}
-                        >
-                          {at.departamentos.nome}
-                        </span>
+                  {/* Área principal → abre chat */}
+                  <button
+                    onClick={() => abrirAtendimento(at)}
+                    className="flex flex-1 min-w-0 items-start gap-3 px-4 py-3.5 text-left"
+                  >
+                    {/* Avatar */}
+                    <div className="relative shrink-0">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
+                        {iniciais(nomeAtendimento(at))}
+                      </div>
+                      {at.status === 'aguardando' && (
+                        <span className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full bg-amber-500 ring-2 ring-card" />
                       )}
                     </div>
-                  </div>
-                </button>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="truncate text-sm font-medium text-foreground">
+                          {nomeAtendimento(at)}
+                        </span>
+                        <span className="shrink-0 text-[10px] text-muted-foreground">
+                          {at.ultima_msg_em ? formatarTempo(at.ultima_msg_em) : ''}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                        {at.ultima_mensagem ?? at.celular}
+                      </p>
+                      <div className="mt-1 flex items-center gap-1.5">
+                        <span className="font-mono text-[9px] text-muted-foreground/60">
+                          #{String(at.numero).padStart(4, '0')}
+                        </span>
+                        {at.departamentos && (
+                          <span
+                            className="rounded px-1.5 py-0.5 text-[9px] font-semibold text-white"
+                            style={{ backgroundColor: at.departamentos.cor }}
+                          >
+                            {at.departamentos.nome}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+
+                  {/* Ícone de cadastro → abre página do cliente */}
+                  {at.cliente_id && (
+                    <Link
+                      href={`/clientes/${at.cliente_id}`}
+                      title="Ver cadastro do cliente"
+                      className="mr-3 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground/40 transition hover:bg-accent hover:text-foreground"
+                      onClick={e => e.stopPropagation()}
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </Link>
+                  )}
+                </div>
               ))
             )}
           </div>
@@ -1459,9 +1647,10 @@ export default function AtendimentoPage() {
         {/* ── Painel direito: perfil do cliente (desktop) ── */}
         {selecionado && mostrarPerfil && (
           <div className={[
-            // Mobile: slide sobre o chat como overlay
-            'fixed inset-y-0 right-0 z-[65] w-[300px] border-l border-border bg-card shadow-xl',
-            'md:relative md:inset-auto md:z-auto md:w-[280px] md:shrink-0 md:shadow-none',
+            // Mobile: tela cheia sobre o chat
+            'fixed inset-0 z-[65] bg-card overflow-hidden',
+            // Desktop: painel lateral fixo
+            'md:relative md:inset-auto md:z-auto md:w-[280px] md:shrink-0 md:border-l md:border-border md:shadow-none md:overflow-hidden',
           ].join(' ')}>
             <PainelCliente
               atendimento={selecionado}
