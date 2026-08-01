@@ -178,18 +178,20 @@ async function encontrarOuCriarAtendimento(
   // Busca atendimento aberto (aguardando | em_atendimento)
   const { data: existing } = await supabase
     .from('atendimentos')
-    .select('id')
+    .select('id, cliente_id')
     .eq('conta_id', contaId)
     .eq('celular', celular)
     .neq('status', 'finalizado')
     .maybeSingle()
 
   if (existing) {
-    await supabase
-      .from('atendimentos')
-      .update({ ultima_mensagem: texto, ultima_msg_em: new Date().toISOString() })
-      .eq('id', existing.id)
-    return existing.id
+    const vincularCliente = clienteId && !(existing as any).cliente_id
+    await supabase.from('atendimentos').update({
+      ultima_mensagem: texto,
+      ultima_msg_em:   new Date().toISOString(),
+      ...(vincularCliente ? { cliente_id: clienteId } : {}),
+    } as any).eq('id', (existing as any).id)
+    return (existing as any).id
   }
 
   // Busca departamento padrão (Geral) da conta

@@ -19,18 +19,20 @@ export async function encontrarOuCriarAtendimento(
   // Busca atendimento aberto pelo celular exato
   const { data: existing } = await supabase
     .from('atendimentos')
-    .select('id')
+    .select('id, cliente_id')
     .eq('conta_id', contaId)
     .eq('celular', celular)
     .neq('status', 'finalizado')
     .maybeSingle()
 
   if (existing) {
-    await supabase
-      .from('atendimentos')
-      .update({ ultima_mensagem: ultimaMensagem, ultima_msg_em: agora })
-      .eq('id', existing.id)
-    return existing.id
+    const vincularCliente = clienteId && !(existing as any).cliente_id
+    await supabase.from('atendimentos').update({
+      ultima_mensagem: ultimaMensagem,
+      ultima_msg_em:   agora,
+      ...(vincularCliente ? { cliente_id: clienteId } : {}),
+    } as any).eq('id', (existing as any).id)
+    return (existing as any).id
   }
 
   // Tenta criar novo atendimento
