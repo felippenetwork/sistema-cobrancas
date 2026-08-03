@@ -54,6 +54,7 @@ export default function ConfiguracoesPage() {
   const [showLdPassword, setShowLdPassword]   = useState(false)
   const [showEfiSecret, setShowEfiSecret]     = useState(false)
   const [efiSandbox, setEfiSandbox]           = useState(false)
+  const [efiCert, setEfiCert]                 = useState('')
   const [overrideMetaAtivo, setOverrideMetaAtivo]     = useState<boolean | null>(null)
   const [overrideTwilioAtivo, setOverrideTwilioAtivo] = useState<boolean | null>(null)
   const scrollSaveRef = useRef(0)
@@ -87,6 +88,7 @@ export default function ConfiguracoesPage() {
     setData({ cfg, rem, domain: plat?.dominio_email_operador ?? null })
     setLocalPart(rem?.local_part ?? '')
     setEfiSandbox(!!(cfg as any)?.efi_sandbox)
+    setEfiCert((cfg as any)?.efi_cert_base64 ?? '')
     setLoading(false)
 
     if (preserveScroll && scrollSaveRef.current > 0) {
@@ -639,7 +641,8 @@ export default function ConfiguracoesPage() {
               <label className={LABEL}>Certificado .p12 em Base64</label>
               <textarea
                 name="efi_cert_base64"
-                defaultValue={data?.cfg?.efi_cert_base64 ?? ''}
+                value={efiCert}
+                onChange={e => setEfiCert(e.target.value)}
                 placeholder="Cole aqui o conteúdo base64 do arquivo .p12..."
                 rows={4}
                 className={INPUT + ' resize-none font-mono text-xs'}
