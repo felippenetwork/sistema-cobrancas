@@ -214,7 +214,7 @@ export async function renovarParcelaAction(parcelaId: string, cobrancaId: string
 
   // Notificação WhatsApp + LookDefense
   if (clienteId) {
-    const { data: cfgPag } = await supabase
+    const { data: cfgPag } = await admin
       .from('notificacoes_config')
       .select('ativo_whatsapp, ativo_email')
       .eq('conta_id', contaIdFinal)
@@ -233,7 +233,7 @@ export async function renovarParcelaAction(parcelaId: string, cobrancaId: string
     }
 
     if (cfgPag?.ativo_whatsapp) {
-      const { data: notifWa, error: e } = await supabase
+      const { data: notifWa, error: e } = await admin
         .from('notificacoes_enviadas')
         .insert({ ...baseNotif, canal: 'whatsapp' as const })
         .select('id').single()
@@ -243,27 +243,30 @@ export async function renovarParcelaAction(parcelaId: string, cobrancaId: string
       }
     }
     if (cfgPag?.ativo_email) {
-      await supabase.from('notificacoes_enviadas').insert({ ...baseNotif, canal: 'email' as const })
+      await admin.from('notificacoes_enviadas').insert({ ...baseNotif, canal: 'email' as const })
     }
 
     // LookDefense
-    const { data: integ } = await supabase
+    const { data: integ } = await admin
       .from('clientes')
       .select('login_externo, tipo_integracao')
       .eq('id', clienteId)
       .maybeSingle()
 
     if ((integ as any)?.login_externo && (integ as any)?.tipo_integracao) {
-      const { data: baixaExt } = await supabase.from('baixas_externas').insert({
+      const { data: baixaExt, error: baixaErr } = await admin.from('baixas_externas').insert({
         conta_id:        contaIdFinal,
         cliente_id:      clienteId,
         parcela_id:      parcelaId,
         login_externo:   (integ as any).login_externo,
         tipo_integracao: (integ as any).tipo_integracao,
       }).select('id').single()
-      if ((baixaExt as any)?.id) {
+      if (baixaErr) console.error('[renovarParcela] baixas_externas', baixaErr)
+      else if ((baixaExt as any)?.id) {
         await renovarLookDefenseImediato(contaIdFinal, (baixaExt as any).id, (integ as any).login_externo, 0)
       }
+    } else {
+      console.info('[renovarParcela] cliente sem login_externo/tipo_integracao — LookDefense ignorado', clienteId)
     }
   }
 

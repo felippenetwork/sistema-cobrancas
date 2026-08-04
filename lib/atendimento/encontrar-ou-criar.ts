@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/admin'
+import { celularVariantes } from '@/lib/utils/celular'
 
 type AdminClient = ReturnType<typeof createAdminClient>
 
@@ -16,12 +17,12 @@ export async function encontrarOuCriarAtendimento(
 ): Promise<string | null> {
   const agora = new Date().toISOString()
 
-  // Busca atendimento aberto pelo celular exato
+  // Busca por variantes para evitar duplicatas quando número tem/não tem 9 transitório
   const { data: existing } = await supabase
     .from('atendimentos')
     .select('id, cliente_id')
     .eq('conta_id', contaId)
-    .eq('celular', celular)
+    .in('celular', celularVariantes(celular))
     .neq('status', 'finalizado')
     .maybeSingle()
 

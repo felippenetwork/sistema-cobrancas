@@ -5,6 +5,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { processarMidiaMeta } from '@/lib/media/processar-midia-meta'
+import { celularVariantes } from '@/lib/utils/celular'
 
 // ── Meta Cloud API: verificação do webhook (GET) ─────────────────────────────
 export async function GET(req: NextRequest) {
@@ -257,12 +258,13 @@ async function encontrarOuCriarAtendimento(
   clienteId: string | null,
   texto: string,
 ): Promise<string | null> {
-  // Busca atendimento aberto (aguardando | em_atendimento)
+  // Busca atendimento aberto — tenta variantes do número para evitar duplicatas
+  // quando WhatsApp envia o número com ou sem o 9 transitório brasileiro
   const { data: existing } = await supabase
     .from('atendimentos')
     .select('id, cliente_id')
     .eq('conta_id', contaId)
-    .eq('celular', celular)
+    .in('celular', celularVariantes(celular))
     .neq('status', 'finalizado')
     .maybeSingle()
 
@@ -356,7 +358,7 @@ async function salvarMensagem(
     .from('clientes')
     .select('id')
     .eq('conta_id', params.contaId)
-    .eq('celular', params.celular)
+    .in('celular', celularVariantes(params.celular))
     .maybeSingle()
 
   // Para mensagens recebidas (in), vincula ao atendimento (cria se necessário)
@@ -440,7 +442,7 @@ async function resolverContaPorCelular(
   const { data } = await supabase
     .from('clientes')
     .select('conta_id')
-    .eq('celular', celular)
+    .in('celular', celularVariantes(celular))
     .limit(1)
     .maybeSingle()
   return (data?.conta_id as string) ?? null
