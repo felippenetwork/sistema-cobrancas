@@ -2,10 +2,19 @@ import { createAdminClient } from '@/lib/supabase/admin'
 
 const LD_BASE = 'https://gesapioffice.com/api'
 
+const LD_HEADERS = {
+  'Content-Type':  'application/json',
+  'User-Agent':    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+  'Referer':       'https://gesapioffice.com/',
+  'Origin':        'https://gesapioffice.com',
+  'Accept':        'application/json, text/plain, */*',
+  'Accept-Language': 'pt-BR,pt;q=0.9',
+}
+
 async function ldLogin(username: string, password: string) {
   const res = await fetch(`${LD_BASE}/login`, {
     method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: LD_HEADERS,
     body:    JSON.stringify({ username, password, code: '' }),
     cache:   'no-store',
   })
@@ -19,7 +28,7 @@ async function ldListarUsuarios(token: string, cryptPass: string): Promise<{ id:
   const url = new URL(`${LD_BASE}/users-iptv`)
   url.searchParams.set('reg_password', cryptPass)
   const res = await fetch(url.toString(), {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { ...LD_HEADERS, Authorization: `Bearer ${token}` },
     cache:   'no-store',
   })
   if (!res.ok) throw new Error(`LookDefense listar usuários falhou (${res.status})`)
@@ -30,7 +39,7 @@ async function ldListarUsuarios(token: string, cryptPass: string): Promise<{ id:
 async function ldRenovar(token: string, cryptPass: string, userId: number): Promise<void> {
   const res = await fetch(`${LD_BASE}/users-iptv/${userId}`, {
     method:  'PUT',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    headers: { ...LD_HEADERS, Authorization: `Bearer ${token}` },
     body:    JSON.stringify({ action: 1, credits: 1, reg_password: cryptPass }),
     cache:   'no-store',
   })
