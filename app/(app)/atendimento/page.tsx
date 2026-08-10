@@ -8,6 +8,7 @@ import {
   ArrowRightLeft, Inbox, History, Plus, Search, User, Pencil,
   ChevronRight, Phone, Mail, X, Loader2, RefreshCw, ExternalLink,
   CreditCard, Check, CheckCheck, FileText, Volume2, Video, ImageIcon,
+  Zap, Trash2,
 } from 'lucide-react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
@@ -26,7 +27,10 @@ import {
   type DadosPainel,
 } from './_actions/renovar'
 import QRCode from 'react-qr-code'
-import { listarMensagensRapidasAction, type MensagemRapida } from '@/app/(app)/mensagens-rapidas/_actions'
+import {
+  listarMensagensRapidasAction, criarMensagemRapidaAction,
+  excluirMensagemRapidaAction, type MensagemRapida,
+} from '@/app/(app)/mensagens-rapidas/_actions'
 import { celularVariantes } from '@/lib/utils/celular'
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
@@ -1170,6 +1174,11 @@ export default function AtendimentoPage() {
   const [msgsRapidas, setMsgsRapidas]     = useState<MensagemRapida[]>([])
   const [filtroMsgs, setFiltroMsgs]       = useState('')
   const [mostrarMsgs, setMostrarMsgs]     = useState(false)
+  const [mostrarPainelMsgs, setMostrarPainelMsgs] = useState(false)
+  const [novaMsgTitulo, setNovaMsgTitulo] = useState('')
+  const [novaMsgTexto, setNovaMsgTexto]   = useState('')
+  const [salvandoMsg, setSalvandoMsg]     = useState(false)
+  const [erroMsg, setErroMsg]             = useState<string | null>(null)
 
   const bottomRef   = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -1232,6 +1241,32 @@ export default function AtendimentoPage() {
     if (!contaId) return
     listarMensagensRapidasAction().then(({ data }) => setMsgsRapidas(data))
   }, [contaId])
+
+  async function recarregarMsgsRapidas() {
+    const { data } = await listarMensagensRapidasAction()
+    setMsgsRapidas(data)
+  }
+
+  async function handleCriarMsgRapida() {
+    if (!novaMsgTitulo.trim()) { setErroMsg('Informe o título.'); return }
+    if (!novaMsgTexto.trim())  { setErroMsg('Informe o texto.');  return }
+    setSalvandoMsg(true)
+    setErroMsg(null)
+    const fd = new FormData()
+    fd.set('titulo', novaMsgTitulo.trim())
+    fd.set('texto',  novaMsgTexto.trim())
+    const res = await criarMensagemRapidaAction(null as any, fd)
+    setSalvandoMsg(false)
+    if (res.error) { setErroMsg(res.error); return }
+    setNovaMsgTitulo('')
+    setNovaMsgTexto('')
+    recarregarMsgsRapidas()
+  }
+
+  async function handleExcluirMsgRapida(id: string) {
+    await excluirMensagemRapidaAction(id)
+    recarregarMsgsRapidas()
+  }
 
   // ── Carregar atendimentos ─────────────────────────────────────────────────────
 
@@ -1829,7 +1864,75 @@ export default function AtendimentoPage() {
                   {sendState.error && (
                     <p className="mb-2 text-xs text-destructive">{sendState.error}</p>
                   )}
-                  {/* Dropdown de mensagens rápidas */}
+                  {/* Painel de mensagens rápidas (botão ⚡) */}
+                  {mostrarPainelMsgs && (
+                    <div className="mb-2 rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+                      {/* Lista de msgs existentes */}
+                      {msgsRapidas.length > 0 && (
+                        <div className="max-h-48 overflow-y-auto divide-y divide-border">
+                          {msgsRapidas.map(m => (
+                            <div key={m.id} className="flex items-start gap-2 px-3 py-2 hover:bg-accent transition-colors group">
+                              <button
+                                type="button"
+                                onMouseDown={e => {
+                                  e.preventDefault()
+                                  if (textareaRef.current) {
+                                    textareaRef.current.value = m.texto
+                                    textareaRef.current.style.height = 'auto'
+                                    textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 128) + 'px'
+                                    textareaRef.current.focus()
+                                  }
+                                  setMostrarPainelMsgs(false)
+                                }}
+                                className="min-w-0 flex-1 text-left"
+                              >
+                                <span className="block text-xs font-medium text-foreground">{m.titulo}</span>
+                                <span className="block line-clamp-1 text-xs text-muted-foreground">{m.texto}</span>
+                              </button>
+                              <button
+                                type="button"
+                                onMouseDown={e => { e.preventDefault(); handleExcluirMsgRapida(m.id) }}
+                                aria-label="Excluir mensagem rápida"
+                                className="shrink-0 rounded p-1 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive transition-all"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {/* Formulário de nova msg */}
+                      <div className="border-t border-border p-3 space-y-2">
+                        <p className="text-xs font-medium text-muted-foreground">Nova mensagem rápida</p>
+                        <input
+                          type="text"
+                          value={novaMsgTitulo}
+                          onChange={e => setNovaMsgTitulo(e.target.value)}
+                          placeholder="Título (ex: Saudação)"
+                          maxLength={100}
+                          className="w-full rounded-lg border border-border bg-input px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/20"
+                        />
+                        <textarea
+                          value={novaMsgTexto}
+                          onChange={e => setNovaMsgTexto(e.target.value)}
+                          placeholder="Texto da mensagem…"
+                          rows={2}
+                          className="w-full resize-none rounded-lg border border-border bg-input px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/20"
+                        />
+                        {erroMsg && <p className="text-xs text-destructive">{erroMsg}</p>}
+                        <button
+                          type="button"
+                          onClick={handleCriarMsgRapida}
+                          disabled={salvandoMsg}
+                          className="w-full rounded-lg bg-primary py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50 transition-opacity"
+                        >
+                          {salvandoMsg ? 'Salvando…' : 'Salvar'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Dropdown "/" */}
                   {mostrarMsgs && (() => {
                     const filtradas = msgsRapidas.filter(m =>
                       !filtroMsgs || m.titulo.toLowerCase().includes(filtroMsgs.toLowerCase()) || m.texto.toLowerCase().includes(filtroMsgs.toLowerCase())
@@ -1860,6 +1963,7 @@ export default function AtendimentoPage() {
                       </div>
                     ) : null
                   })()}
+
                   <form action={formAction} className="flex items-end gap-2">
                     <input type="hidden" name="celular" value={selecionado.celular} />
                     <input type="hidden" name="atendimento_id" value={selecionado.id} />
@@ -1889,6 +1993,7 @@ export default function AtendimentoPage() {
                         if (val.startsWith('/')) {
                           setFiltroMsgs(val.slice(1))
                           setMostrarMsgs(true)
+                          setMostrarPainelMsgs(false)
                         } else {
                           setMostrarMsgs(false)
                           setFiltroMsgs('')
@@ -1898,6 +2003,18 @@ export default function AtendimentoPage() {
                         setTimeout(() => setMostrarMsgs(false), 150)
                       }}
                     />
+                    {/* Botão mensagens rápidas */}
+                    <button
+                      type="button"
+                      onClick={() => { setMostrarPainelMsgs(p => !p); setErroMsg(null) }}
+                      title="Mensagens rápidas"
+                      className={[
+                        'flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-border transition',
+                        mostrarPainelMsgs ? 'bg-primary text-primary-foreground border-primary' : 'text-muted-foreground hover:bg-accent',
+                      ].join(' ')}
+                    >
+                      <Zap className="h-4 w-4" />
+                    </button>
                     <button
                       type="submit"
                       disabled={isSending}
