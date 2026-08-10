@@ -63,6 +63,7 @@ const META_TMPL: Record<string, { nome: string; idioma: string; params: 2 | 3; c
   'vencido1d':           { nome: 'cobranca_vencido',    idioma: 'pt_BR', params: 3, corpo: 'Olá, *{{1}}*! Sua fatura de *{{2}}* venceu ontem ({{3}}). Regularize o quanto antes para evitar cobrança adicional.' },
   'pagamento_confirmado':{ nome: 'pagamento_confirmado',idioma: 'pt_BR', params: 2, corpo: 'Muito obrigado, *{{1}}*! Recebemos seu pagamento de *{{2}}*. Qualquer dúvida ou problema só me enviar mensagem.' },
   'boasvindas':          { nome: 'boasvindas',          idioma: 'pt_BR', params: 3, corpo: 'Muito obrigado, *{{1}}*! Sua primeira fatura de *{{2}}* vence em *{{3}}*. Estaremos sempre à disposição para melhor lhe atender.' },
+  'manual':              { nome: 'cobranca_manual',     idioma: 'pt_BR', params: 3, corpo: 'Olá, *{{1}}*! Passando para lembrar da fatura de *{{2}}* com vencimento em *{{3}}*. Para dúvidas, responda esta mensagem.' },
 }
 
 function _fmtBRL(v: number) {
@@ -112,7 +113,24 @@ export async function forcarEnvioAction(id: string): Promise<{ error?: string }>
 
   // ── 4a. Envio via Meta Cloud API ─────────────────────────────────────────
   if (usarMeta) {
-    const tmpl = META_TMPL[notif.tipo as string]
+    // Template customizado da conta tem prioridade sobre o hardcoded
+    const { data: cfgTmpl } = await admin
+      .from('notificacoes_config')
+      .select('meta_template_nome, meta_template_idioma, meta_template_corpo')
+      .eq('conta_id', contaId)
+      .eq('tipo', notif.tipo as any)
+      .maybeSingle()
+
+    const corpoCustom = ((cfgTmpl as any)?.meta_template_corpo as string | null) ?? ''
+    const tmpl = (cfgTmpl as any)?.meta_template_nome
+      ? {
+          nome:   (cfgTmpl as any).meta_template_nome as string,
+          idioma: ((cfgTmpl as any).meta_template_idioma as string | null) ?? 'pt_BR',
+          params: (corpoCustom.includes('{{3}}') ? 3 : corpoCustom.includes('{{2}}') ? 2 : 1) as 2 | 3,
+          corpo:  corpoCustom,
+        }
+      : META_TMPL[notif.tipo as string]
+
     if (!tmpl) {
       await admin.from('notificacoes_enviadas').update({ status: 'fila' }).eq('id', id)
       return { error: `Tipo "${notif.tipo}" não possui template Meta configurado.` }

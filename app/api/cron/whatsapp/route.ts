@@ -45,6 +45,10 @@ const META_TEMPLATES: Record<string, { nome: string; idioma: string; params: 2 |
     nome: 'boasvindas', idioma: 'pt_BR', params: 3,
     corpo: '🎉 Ativado com sucesso 🎉\n\nMuito obrigado Sr.(Sra.) *{{1}}*! Sua primeira fatura de *{{2}}* vence em *{{3}}*.\n\n🤩 Estaremos sempre à disposição para melhor lhe atender. 🤩',
   },
+  'manual': {
+    nome: 'cobranca_manual', idioma: 'pt_BR', params: 3,
+    corpo: 'Olá, *{{1}}*! Passando para lembrar da fatura de *{{2}}* com vencimento em *{{3}}*. Para dúvidas, responda esta mensagem.',
+  },
 }
 
 function reconstruirTexto(corpo: string, parametros: string[]): string {

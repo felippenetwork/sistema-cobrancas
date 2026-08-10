@@ -26,6 +26,8 @@ import {
   type DadosPainel,
 } from './_actions/renovar'
 import QRCode from 'react-qr-code'
+import { listarMensagensRapidasAction, type MensagemRapida } from '@/app/(app)/mensagens-rapidas/_actions'
+import { celularVariantes } from '@/lib/utils/celular'
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
 
@@ -1164,6 +1166,11 @@ export default function AtendimentoPage() {
   const [carregandoTemplates, setCarregandoTemplates] = useState(false)
   const [erroTemplates, setErroTemplates]       = useState<string | null>(null)
 
+  // Mensagens rápidas
+  const [msgsRapidas, setMsgsRapidas]     = useState<MensagemRapida[]>([])
+  const [filtroMsgs, setFiltroMsgs]       = useState('')
+  const [mostrarMsgs, setMostrarMsgs]     = useState(false)
+
   const bottomRef   = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const buscaRef    = useRef<HTMLInputElement>(null)
@@ -1219,6 +1226,13 @@ export default function AtendimentoPage() {
     })
   }, [])
 
+  // ── Carregar mensagens rápidas ────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!contaId) return
+    listarMensagensRapidasAction().then(({ data }) => setMsgsRapidas(data))
+  }, [contaId])
+
   // ── Carregar atendimentos ─────────────────────────────────────────────────────
 
   const carregarContadorPendentes = useCallback(async (cid: string) => {
@@ -1264,7 +1278,7 @@ export default function AtendimentoPage() {
       .from('mensagens_wa')
       .select('id, celular, direcao, texto, tipo, status, midia_url, recebido_em, lida')
       .eq('conta_id', cid)
-      .eq('celular', celular)
+      .in('celular', celularVariantes(celular))
       .order('recebido_em', { ascending: true })
       .limit(300)
 
@@ -1689,14 +1703,24 @@ export default function AtendimentoPage() {
               {/* Ações */}
               <div className="flex shrink-0 items-center gap-1.5">
                 {selecionado.status === 'aguardando' && (
-                  <button
-                    onClick={handleAceitar}
-                    disabled={!!acao}
-                    className="flex h-9 items-center gap-1.5 rounded-xl bg-primary px-3 text-xs font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
-                  >
-                    <CheckCircle className="h-3.5 w-3.5" />
-                    {acao === 'aceitar' ? 'Aceitando…' : 'Aceitar'}
-                  </button>
+                  <>
+                    <button
+                      onClick={handleFinalizar}
+                      disabled={!!acao}
+                      className="flex h-9 items-center gap-1.5 rounded-xl border border-border px-2.5 text-xs font-medium text-muted-foreground transition hover:bg-accent disabled:opacity-50"
+                    >
+                      <XCircle className="h-3.5 w-3.5" />
+                      {acao === 'finalizar' ? '…' : 'Finalizar'}
+                    </button>
+                    <button
+                      onClick={handleAceitar}
+                      disabled={!!acao}
+                      className="flex h-9 items-center gap-1.5 rounded-xl bg-primary px-3 text-xs font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
+                    >
+                      <CheckCircle className="h-3.5 w-3.5" />
+                      {acao === 'aceitar' ? 'Aceitando…' : 'Aceitar'}
+                    </button>
+                  </>
                 )}
 
                 {selecionado.status === 'em_atendimento' && (
@@ -1805,6 +1829,37 @@ export default function AtendimentoPage() {
                   {sendState.error && (
                     <p className="mb-2 text-xs text-destructive">{sendState.error}</p>
                   )}
+                  {/* Dropdown de mensagens rápidas */}
+                  {mostrarMsgs && (() => {
+                    const filtradas = msgsRapidas.filter(m =>
+                      !filtroMsgs || m.titulo.toLowerCase().includes(filtroMsgs.toLowerCase()) || m.texto.toLowerCase().includes(filtroMsgs.toLowerCase())
+                    )
+                    return filtradas.length > 0 ? (
+                      <div className="mb-1 max-h-48 overflow-y-auto rounded-xl border border-border bg-card shadow-sm">
+                        {filtradas.map(m => (
+                          <button
+                            key={m.id}
+                            type="button"
+                            onMouseDown={e => {
+                              e.preventDefault()
+                              if (textareaRef.current) {
+                                textareaRef.current.value = m.texto
+                                textareaRef.current.style.height = 'auto'
+                                textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 128) + 'px'
+                                textareaRef.current.focus()
+                              }
+                              setMostrarMsgs(false)
+                              setFiltroMsgs('')
+                            }}
+                            className="flex w-full flex-col gap-0.5 px-3 py-2 text-left hover:bg-accent transition-colors"
+                          >
+                            <span className="text-xs font-medium text-foreground">{m.titulo}</span>
+                            <span className="line-clamp-1 text-xs text-muted-foreground">{m.texto}</span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : null
+                  })()}
                   <form action={formAction} className="flex items-end gap-2">
                     <input type="hidden" name="celular" value={selecionado.celular} />
                     <input type="hidden" name="atendimento_id" value={selecionado.id} />
@@ -1812,10 +1867,15 @@ export default function AtendimentoPage() {
                       ref={textareaRef}
                       name="texto"
                       rows={1}
-                      placeholder="Mensagem… (Enter envia)"
+                      placeholder="Mensagem… (/ para msgs. rápidas, Enter envia)"
                       className="flex-1 resize-none rounded-2xl border border-border bg-input px-4 py-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
                       style={{ maxHeight: '8rem' }}
                       onKeyDown={e => {
+                        if (e.key === 'Escape' && mostrarMsgs) {
+                          setMostrarMsgs(false)
+                          setFiltroMsgs('')
+                          return
+                        }
                         if (e.key === 'Enter' && !e.shiftKey) {
                           e.preventDefault()
                           e.currentTarget.form?.requestSubmit()
@@ -1825,6 +1885,17 @@ export default function AtendimentoPage() {
                         const el = e.currentTarget
                         el.style.height = 'auto'
                         el.style.height = Math.min(el.scrollHeight, 128) + 'px'
+                        const val = el.value
+                        if (val.startsWith('/')) {
+                          setFiltroMsgs(val.slice(1))
+                          setMostrarMsgs(true)
+                        } else {
+                          setMostrarMsgs(false)
+                          setFiltroMsgs('')
+                        }
+                      }}
+                      onBlur={() => {
+                        setTimeout(() => setMostrarMsgs(false), 150)
                       }}
                     />
                     <button

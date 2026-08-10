@@ -34,7 +34,7 @@ export async function cobrarManualAction(formData: FormData) {
 
   const clienteId = parcela.cobrancas.cliente_id
 
-  const { error: notifErr } = await supabase.from('notificacoes_enviadas').insert({
+  const { data: notif, error: notifErr } = await supabase.from('notificacoes_enviadas').insert({
     conta_id:      parcela.conta_id,
     parcela_id:    parcela.id,
     cobranca_id:   parcela.cobranca_id,
@@ -43,8 +43,12 @@ export async function cobrarManualAction(formData: FormData) {
     canal:         'whatsapp',
     status:        'fila',
     agendado_para: new Date().toISOString(),
-  })
+  }).select('id').single()
   if (notifErr) throw new Error(notifErr.message)
+
+  if (notif?.id) {
+    await enviarWhatsAppImediato(parcela.conta_id, notif.id, parcela.id, parcela.cobranca_id, clienteId, 'manual')
+  }
 
   revalidatePath(`/cobrancas/${parcela.cobranca_id}`)
 }
