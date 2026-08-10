@@ -8,7 +8,7 @@ import {
   ArrowRightLeft, Inbox, History, Plus, Search, User, Pencil,
   ChevronRight, Phone, Mail, X, Loader2, RefreshCw, ExternalLink,
   CreditCard, Check, CheckCheck, FileText, Volume2, Video, ImageIcon,
-  Zap, Trash2,
+  Zap, Trash2, Play, Pause, ZoomIn,
 } from 'lucide-react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
@@ -605,11 +605,77 @@ function TickStatus({ status }: { status: string }) {
   return <Check className="h-3.5 w-3.5 opacity-60" />
 }
 
+// ── AudioPlayer — player de áudio customizado (visível em tema escuro) ────────
+
+function AudioPlayer({ src, isOut }: { src: string; isOut: boolean }) {
+  const audioRef = useRef<HTMLAudioElement>(null)
+  const [playing, setPlaying]   = useState(false)
+  const [current, setCurrent]   = useState(0)
+  const [duration, setDuration] = useState(0)
+
+  function toggle() {
+    const a = audioRef.current
+    if (!a) return
+    if (playing) { a.pause(); setPlaying(false) }
+    else { a.play().then(() => setPlaying(true)).catch(() => {}) }
+  }
+
+  function fmtTime(s: number) {
+    if (!isFinite(s)) return '0:00'
+    const m = Math.floor(s / 60)
+    return `${m}:${Math.floor(s % 60).toString().padStart(2, '0')}`
+  }
+
+  const btnCls = isOut
+    ? 'bg-white/20 text-white hover:bg-white/30'
+    : 'bg-muted text-foreground hover:bg-accent'
+  const timeCls = isOut ? 'text-white/70' : 'text-muted-foreground'
+
+  return (
+    <div className="flex items-center gap-2 px-3 py-2" style={{ minWidth: 200 }}>
+      <audio
+        ref={audioRef}
+        src={src}
+        onTimeUpdate={() => setCurrent(audioRef.current?.currentTime ?? 0)}
+        onLoadedMetadata={() => setDuration(audioRef.current?.duration ?? 0)}
+        onEnded={() => { setPlaying(false); setCurrent(0) }}
+      />
+      <button
+        type="button"
+        onClick={toggle}
+        aria-label={playing ? 'Pausar' : 'Reproduzir'}
+        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors ${btnCls}`}
+      >
+        {playing ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+      </button>
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <input
+          type="range"
+          min={0}
+          max={duration || 1}
+          step={0.1}
+          value={current}
+          onChange={e => {
+            const t = Number(e.target.value)
+            setCurrent(t)
+            if (audioRef.current) audioRef.current.currentTime = t
+          }}
+          className="w-full cursor-pointer accent-current"
+          style={{ height: 4 }}
+        />
+        <span className={`text-[10px] tabular-nums ${timeCls}`}>
+          {fmtTime(current)} / {fmtTime(duration)}
+        </span>
+      </div>
+    </div>
+  )
+}
+
 // ── BubbleMidia — conteúdo da bolha de mensagem (texto ou mídia) ──────────────
 
 function BubbleMidia({
-  tipo, midiaUrl, texto, isOut,
-}: { tipo: string; midiaUrl: string | null; texto: string; isOut: boolean }) {
+  tipo, midiaUrl, texto, isOut, onImageClick,
+}: { tipo: string; midiaUrl: string | null; texto: string; isOut: boolean; onImageClick?: (url: string) => void }) {
   const txtCls = isOut ? 'text-primary-foreground' : 'text-foreground'
   const captionRaw = (s: string, prefix: string) => s.startsWith(prefix) ? s.slice(prefix.length).trim() : ''
 
@@ -618,12 +684,17 @@ function BubbleMidia({
       const caption = captionRaw(texto, '[Imagem]')
       return (
         <div>
-          <img
-            src={midiaUrl}
-            alt="Imagem"
-            className="block max-w-full"
-            style={{ maxHeight: 320, objectFit: 'cover', width: '100%' }}
-          />
+          <div className="relative cursor-zoom-in group" onClick={() => onImageClick?.(midiaUrl)}>
+            <img
+              src={midiaUrl}
+              alt="Imagem"
+              className="block max-w-full"
+              style={{ maxHeight: 320, objectFit: 'cover', width: '100%' }}
+            />
+            <div className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/20 transition-colors">
+              <ZoomIn className="h-6 w-6 text-white opacity-0 group-hover:opacity-100 drop-shadow transition-opacity" />
+            </div>
+          </div>
           {caption && <p className={`whitespace-pre-wrap break-words px-3 pt-1 ${txtCls}`}>{caption}</p>}
         </div>
       )
@@ -637,9 +708,7 @@ function BubbleMidia({
   }
 
   if (tipo === 'audio') {
-    if (midiaUrl) {
-      return <div className="px-3 pt-2"><audio controls src={midiaUrl} className="h-10 w-full max-w-xs" /></div>
-    }
+    if (midiaUrl) return <AudioPlayer src={midiaUrl} isOut={isOut} />
     return (
       <div className={`flex items-center gap-2 px-3 pt-2 ${txtCls} opacity-80`}>
         <Volume2 className="h-4 w-4 shrink-0" />
@@ -1169,6 +1238,9 @@ export default function AtendimentoPage() {
   const [metaTemplates, setMetaTemplates]       = useState<MetaTemplate[]>([])
   const [carregandoTemplates, setCarregandoTemplates] = useState(false)
   const [erroTemplates, setErroTemplates]       = useState<string | null>(null)
+
+  // Lightbox de imagem
+  const [imagemAmpliada, setImagemAmpliada] = useState<string | null>(null)
 
   // Mensagens rápidas
   const [msgsRapidas, setMsgsRapidas]     = useState<MensagemRapida[]>([])
@@ -1816,7 +1888,7 @@ export default function AtendimentoPage() {
                         ? 'rounded-br-sm bg-primary text-primary-foreground'
                         : 'rounded-bl-sm border border-border bg-card text-foreground',
                     ].join(' ')}>
-                      <BubbleMidia tipo={msg.tipo ?? 'text'} midiaUrl={msg.midia_url ?? null} texto={msg.texto} isOut={isOut} />
+                      <BubbleMidia tipo={msg.tipo ?? 'text'} midiaUrl={msg.midia_url ?? null} texto={msg.texto} isOut={isOut} onImageClick={setImagemAmpliada} />
                       <div className={['flex items-center gap-1 px-3 pb-2 pt-0.5 text-[10px]', isOut ? 'justify-end text-primary-foreground/70' : 'text-muted-foreground'].join(' ')}>
                         <span>{formatarHora(msg.recebido_em)}</span>
                         {isOut && <TickStatus status={msg.status ?? 'enviado'} />}
@@ -2047,6 +2119,28 @@ export default function AtendimentoPage() {
           </div>
         )}
       </div>
+
+      {/* Lightbox de imagem */}
+      {imagemAmpliada && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 p-4"
+          onClick={() => setImagemAmpliada(null)}
+        >
+          <button
+            onClick={() => setImagemAmpliada(null)}
+            aria-label="Fechar imagem"
+            className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 transition-colors"
+          >
+            <X className="h-5 w-5" />
+          </button>
+          <img
+            src={imagemAmpliada}
+            alt="Imagem ampliada"
+            className="max-h-full max-w-full rounded-lg object-contain"
+            onClick={e => e.stopPropagation()}
+          />
+        </div>
+      )}
     </>
   )
 }
