@@ -1414,27 +1414,45 @@ export default function AtendimentoPage() {
 
   // ── Realtime ──────────────────────────────────────────────────────────────────
 
+  // Refs para acessar valores atuais dentro dos handlers sem recriar o canal
+  const selecionadoRef = useRef<Atendimento | null>(null)
+  const tabRef         = useRef<AtendimentoStatus>('aguardando')
+  const contaIdRef     = useRef<string | null>(null)
+  useEffect(() => { selecionadoRef.current = selecionado },  [selecionado])
+  useEffect(() => { tabRef.current         = tab },          [tab])
+  useEffect(() => { contaIdRef.current     = contaId },      [contaId])
+
+  // Canal realtime — criado uma vez por contaId, nunca recriado por selecionado/tab
   useEffect(() => {
     if (!contaId) return
+    const channelName = `atendimento-rt-${contaId}`
     const ch = sb
-      .channel('atendimento-realtime')
+      .channel(channelName)
       .on('postgres_changes', {
         event: '*', schema: 'public', table: 'atendimentos',
         filter: `conta_id=eq.${contaId}`,
-      }, () => { carregarAtendimentos(contaId, tab); carregarContadorPendentes(contaId) })
+      }, () => {
+        const cid = contaIdRef.current
+        if (cid) { carregarAtendimentos(cid, tabRef.current); carregarContadorPendentes(cid) }
+      })
       .on('postgres_changes', {
         event: 'INSERT', schema: 'public', table: 'mensagens_wa',
         filter: `conta_id=eq.${contaId}`,
       }, (payload) => {
         const nova = payload.new as Mensagem
-        if (selecionado && nova.celular === selecionado.celular) {
-          setMensagens(prev => [...prev, nova])
+        const sel  = selecionadoRef.current
+        if (sel && celularVariantes(sel.celular).includes(nova.celular)) {
+          setMensagens(prev => {
+            if (prev.some(m => m.id === nova.id)) return prev
+            return [...prev, nova]
+          })
           if (nova.direcao === 'in') {
             setUltimaMsgIn(new Date(nova.recebido_em))
             marcarLidaAction(nova.celular)
           }
         }
-        carregarAtendimentos(contaId, tab)
+        const cid = contaIdRef.current
+        if (cid) { carregarAtendimentos(cid, tabRef.current); carregarContadorPendentes(cid) }
       })
       .on('postgres_changes', {
         event: 'UPDATE', schema: 'public', table: 'mensagens_wa',
@@ -1446,8 +1464,18 @@ export default function AtendimentoPage() {
         )
       })
       .subscribe()
-    return () => { sb.removeChannel(ch) }
-  }, [contaId, tab, selecionado, sb, carregarAtendimentos, carregarContadorPendentes])
+
+    // Polling de fallback a cada 30s para cobrir falhas do realtime
+    const poll = setInterval(() => {
+      const cid = contaIdRef.current
+      if (cid) { carregarAtendimentos(cid, tabRef.current); carregarContadorPendentes(cid) }
+    }, 30_000)
+
+    return () => {
+      clearInterval(poll)
+      sb.removeChannel(ch)
+    }
+  }, [contaId, sb, carregarAtendimentos, carregarContadorPendentes])
 
   // ── Ações ─────────────────────────────────────────────────────────────────────
 
