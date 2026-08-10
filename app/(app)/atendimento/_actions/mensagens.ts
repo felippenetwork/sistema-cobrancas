@@ -37,6 +37,8 @@ export async function enviarRespostaAction(
     const usarMeta   = !!(cfg?.meta_api_ativo !== false && cfg?.meta_access_token && cfg?.meta_phone_number_id)
     const usarTwilio = !!(cfg?.twilio_ativo !== false && cfg?.twilio_account_sid && cfg?.twilio_auth_token && cfg?.twilio_from_number)
 
+    let waId: string | null = null
+
     if (usarMeta) {
       // ── Envio via Meta Cloud API ────────────────────────────────────────────
       const res = await fetch(
@@ -62,6 +64,9 @@ export async function enviarRespostaAction(
         const msg  = body?.error?.message ?? `Erro Meta API: ${res.status}`
         return { error: msg }
       }
+
+      const metaJson = await res.json().catch(() => ({}))
+      waId = (metaJson?.messages?.[0]?.id as string | undefined) ?? null
 
     } else if (usarTwilio) {
       // ── Envio via Twilio ────────────────────────────────────────────────────
@@ -125,6 +130,7 @@ export async function enviarRespostaAction(
       direcao: 'out',
       texto,
       lida:    true,
+      ...(waId ? { wa_id: waId } : {}),
     })
 
     if (atendimentoId) {
@@ -242,6 +248,9 @@ export async function enviarTemplateAction(
       return { error: (body as any)?.error?.message ?? `Erro Meta API: ${res.status}` }
     }
 
+    const metaJson = await res.json().catch(() => ({}))
+    const waId = (metaJson?.messages?.[0]?.id as string | undefined) ?? null
+
     // Reconstruir texto legível para salvar no histórico
     const texto = templateCorpo
       .replace('{{1}}', parametros[0] ?? '')
@@ -256,6 +265,7 @@ export async function enviarTemplateAction(
       direcao:        'out',
       texto,
       lida:           true,
+      ...(waId ? { wa_id: waId } : {}),
     })
 
     await supabase
