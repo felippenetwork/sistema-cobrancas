@@ -42,6 +42,21 @@ export async function enviarWhatsAppImediato(
 ): Promise<boolean> {
   const supabase = createAdminClient()
 
+  // Claim atômico: só processa se a notificação ainda estiver em 'fila'.
+  // Evita envio duplo quando o cron e o envio imediato disputam a mesma notificação.
+  const { data: claimed } = await supabase
+    .from('notificacoes_enviadas')
+    .update({ status: 'processando' } as any)
+    .eq('id', notifId)
+    .eq('status', 'fila')
+    .select('id')
+    .maybeSingle()
+
+  if (!(claimed as any)?.id) {
+    console.log('[enviarWhatsAppImediato] notificação já reivindicada por outro processo', notifId)
+    return false
+  }
+
   // Credenciais Meta
   const { data: cfg } = await supabase
     .from('configuracoes')
@@ -157,6 +172,10 @@ export async function enviarWhatsAppImediato(
     return true
   } catch (err: any) {
     console.error('[enviarWhatsAppImediato] falha ao enviar', tipo, err?.message)
+    // Devolve para fila para que o cron possa tentar novamente
+    await supabase.from('notificacoes_enviadas')
+      .update({ status: 'fila' } as any)
+      .eq('id', notifId)
     return false
   }
 }

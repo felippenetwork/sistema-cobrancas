@@ -147,8 +147,25 @@ async function processarNotificacao(
   tmplOverride?: Map<string, { nome: string; idioma: string; corpo: string }>,
 ): Promise<'enviado' | 'fora_janela' | 'sem_template' | 'erro'> {
 
+  // Claim atômico: garante que só um processo envia esta notificação.
+  const { data: claimed } = await supabase
+    .from('notificacoes_enviadas')
+    .update({ status: 'processando' as any })
+    .eq('id', notif.id)
+    .eq('status', 'fila')
+    .select('id')
+    .maybeSingle()
+
+  if (!(claimed as any)?.id) {
+    // Já reivindicado por envio imediato ou outro cron — não é erro, só ignorar.
+    return 'enviado'
+  }
+
   // Verificar janela horária
   if (!TIPOS_SEM_JANELA.has(notif.tipo) && !dentroDaJanela(hInicio, hFim)) {
+    // Devolve para fila para ser tentado na próxima janela
+    await supabase.from('notificacoes_enviadas')
+      .update({ status: 'fila' }).eq('id', notif.id)
     return 'fora_janela'
   }
 
@@ -230,7 +247,7 @@ async function processarNotificacao(
       status:         'enviado',
       mensagem_final: textoMensagem,
       enviado_em:     agora,
-    }).eq('id', notif.id).eq('status', 'fila')
+    }).eq('id', notif.id)
 
     // Garantir que existe um atendimento e salvar a mensagem
     const atendimentoId = await encontrarOuCriarAtendimento(
@@ -255,11 +272,11 @@ async function processarNotificacao(
   } catch (err: any) {
     console.error('[cron/whatsapp] erro ao enviar', notif.id, err?.message)
 
-    // Fora da janela de serviço da Meta (131026) → reagenda para amanhã
+    // Fora da janela de serviço da Meta (131026) → reagenda para amanhã e volta a fila
     if (err?.message?.includes('131026') || err?.message?.includes('outside')) {
       const amanha = addDias(hojeEmSP(), 1)
       await supabase.from('notificacoes_enviadas')
-        .update({ agendado_para: new Date(`${amanha}T09:00:00-03:00`).toISOString() })
+        .update({ status: 'fila', agendado_para: new Date(`${amanha}T09:00:00-03:00`).toISOString() })
         .eq('id', notif.id)
     } else {
       await supabase.from('notificacoes_enviadas')
