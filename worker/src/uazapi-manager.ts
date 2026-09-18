@@ -38,7 +38,16 @@ type InstanciaInfo = {
   phone:  string | null
   qr:     string | null
   nome:   string | null
+  // true quando o estado acima é um "não sei" por causa de HTTP 429 (rate limit
+  // da uazapi), não uma resposta real da API. Ver comentário na classe abaixo.
+  rateLimited?: boolean
 }
+
+// 429 é rate limit transitório da uazapi — NUNCA deve virar "disconnected".
+// Um falso negativo aqui (ver checarInstancia → reconectar/tentarReconectarAuto)
+// apagaria e recriaria a instância, derrubando uma sessão que pode já estar
+// conectada no celular só porque a CHECAGEM foi limitada, não o WhatsApp em si.
+class UazapiRateLimitError extends Error {}
 
 // Verifica estado via GET /instance/status — leve, sem reconexão ao WhatsApp.
 // Usar apenas no loop de polling (steady-state). Não aciona /instance/connect.
@@ -57,6 +66,7 @@ async function verificarEstado(token: string): Promise<InstanciaInfo> {
     const qr = (data?.instance?.qrcode as string) ?? null
     return { state: qr ? 'connecting' : 'disconnected', phone: null, nome: null, qr }
   } catch (err: any) {
+    if (err instanceof UazapiRateLimitError) throw err
     if (/404/.test(String(err?.message ?? ''))) return { state: 'disconnected', phone: null, nome: null, qr: null }
     throw err
   }
@@ -81,7 +91,13 @@ async function checarInstancia(token: string): Promise<InstanciaInfo> {
       return { state: 'connecting', phone: null, nome: null, qr: inst.qrcode }
     }
     return { state: 'connecting', phone: null, nome: null, qr: null }
-  } catch {
+  } catch (err) {
+    // 429: não sabemos o estado real. Reportar 'disconnected' aqui faria o
+    // chamador (reconectar/tentarReconectarAuto) apagar e recriar a instância
+    // por engano — sinaliza rateLimited e deixa quem chama decidir sem agir.
+    if (err instanceof UazapiRateLimitError) {
+      return { state: 'connecting', phone: null, nome: null, qr: null, rateLimited: true }
+    }
     return { state: 'disconnected', phone: null, nome: null, qr: null }
   }
 }
@@ -93,6 +109,7 @@ async function adminApi(method: string, path: string, body?: object): Promise<an
     headers: { 'Content-Type': 'application/json', 'admintoken': GLOBAL_TOKEN },
     body: body ? JSON.stringify(body) : undefined,
   })
+  if (res.status === 429) throw new UazapiRateLimitError(`uazapi admin ${method} ${path} → 429`)
   const text = await res.text()
   if (!res.ok) throw new Error(`uazapi admin ${method} ${path} → ${res.status}: ${text}`)
   try { return JSON.parse(text) } catch { return text }
@@ -105,6 +122,7 @@ async function instanceApi(instanceToken: string, method: string, path: string, 
     headers: { 'Content-Type': 'application/json', 'token': instanceToken },
     body: body ? JSON.stringify(body) : undefined,
   })
+  if (res.status === 429) throw new UazapiRateLimitError(`uazapi inst ${method} ${path} → 429`)
   const text = await res.text()
   if (!res.ok) throw new Error(`uazapi inst ${method} ${path} → ${res.status}: ${text}`)
   try { return JSON.parse(text) } catch { return text }
@@ -113,6 +131,7 @@ async function instanceApi(instanceToken: string, method: string, path: string, 
 export class UazapiManager {
   private connected      = new Set<string>()           // contaIds com estado 'connected'
   private polling        = new Set<string>()           // contaIds com loop de polling ativo
+  private rateLimitados   = new Set<string>()           // contaIds atualmente sinalizadas como rate-limited
   private instanceTokens = new Map<string, string>()   // contaId → instance token
 
   constructor(private supabase: SupabaseAdmin) {}
@@ -156,11 +175,12 @@ export class UazapiManager {
           const nome   = (data?.instance?.profileName as string) ?? null
           await this.supabase.from('conexoes').upsert(
             { conta_id: contaId, status: 'conectado', qr_code: null, comando: null,
-              numero_conectado: numero, device_name: nome,
+              numero_conectado: numero, device_name: nome, rate_limitado: false,
               ultima_conexao: new Date().toISOString(),
               uazapi_instance_token: inst.token as string },
             { onConflict: 'conta_id' },
           )
+          this.rateLimitados.delete(contaId)
         } catch (err) { logger.warn({ contaId, err }, 'uazapi: restaurarSessoes — falha ao sincronizar DB') }
         this.iniciarPolling(contaId)
         logger.info({ contaId }, 'uazapi: sessão restaurada')
@@ -184,6 +204,7 @@ export class UazapiManager {
     this.instanceTokens.delete(contaId)
     this.connected.delete(contaId)
     this.polling.delete(contaId)
+    this.rateLimitados.delete(contaId)
 
     // 2. Criar nova instância
     let token: string
@@ -199,7 +220,7 @@ export class UazapiManager {
 
     await this.supabase.from('conexoes').upsert(
       { conta_id: contaId, status: 'conectando', qr_code: null, comando: null,
-        uazapi_instance_token: token },
+        uazapi_instance_token: token, rate_limitado: false },
       { onConflict: 'conta_id' },
     )
 
@@ -230,10 +251,11 @@ export class UazapiManager {
     this.instanceTokens.delete(contaId)
     this.connected.delete(contaId)
     this.polling.delete(contaId)
+    this.rateLimitados.delete(contaId)
 
     await this.supabase.from('conexoes').upsert(
       { conta_id: contaId, status: 'desconectado', qr_code: null, comando: null,
-        numero_conectado: null, device_name: null },
+        numero_conectado: null, device_name: null, rate_limitado: false },
       { onConflict: 'conta_id' },
     )
   }
@@ -257,10 +279,10 @@ export class UazapiManager {
     }
 
     // Checar estado real no uazapi antes de qualquer ação destrutiva
-    let estadoAtual: 'connected' | 'disconnected' | 'connecting' = 'disconnected'
-    try { estadoAtual = await this.pegarEstado(contaId) } catch (err) { logger.warn({ contaId, err }, 'uazapi: reconectar — falha ao checar estado') }
+    let estado: InstanciaInfo = { state: 'disconnected', phone: null, nome: null, qr: null }
+    try { estado = await this.pegarEstado(contaId) } catch (err) { logger.warn({ contaId, err }, 'uazapi: reconectar — falha ao checar estado') }
 
-    if (estadoAtual === 'connected') {
+    if (estado.state === 'connected') {
       // Já conectado — apenas sincronizar banco, sem desconectar
       const token = this.instanceTokens.get(contaId)
       if (token) {
@@ -270,15 +292,29 @@ export class UazapiManager {
           const nome   = (data?.instance?.profileName as string) ?? null
           await this.supabase.from('conexoes').upsert(
             { conta_id: contaId, status: 'conectado', qr_code: null, comando: null,
-              numero_conectado: numero, device_name: nome,
+              numero_conectado: numero, device_name: nome, rate_limitado: false,
               ultima_conexao: new Date().toISOString() },
             { onConflict: 'conta_id' },
           )
+          this.rateLimitados.delete(contaId)
         } catch (err) { logger.warn({ contaId, err }, 'uazapi: reconectar — falha ao sincronizar DB') }
       }
       this.connected.add(contaId)
       this.iniciarPolling(contaId)
       logger.info({ contaId }, 'uazapi: reiniciar — já conectado, banco sincronizado')
+      return
+    }
+
+    if (estado.rateLimited) {
+      // uazapi está limitando as checagens agora — não sabemos o estado real.
+      // NUNCA apagar/recriar a instância aqui: se a conta já estiver conectada
+      // no celular, isso derrubaria a sessão por causa de um falso negativo.
+      // Só sinaliza na tela; o próximo ciclo de polling (60s) resolve sozinho.
+      logger.warn({ contaId }, 'uazapi: reconectar — rate limited, mantendo estado atual sem mexer na instância')
+      await this.sinalizarRateLimit(contaId)
+      try {
+        await this.supabase.from('conexoes').update({ comando: null }).eq('conta_id', contaId)
+      } catch (err) { logger.warn({ contaId, err }, 'uazapi: reconectar — falha ao limpar comando') }
       return
     }
 
@@ -325,16 +361,15 @@ export class UazapiManager {
 
   // ── Privados ──────────────────────────────────────────────────────────────────
 
-  private async pegarEstado(contaId: string): Promise<'connected' | 'disconnected' | 'connecting'> {
+  private async pegarEstado(contaId: string): Promise<InstanciaInfo> {
     const token = this.instanceTokens.get(contaId)
-    if (!token) return 'disconnected'
+    if (!token) return { state: 'disconnected', phone: null, nome: null, qr: null }
     try {
-      const info = await checarInstancia(token)
-      return info.state
+      return await checarInstancia(token)
     } catch (err: any) {
       if (/404/.test(String(err?.message ?? ''))) {
         this.instanceTokens.delete(contaId)
-        return 'disconnected'
+        return { state: 'disconnected', phone: null, nome: null, qr: null }
       }
       throw err
     }
@@ -347,10 +382,13 @@ export class UazapiManager {
       const info = await checarInstancia(token)
       if (info.qr) {
         await this.supabase.from('conexoes').upsert(
-          { conta_id: contaId, qr_code: info.qr, status: 'conectando' },
+          { conta_id: contaId, qr_code: info.qr, status: 'conectando', rate_limitado: false },
           { onConflict: 'conta_id' },
         )
+        this.rateLimitados.delete(contaId)
         logger.info({ contaId }, 'uazapi: QR gravado no banco')
+      } else if (info.rateLimited) {
+        await this.sinalizarRateLimit(contaId)
       }
     } catch (err) {
       logger.warn({ contaId, err }, 'uazapi: erro ao buscar QR')
@@ -359,9 +397,30 @@ export class UazapiManager {
 
   private async marcarDesconectado(contaId: string) {
     await this.supabase.from('conexoes').upsert(
-      { conta_id: contaId, status: 'desconectado', qr_code: null, comando: null },
+      { conta_id: contaId, status: 'desconectado', qr_code: null, comando: null, rate_limitado: false },
       { onConflict: 'conta_id' },
     )
+    this.rateLimitados.delete(contaId)
+  }
+
+  // Sinaliza na tela que a uazapi está limitando as checagens desta conta.
+  // Idempotente em memória — evita reescrever o banco a cada ciclo de polling
+  // enquanto o rate limit continuar ativo.
+  private async sinalizarRateLimit(contaId: string) {
+    if (this.rateLimitados.has(contaId)) return
+    this.rateLimitados.add(contaId)
+    try {
+      await this.supabase.from('conexoes').update({ rate_limitado: true }).eq('conta_id', contaId)
+    } catch (err) { logger.warn({ contaId, err }, 'uazapi: falha ao sinalizar rate limit') }
+  }
+
+  // Limpa a sinalização de rate limit assim que uma checagem volta a funcionar.
+  private async limparRateLimit(contaId: string) {
+    if (!this.rateLimitados.has(contaId)) return
+    this.rateLimitados.delete(contaId)
+    try {
+      await this.supabase.from('conexoes').update({ rate_limitado: false }).eq('conta_id', contaId)
+    } catch (err) { logger.warn({ contaId, err }, 'uazapi: falha ao limpar rate limit') }
   }
 
   // Varredura periódica: sincroniza estado real do uazapi com o banco.
@@ -411,10 +470,11 @@ export class UazapiManager {
           const nome   = (data?.instance?.profileName as string) ?? null
           await this.supabase.from('conexoes').upsert(
             { conta_id: contaId, status: 'conectado', qr_code: null, comando: null,
-              numero_conectado: numero, device_name: nome,
+              numero_conectado: numero, device_name: nome, rate_limitado: false,
               ultima_conexao: new Date().toISOString() },
             { onConflict: 'conta_id' },
           )
+          this.rateLimitados.delete(contaId)
         } catch (err) { logger.warn({ contaId, err }, 'uazapi: sincronizarConexoes — falha ao sincronizar DB') }
         this.iniciarPolling(contaId)
         logger.info({ contaId }, 'uazapi: sincronizarConexoes — sessão restaurada, polling reiniciado')
@@ -442,16 +502,19 @@ export class UazapiManager {
 
   // Tenta restaurar a sessão automaticamente após queda de conexão.
   // Retorna 'conectado' se OK, 'conectando' se gerou QR (precisa de scan),
-  // ou 'falhou' se esgotou tentativas.
+  // 'incerto' se só encontrou rate limit (não mexe no banco, tenta de novo depois),
+  // ou 'falhou' se esgotou tentativas com uma resposta real de desconectado.
   private async tentarReconectarAuto(
     contaId: string,
-  ): Promise<'conectado' | 'conectando' | 'falhou'> {
+  ): Promise<'conectado' | 'conectando' | 'falhou' | 'incerto'> {
     const MAX_TENTATIVAS  = 3
     const DELAY_INICIAL   = 3_000   // deixar uazapi processar a queda antes de reconectar
     const DELAY_CONECTAR  = 8_000   // aguardar sessão estabelecer após /instance/connect
     const DELAY_TENTATIVA = 20_000  // pausa entre tentativas fracassadas
 
     await sleep(DELAY_INICIAL)
+
+    let ultimaFoiRateLimit = false
 
     for (let i = 1; i <= MAX_TENTATIVAS; i++) {
       if (!this.polling.has(contaId)) return 'falhou' // desconectado manualmente durante tentativa
@@ -470,10 +533,10 @@ export class UazapiManager {
       await sleep(DELAY_CONECTAR)
       if (!this.polling.has(contaId)) return 'falhou'
 
-      let state: 'connected' | 'disconnected' | 'connecting' = 'disconnected'
-      try { state = await this.pegarEstado(contaId) } catch (err) { logger.warn({ contaId, tentativa: i, err }, 'uazapi: tentarReconectarAuto — falha ao checar estado') }
+      let estado: InstanciaInfo = { state: 'disconnected', phone: null, nome: null, qr: null }
+      try { estado = await this.pegarEstado(contaId) } catch (err) { logger.warn({ contaId, tentativa: i, err }, 'uazapi: tentarReconectarAuto — falha ao checar estado') }
 
-      if (state === 'connected') {
+      if (estado.state === 'connected') {
         this.connected.add(contaId)
         try {
           const data   = await instanceApi(token, 'GET', '/instance/status')
@@ -481,23 +544,37 @@ export class UazapiManager {
           const nome   = (data?.instance?.profileName as string) ?? null
           await this.supabase.from('conexoes').upsert(
             { conta_id: contaId, status: 'conectado', qr_code: null, comando: null,
-              numero_conectado: numero, device_name: nome,
+              numero_conectado: numero, device_name: nome, rate_limitado: false,
               ultima_conexao: new Date().toISOString() },
             { onConflict: 'conta_id' },
           )
+          this.rateLimitados.delete(contaId)
         } catch (err) { logger.warn({ contaId, err }, 'uazapi: tentarReconectarAuto — falha ao sincronizar DB pós-reconexão') }
         logger.info({ contaId, tentativa: i }, 'uazapi: reconexão automática bem-sucedida')
         return 'conectado'
       }
 
-      if (state === 'connecting') {
+      if (estado.rateLimited) {
+        // Não sabemos o estado real — não conta como tentativa fracassada de verdade,
+        // senão esgota as 3 tentativas e marca 'desconectado' só por causa do 429.
+        logger.warn({ contaId, tentativa: i }, 'uazapi: tentarReconectarAuto — rate limited, tentando de novo mais tarde')
+        ultimaFoiRateLimit = true
+        await this.sinalizarRateLimit(contaId)
+        if (i < MAX_TENTATIVAS) await sleep(DELAY_TENTATIVA)
+        continue
+      }
+
+      ultimaFoiRateLimit = false
+
+      if (estado.state === 'connecting') {
         // Sessão expirou — gerou novo QR, aguardar scan do usuário
         await this.buscarEGravarQR(contaId)
         try {
           await this.supabase.from('conexoes').upsert(
-            { conta_id: contaId, status: 'conectando', comando: null },
+            { conta_id: contaId, status: 'conectando', comando: null, rate_limitado: false },
             { onConflict: 'conta_id' },
           )
+          this.rateLimitados.delete(contaId)
         } catch (err) { logger.warn({ contaId, err }, 'uazapi: tentarReconectarAuto — falha ao atualizar status conectando') }
         logger.info({ contaId }, 'uazapi: reconexão automática gerou QR — aguardando scan do usuário')
         return 'conectando'
@@ -507,6 +584,11 @@ export class UazapiManager {
         logger.info({ contaId, tentativa: i }, 'uazapi: ainda desconectado — aguardando próxima tentativa')
         await sleep(DELAY_TENTATIVA)
       }
+    }
+
+    if (ultimaFoiRateLimit) {
+      logger.warn({ contaId }, 'uazapi: reconexão automática esgotou tentativas só por rate limit — mantendo estado atual')
+      return 'incerto'
     }
 
     logger.warn({ contaId }, 'uazapi: reconexão automática esgotou todas as tentativas')
@@ -531,6 +613,7 @@ export class UazapiManager {
           const info = tok ? await verificarEstado(tok) : { state: 'disconnected' as const, phone: null, nome: null, qr: null }
           const state = info.state
           erros = 0  // reset no sucesso
+          await this.limparRateLimit(contaId)  // checagem funcionou — qualquer sinalização antiga fica obsoleta
 
           if (state === 'connected' && !this.connected.has(contaId)) {
             this.connected.add(contaId)
@@ -538,7 +621,7 @@ export class UazapiManager {
             try {
               await this.supabase.from('conexoes').upsert(
                 { conta_id: contaId, status: 'conectado', qr_code: null, comando: null,
-                  numero_conectado: info.phone, device_name: info.nome,
+                  numero_conectado: info.phone, device_name: info.nome, rate_limitado: false,
                   ultima_conexao: new Date().toISOString() },
                 { onConflict: 'conta_id' },
               )
@@ -550,6 +633,7 @@ export class UazapiManager {
             logger.warn({ contaId }, 'uazapi: perdeu conexão — iniciando reconexão automática')
             const resultado = await this.tentarReconectarAuto(contaId)
             if (resultado === 'falhou') await this.marcarDesconectado(contaId)
+            // 'incerto' (só rate limit): não mexe no banco, o próximo ciclo de 60s resolve.
           }
 
           if (state === 'connecting') {
@@ -557,6 +641,13 @@ export class UazapiManager {
           }
 
         } catch (err) {
+          if (err instanceof UazapiRateLimitError) {
+            // Transitório — não conta como erro de conexão nem mexe em connected/DB status.
+            logger.warn({ contaId }, 'uazapi: polling — rate limited, tentando de novo no próximo ciclo')
+            await this.sinalizarRateLimit(contaId)
+            continue
+          }
+
           erros++
           logger.error({ contaId, err, erros }, 'uazapi: erro no polling')
 

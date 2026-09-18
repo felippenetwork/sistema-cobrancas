@@ -9,6 +9,10 @@
       "schedule": "0 8 * * *"
     },
     {
+      "path": "/api/cron/whatsapp-uazapi",
+      "schedule": "5 8 * * *"
+    },
+    {
       "path": "/api/cron/lookdefense",
       "schedule": "0 10 * * *"
     }

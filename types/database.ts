@@ -13,7 +13,7 @@ type LancamentoOrigem  = 'parcela' | 'manual'
 type LancamentoTipo    = 'entrada' | 'saida'
 type MeioPagTipo       = 'pix' | 'outro'
 type NotifCanal        = 'whatsapp' | 'email'
-type NotifStatus       = 'fila' | 'enviado' | 'entregue' | 'lido' | 'aberto' | 'falhou' | 'cancelado'
+type NotifStatus       = 'fila' | 'processando' | 'enviado' | 'entregue' | 'lido' | 'aberto' | 'falhou' | 'cancelado'
 type NotifTipo         = '5d' | '3d' | '2d' | '1d' | 'dia' | 'vencido1d' | 'manual' | 'boasvindas' | 'pagamento_confirmado' | 'agendada'
 type ParcelaStatus      = 'aberta' | 'paga' | 'vencida'
 type AtendimentoStatus = 'aguardando' | 'em_atendimento' | 'finalizado'
@@ -320,6 +320,7 @@ export type Database = {
           id: string
           numero_conectado: string | null
           qr_code: string | null
+          rate_limitado: boolean
           session_ref: string | null
           status: ConexaoStatus
           ultima_conexao: string | null
@@ -335,6 +336,7 @@ export type Database = {
           id?: string
           numero_conectado?: string | null
           qr_code?: string | null
+          rate_limitado?: boolean
           session_ref?: string | null
           status?: ConexaoStatus
           ultima_conexao?: string | null
@@ -350,6 +352,7 @@ export type Database = {
           id?: string
           numero_conectado?: string | null
           qr_code?: string | null
+          rate_limitado?: boolean
           session_ref?: string | null
           status?: ConexaoStatus
           ultima_conexao?: string | null

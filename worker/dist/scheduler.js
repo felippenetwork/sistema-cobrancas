@@ -8,6 +8,18 @@
 import pino from 'pino';
 import { hojeEmSP, addDias } from './format.js';
 const logger = pino({ level: process.env.LOG_LEVEL ?? 'warn' });
+function calcularProximoVencimento(ultimoVencimento, diaPagamento) {
+    const [ano, mes] = ultimoVencimento.split('-').map(Number);
+    let novoMes = mes + 1;
+    let novoAno = ano;
+    if (novoMes > 12) {
+        novoMes = 1;
+        novoAno++;
+    }
+    const ultimoDia = new Date(novoAno, novoMes, 0).getDate();
+    const dia = Math.min(diaPagamento, ultimoDia);
+    return `${novoAno}-${String(novoMes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+}
 const JANELAS = [
     { tipo: '5d', offset: 5 },
     { tipo: '3d', offset: 3 },
@@ -24,6 +36,9 @@ export async function runScheduler(supabase) {
         .from('contas').select('id').eq('status', 'ativa');
     for (const conta of contas ?? []) {
         try {
+            // Gera parcelas recorrentes antes de processar notificações, assim a parcela
+            // recém-criada já entra na varredura D-5/D-3... do mesmo ciclo.
+            await manterParcelasRecorrentes(supabase, conta.id);
             await processarConta(supabase, conta.id, hoje);
         }
         catch (err) {
@@ -31,6 +46,66 @@ export async function runScheduler(supabase) {
         }
     }
     logger.info('Scheduler: varredura concluída');
+}
+async function manterParcelasRecorrentes(supabase, contaId) {
+    // 1. Cobranças recorrentes ativas desta conta
+    const { data: cobrancas } = await supabase
+        .from('cobrancas')
+        .select('id, dia_pagamento, valor_mensalidade')
+        .eq('conta_id', contaId)
+        .eq('recorrente', true)
+        .eq('status', 'ativa');
+    if (!cobrancas?.length)
+        return;
+    const cobIds = cobrancas.map((c) => c.id);
+    // 2. Quais têm parcela aberta (1 query — elimina N+1)
+    const { data: comAbertaRows } = await supabase
+        .from('parcelas')
+        .select('cobranca_id')
+        .eq('conta_id', contaId)
+        .in('cobranca_id', cobIds)
+        .eq('status', 'aberta');
+    const comAberta = new Set((comAbertaRows ?? []).map((p) => p.cobranca_id));
+    const semAberta = cobrancas.filter((c) => !comAberta.has(c.id));
+    if (!semAberta.length)
+        return;
+    // 3. Última parcela de cada cobrança sem aberta (1 query — elimina 2° N+1)
+    const semAbertaIds = semAberta.map((c) => c.id);
+    const { data: ultimas } = await supabase
+        .from('parcelas')
+        .select('cobranca_id, numero, data_vencimento')
+        .eq('conta_id', contaId)
+        .in('cobranca_id', semAbertaIds)
+        .order('numero', { ascending: false });
+    // Tomar apenas a de maior número por cobrança
+    const ultimaMap = new Map();
+    for (const p of ultimas ?? []) {
+        const cid = p.cobranca_id;
+        if (!ultimaMap.has(cid)) {
+            ultimaMap.set(cid, { numero: p.numero, data_vencimento: p.data_vencimento });
+        }
+    }
+    for (const cob of semAberta) {
+        const ultima = ultimaMap.get(cob.id);
+        if (!ultima)
+            continue; // cobrança sem parcelas (não deveria ocorrer)
+        const proximoNumero = ultima.numero + 1;
+        const proximoVencimento = calcularProximoVencimento(ultima.data_vencimento, cob.dia_pagamento);
+        const { error } = await supabase.from('parcelas').insert({
+            conta_id: contaId,
+            cobranca_id: cob.id,
+            numero: proximoNumero,
+            valor: cob.valor_mensalidade,
+            data_vencimento: proximoVencimento,
+            status: 'aberta',
+        });
+        if (error) {
+            logger.error({ contaId, cobrancaId: cob.id, error }, 'Scheduler: erro ao gerar parcela recorrente');
+        }
+        else {
+            logger.info({ contaId, cobrancaId: cob.id, proximoVencimento, numero: proximoNumero }, 'Scheduler: parcela recorrente gerada');
+        }
+    }
 }
 async function processarConta(supabase, contaId, hoje) {
     // Buscar configuração de notificações da conta
@@ -48,18 +123,23 @@ async function processarConta(supabase, contaId, hoje) {
         if (!cfg.ativo_whatsapp && !cfg.ativo_email)
             continue; // ambos os canais inativos
         const dataAlvo = addDias(hoje, offset);
-        // Parcelas com esse vencimento, abertas
+        // Parcelas com esse vencimento, abertas e cuja cobrança ainda está ativa.
+        // Sem o filtro cobrancas.status o scheduler continuaria gerando notificações
+        // para parcelas de cobranças canceladas (parcelas abertas não são apagadas pelo cancelamento).
         const { data: parcelas } = await supabase
             .from('parcelas')
-            .select('id, cliente_id')
+            .select('id, cobranca_id, cobrancas!inner(cliente_id)')
             .eq('conta_id', contaId)
             .eq('data_vencimento', dataAlvo)
-            .eq('status', 'aberta');
+            .eq('status', 'aberta')
+            .eq('cobrancas.status', 'ativa');
         for (const parcela of parcelas ?? []) {
+            const clienteId = parcela.cobrancas?.cliente_id;
             const base = {
                 conta_id: contaId,
                 parcela_id: parcela.id,
-                cliente_id: parcela.cliente_id,
+                cobranca_id: parcela.cobranca_id,
+                cliente_id: clienteId,
                 tipo,
             };
             // WhatsApp

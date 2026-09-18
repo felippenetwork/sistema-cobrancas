@@ -2,10 +2,9 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { formatBRL, formatData } from '@/lib/utils/format'
-import { substituirVariaveis } from '@/lib/utils/variaveis'
 import { revalidatePath } from 'next/cache'
 import { encontrarOuCriarAtendimento } from '@/lib/atendimento/encontrar-ou-criar'
+import { resolverVariaveis, resolverVariaveisLeves } from '@/lib/whatsapp/resolver-variaveis'
 
 async function getContaId() {
   const supabase = await createClient()
@@ -226,7 +225,7 @@ export async function forcarEnvioAction(id: string): Promise<{ error?: string }>
   if (notif.tipo === 'agendada') {
     const corpo = ((notif.mensagem_final as string) ?? '').trim()
     if (!corpo) return { error: 'Mensagem não configurada.' }
-    mensagem = await resolverVarsLeves(admin, {
+    mensagem = await resolverVariaveisLeves(admin, {
       contaId,
       clienteId: notif.cliente_id as string,
       template:  corpo,
@@ -255,7 +254,7 @@ export async function forcarEnvioAction(id: string): Promise<{ error?: string }>
     }
     if (!parcelaId) return { error: 'Parcela não encontrada para montar a mensagem.' }
 
-    mensagem = await resolverVars(admin, {
+    mensagem = await resolverVariaveis(admin, {
       contaId,
       parcelaId,
       clienteId:  notif.cliente_id as string,
@@ -314,67 +313,6 @@ export async function forcarEnvioAction(id: string): Promise<{ error?: string }>
   return {}
 }
 
-// ── Helpers de resolução de variáveis ───────────────────────────────────────
-// A substituição pura (substituirVariaveis) vive em lib/utils/variaveis.ts.
-// O worker mantém cópia própria em worker/src/variaveis.ts — processos separados.
-// Ao adicionar nova variável de template, atualizar ambos os arquivos.
-
-async function resolverVarsLeves(
-  admin: ReturnType<typeof createAdminClient>,
-  { contaId, clienteId, template }: { contaId: string; clienteId: string; template: string },
-): Promise<string> {
-  const [{ data: cliente }, { data: saudacoes }] = await Promise.all([
-    admin.from('clientes').select('nome, sobrenome').eq('id', clienteId).single(),
-    admin.from('saudacoes').select('texto').eq('conta_id', contaId),
-  ])
-  const textos   = (saudacoes ?? []).map(s => s.texto)
-  const saudacao = textos.length ? textos[Math.floor(Math.random() * textos.length)] : 'Olá!'
-  const nome     = cliente?.nome ?? ''
-  const sobrenome = cliente?.sobrenome ?? ''
-  return template
-    .replace(/#NOMECOMPLETO#/g, `${nome} ${sobrenome}`.trim())
-    .replace(/#NOME#/g,         nome)
-    .replace(/#SAUDACAO#/g,     saudacao)
-}
-
-async function resolverVars(
-  admin: ReturnType<typeof createAdminClient>,
-  { contaId, parcelaId, clienteId, template, cobrancaId }: {
-    contaId: string; parcelaId: string; clienteId: string; template: string; cobrancaId?: string | null
-  },
-): Promise<string> {
-  async function buscarPix() {
-    if (cobrancaId) {
-      const { data: cob } = await admin
-        .from('cobrancas').select('meio_pagamento_id').eq('id', cobrancaId).maybeSingle()
-      const meioid = cob?.meio_pagamento_id
-      if (meioid) {
-        const { data: meio } = await admin
-          .from('meios_pagamento').select('mensagem').eq('id', meioid).maybeSingle()
-        if (meio?.mensagem) return meio
-      }
-    }
-    const { data } = await admin
-      .from('meios_pagamento').select('mensagem').eq('conta_id', contaId).eq('is_padrao', true).maybeSingle()
-    return data
-  }
-
-  const [{ data: parcela }, { data: cliente }, { data: saudacoes }, pix] = await Promise.all([
-    admin.from('parcelas').select('valor, data_vencimento').eq('id', parcelaId).single(),
-    admin.from('clientes').select('nome, sobrenome').eq('id', clienteId).single(),
-    admin.from('saudacoes').select('texto').eq('conta_id', contaId),
-    buscarPix(),
-  ])
-
-  const textos   = (saudacoes ?? []).map(s => s.texto)
-  const saudacao = textos.length ? textos[Math.floor(Math.random() * textos.length)] : 'Olá!'
-
-  return substituirVariaveis(template, {
-    valor:        formatBRL(parcela?.valor ?? 0),
-    nomecompleto: `${cliente?.nome ?? ''} ${cliente?.sobrenome ?? ''}`.trim(),
-    nome:         cliente?.nome ?? '',
-    pix:          pix?.mensagem ?? '(Pix não configurado)',
-    saudacao,
-    vencimento:   formatData(parcela?.data_vencimento),
-  })
-}
+// Resolução de variáveis (#VALOR# #NOME# #PIX# etc.) vive em
+// lib/whatsapp/resolver-variaveis.ts — compartilhada com o cron uazapi.
+// O worker mantém cópia própria em worker/src/variaveis.ts (processo separado).

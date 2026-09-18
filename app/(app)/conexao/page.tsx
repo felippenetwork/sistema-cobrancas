@@ -1,9 +1,9 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-import { Loader2, Wifi, WifiOff, RefreshCw, LogOut, Smartphone, QrCode } from 'lucide-react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { Loader2, Wifi, WifiOff, RefreshCw, LogOut, Smartphone, QrCode, AlertTriangle } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { conectarAction, desconectarAction, reiniciarAction } from './_actions/conexao'
+import { conectarAction, desconectarAction, reiniciarAction, verificarStatusAction } from './_actions/conexao'
 
 type Conexao = {
   id:               string
@@ -13,17 +13,34 @@ type Conexao = {
   qr_code:          string | null
   ultima_conexao:   string | null
   desconectado_em:  string | null
+  rate_limitado:    boolean
 }
 
 export default function ConexaoPage() {
   const [conexao, setConexao]             = useState<Conexao | null>(null)
   const [loading, setLoading]             = useState(true)
   const [actionPending, setActionPending] = useState(false)
+  const verificandoRef = useRef(false)
 
   const runAction = useCallback(async (fn: () => Promise<void>) => {
     setActionPending(true)
     try { await fn() } finally { setActionPending(false) }
   }, [])
+
+  // Sem worker na VPS mais ninguém varre a uazapi sozinho: enquanto a tela
+  // mostra "conectando" (QR aguardando leitura, ou logo após clicar em
+  // Conectar), a própria tela precisa reconsultar a uazapi periodicamente —
+  // senão nunca descobre que o celular escaneou. Mesmo padrão do ERP-Rifas
+  // (poll só enquanto qr_ready/connecting, não o tempo todo).
+  useEffect(() => {
+    if (conexao?.status !== 'conectando') return
+    const interval = setInterval(async () => {
+      if (verificandoRef.current) return
+      verificandoRef.current = true
+      try { await verificarStatusAction() } finally { verificandoRef.current = false }
+    }, 6_000)
+    return () => clearInterval(interval)
+  }, [conexao?.status])
 
   useEffect(() => {
     const sb = createClient()
@@ -41,7 +58,7 @@ export default function ConexaoPage() {
       const fetchConexao = async () => {
         const { data } = await sb
           .from('conexoes')
-          .select('id, status, numero_conectado, device_name, qr_code, ultima_conexao, desconectado_em')
+          .select('id, status, numero_conectado, device_name, qr_code, ultima_conexao, desconectado_em, rate_limitado')
           .eq('conta_id', conta.id).maybeSingle()
         if (data) setConexao(data)
       }
@@ -104,6 +121,19 @@ export default function ConexaoPage() {
 
           {/* ── Conteúdo ── */}
           <div className="space-y-4 p-4">
+
+            {/* Rate limit da uazapi — checagem limitada, não é "caiu" */}
+            {conexao?.rate_limitado && (
+              <div className="flex items-start gap-2 rounded-md border border-amber-500/20 bg-amber-500/10 px-3 py-2">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+                <div className="min-w-0">
+                  <p className="text-xs font-medium text-amber-400">Checagem temporariamente limitada</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Se você já conectou pelo celular, a sessão deve estar ativa mesmo assim. Aguarde alguns instantes e clique em Atualizar.
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Conectado */}
             {status === 'conectado' && (

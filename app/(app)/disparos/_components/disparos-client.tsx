@@ -47,7 +47,7 @@ function ModalNovaCampanha({
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
   const [busca, setBusca]               = useState('')
   const [enviando, setEnviando]         = useState(false)
-  const [resultado, setResultado]       = useState<{ enviados: number; falhas: number } | null>(null)
+  const [enviada, setEnviada]           = useState(false)
 
   const clientesFiltrados = clientes.filter(c => {
     const nome = [c.nome, c.sobrenome].filter(Boolean).join(' ').toLowerCase()
@@ -82,7 +82,7 @@ function ModalNovaCampanha({
     const r2 = await enviarCampanhaAction(campanhaId)
     setEnviando(false)
     if (r2.error) { setCriandoErr(r2.error); return }
-    setResultado({ enviados: r2.enviados ?? 0, falhas: r2.falhas ?? 0 })
+    setEnviada(true)
   }
 
   return (
@@ -98,21 +98,21 @@ function ModalNovaCampanha({
 
         <div className="flex items-center justify-between border-b border-border px-5 py-4">
           <h2 className="text-sm font-semibold text-foreground">
-            {resultado ? 'Campanha enviada!' : step === 1 ? 'Nova Campanha' : 'Selecionar Destinatários'}
+            {enviada ? 'Campanha na fila!' : step === 1 ? 'Nova Campanha' : 'Selecionar Destinatários'}
           </h2>
           <button onClick={onFechar} className="rounded-lg p-1.5 text-muted-foreground hover:text-foreground">
             <XCircle className="h-4 w-4" />
           </button>
         </div>
 
-        {resultado ? (
+        {enviada ? (
           <div className="space-y-4 p-8 text-center" style={{ paddingBottom: 'max(2rem, env(safe-area-inset-bottom, 0px))' }}>
             <CheckCircle className="mx-auto h-12 w-12 text-green-500" />
             <div>
-              <p className="text-lg font-semibold text-foreground">{resultado.enviados} mensagens enviadas</p>
-              {resultado.falhas > 0 && (
-                <p className="text-sm text-muted-foreground">{resultado.falhas} falha{resultado.falhas !== 1 ? 's' : ''}</p>
-              )}
+              <p className="text-lg font-semibold text-foreground">Campanha entrou na fila de envio</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                As mensagens saem aos poucos, respeitando o ritmo seguro entre envios — acompanhe o progresso na lista de campanhas.
+              </p>
             </div>
             <button
               onClick={onFechar}

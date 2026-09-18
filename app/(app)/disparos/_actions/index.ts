@@ -88,18 +88,22 @@ export async function adicionarDestinatariosAction(
   }
 }
 
+// Só marca a campanha como 'enviando' — quem processa de verdade é o cron
+// /api/cron/whatsapp-uazapi (a cada 1min), respeitando o ritmo anti-ban
+// (intervalo 45-80s configurado + 15-20s de simulação de digitação por
+// envio). Um clique não dispara mais um loop síncrono aqui: com esse ritmo,
+// qualquer campanha um pouco maior estouraria o tempo de execução da Vercel
+// e ficaria pela metade. A campanha continua sendo drenada mesmo se esta
+// tela for fechada — o progresso aparece pelos totais em campanhas_wa.
 export async function enviarCampanhaAction(campanhaId: string): Promise<{
   error: string | null
-  enviados?: number
-  falhas?: number
 }> {
   try {
     const { supabase, contaId } = await getConta()
 
-    // Valida campanha e modelo
     const { data: campanha } = await supabase
       .from('campanhas_wa')
-      .select('id, status, modelo_id, modelos_wa(corpo, cabecalho, status)')
+      .select('id, status, modelo_id, total_destinatarios, modelos_wa(corpo, status)')
       .eq('id', campanhaId)
       .eq('conta_id', contaId)
       .maybeSingle()
@@ -110,9 +114,10 @@ export async function enviarCampanhaAction(campanhaId: string): Promise<{
     }
 
     const modelo = (campanha as any).modelos_wa
-    if (!modelo) return { error: 'Selecione um template antes de enviar.' }
+    if (!modelo?.corpo) return { error: 'Selecione um template antes de enviar.' }
 
-    // Busca conexão uazapiGO
+    if (!campanha.total_destinatarios) return { error: 'Nenhum destinatário cadastrado.' }
+
     const { data: conexao } = await supabase
       .from('conexoes')
       .select('uazapi_instance_token, status')
@@ -123,95 +128,13 @@ export async function enviarCampanhaAction(campanhaId: string): Promise<{
       return { error: 'WhatsApp não está conectado. Verifique a conexão.' }
     }
 
-    const uazapiUrl = process.env.UAZAPI_URL?.replace(/\/$/, '')
-    if (!uazapiUrl) return { error: 'Configuração UAZAPI_URL ausente.' }
-
-    // Busca destinatários pendentes (máximo 100 por execução)
-    const { data: destinatarios } = await supabase
-      .from('campanha_destinatarios')
-      .select('id, celular, variaveis')
-      .eq('campanha_id', campanhaId)
-      .eq('conta_id', contaId)
-      .eq('status', 'pendente')
-      .limit(100)
-
-    if (!destinatarios?.length) return { error: 'Nenhum destinatário pendente.' }
-
-    // Marca campanha como enviando
     await supabase
       .from('campanhas_wa')
       .update({ status: 'enviando', iniciado_em: new Date().toISOString() })
       .eq('id', campanhaId)
 
-    let enviados = 0
-    let falhas   = 0
-
-    for (const dest of destinatarios) {
-      // Interpola variáveis no corpo do template: {{1}} → variaveis[0]
-      let texto = modelo.corpo as string
-      const vars = (dest.variaveis as string[] | null) ?? []
-      vars.forEach((v, i) => {
-        texto = texto.replace(new RegExp(`\\{\\{${i + 1}\\}\\}`, 'g'), v)
-      })
-
-      try {
-        const res = await fetch(`${uazapiUrl}/send/text`, {
-          method:  'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            token: conexao.uazapi_instance_token,
-          },
-          body: JSON.stringify({ number: dest.celular, text: texto }),
-        })
-
-        if (res.ok) {
-          const json = await res.json().catch(() => ({}))
-          await supabase
-            .from('campanha_destinatarios')
-            .update({ status: 'enviado', wa_id: json?.id ?? null, enviado_em: new Date().toISOString() })
-            .eq('id', dest.id)
-          enviados++
-        } else {
-          const err = await res.text().catch(() => String(res.status))
-          await supabase
-            .from('campanha_destinatarios')
-            .update({ status: 'falhou', erro: err })
-            .eq('id', dest.id)
-          falhas++
-        }
-      } catch (e) {
-        await supabase
-          .from('campanha_destinatarios')
-          .update({ status: 'falhou', erro: String(e) })
-          .eq('id', dest.id)
-        falhas++
-      }
-
-      // Intervalo de 1s entre envios para evitar ban
-      await new Promise(r => setTimeout(r, 1_000))
-    }
-
-    // Verifica se todos foram processados
-    const { count: pendentes } = await supabase
-      .from('campanha_destinatarios')
-      .select('id', { count: 'exact', head: true })
-      .eq('campanha_id', campanhaId)
-      .eq('status', 'pendente')
-
-    const concluida = (pendentes ?? 0) === 0
-
-    await supabase
-      .from('campanhas_wa')
-      .update({
-        status:        concluida ? 'concluida' : 'enviando',
-        total_enviados: enviados,
-        total_falhas:   falhas,
-        concluido_em:   concluida ? new Date().toISOString() : null,
-      })
-      .eq('id', campanhaId)
-
     revalidatePath('/disparos')
-    return { error: null, enviados, falhas }
+    return { error: null }
   } catch (e) {
     return { error: e instanceof Error ? e.message : 'Erro desconhecido.' }
   }

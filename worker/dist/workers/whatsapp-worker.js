@@ -2,28 +2,117 @@
 //
 // Regras obrigatórias (notificacoes-fila §5):
 //   • Janela 09:00–20:00 SP. Fora disso: overflow → dia seguinte às 09h.
-//   • Intervalo 45–80s aleatório ENTRE contas (nunca em paralelo no mesmo número).
-//   • Warmup 60s após conectar (hasSocket retorna false durante esse período).
-//   • Simulação de digitação 23–27s dentro do enviarMensagem.
+//   • Intervalo 45–80s aleatório ENTRE contas (Baileys apenas — Meta Cloud API é oficial).
+//   • Warmup 60s após conectar (hasSocket retorna false durante esse período) — Baileys apenas.
+//   • Simulação de digitação 7–9s dentro do enviarMensagem — Baileys apenas.
+//   • Meta Cloud API: usa templates pré-aprovados para mensagens proativas.
 //   • Retry: até 2 tentativas com pausa de 5s antes de desistir.
 //   • Socket caiu durante retry → reagenda (não descarta).
 //   • Cliente deletado → cancela.
 //   • Template vazio → falhou (config ausente, não deve silenciar).
 import pino from 'pino';
-import { dentroDaJanela, sleep, intervalAleatorio, hojeEmSP, addDias, } from '../format.js';
+import { dentroDaJanela, horaStr, TIPOS_SEM_JANELA, sleep, intervalAleatorio, hojeEmSP, addDias, } from '../format.js';
 import { resolverVariaveis } from '../variaveis.js';
+import { resolverVariaveisLeves } from '../variaveis.js';
 const logger = pino({ level: process.env.LOG_LEVEL ?? 'warn' });
 const MAX_RETRIES = 2; // tentativas de envio por mensagem
 const RETRY_DELAY_MS = 5_000; // pausa entre tentativas (ms)
+// Mapeamento: tipo de notificação → template Meta aprovado
+const META_TEMPLATE_MAP = {
+    '5d': { nome: 'cobranca_5d', idioma: 'pt_BR', params: 3 },
+    '3d': { nome: 'cobranca_3d', idioma: 'en', params: 3 },
+    '2d': { nome: 'cobranca_2d', idioma: 'pt_BR', params: 3 },
+    '1d': { nome: 'cobranca_1d', idioma: 'pt_BR', params: 3 },
+    'dia': { nome: 'cobranca_dia', idioma: 'pt_BR', params: 3 },
+    'vencido1d': { nome: 'cobranca_vencido', idioma: 'pt_BR', params: 3 },
+    'pagamento_confirmado': { nome: 'pagamento_confirmado', idioma: 'pt_BR', params: 2 },
+    'boasvindas': { nome: 'boasvindas', idioma: 'pt_BR', params: 3 },
+};
+// ── Parâmetros para templates Meta (nome, valor formatado, data formatada) ────
+async function resolverParamsTemplate(supabase, clienteId, parcelaId) {
+    const { data: cliente } = await supabase
+        .from('clientes')
+        .select('nome')
+        .eq('id', clienteId)
+        .maybeSingle();
+    if (!cliente)
+        return null;
+    const nome = cliente.nome || 'Cliente';
+    if (!parcelaId)
+        return { nome, valor: '', data: '' };
+    const { data: parcela } = await supabase
+        .from('parcelas')
+        .select('valor, data_vencimento')
+        .eq('id', parcelaId)
+        .maybeSingle();
+    if (!parcela)
+        return { nome, valor: '', data: '' };
+    const valor = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })
+        .format(Number(parcela.valor ?? 0));
+    const dataVenc = parcela.data_vencimento ?? '';
+    const [ano, mes, dia] = dataVenc.split('-');
+    const data = dia && mes && ano ? `${dia}/${mes}/${ano}` : dataVenc;
+    return { nome, valor, data };
+}
+// ── Envio via Meta Cloud API — template pré-aprovado ─────────────────────────
+async function enviarViaMetaTemplate(meta, celular, templateNome, templateIdioma, parametros) {
+    const res = await fetch(`https://graph.facebook.com/v20.0/${meta.phoneNumberId}/messages`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${meta.token}`,
+        },
+        body: JSON.stringify({
+            messaging_product: 'whatsapp',
+            to: celular,
+            type: 'template',
+            template: {
+                name: templateNome,
+                language: { code: templateIdioma },
+                components: [{
+                        type: 'body',
+                        parameters: parametros.map(text => ({ type: 'text', text })),
+                    }],
+            },
+        }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error?.message ?? `Meta template erro ${res.status}`);
+    }
+}
+// ── Envio via Meta Cloud API — texto livre (só funciona dentro da janela 24h) ─
+async function enviarViaMetaTexto(meta, celular, mensagem) {
+    const res = await fetch(`https://graph.facebook.com/v20.0/${meta.phoneNumberId}/messages`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${meta.token}`,
+        },
+        body: JSON.stringify({
+            messaging_product: 'whatsapp',
+            recipient_type: 'individual',
+            to: celular,
+            type: 'text',
+            text: { preview_url: false, body: mensagem },
+        }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error?.message ?? `Meta API erro ${res.status}`);
+    }
+}
+function extrairMetaCfg(cfg) {
+    if (!cfg?.meta_api_ativo || !cfg.meta_access_token || !cfg.meta_phone_number_id)
+        return null;
+    return { token: cfg.meta_access_token, phoneNumberId: cfg.meta_phone_number_id };
+}
 // ── Ponto de entrada — chamado a cada ciclo de 15s ───────────────────────────
 export async function processarFilaWhatsApp(supabase, manager) {
-    if (!dentroDaJanela())
-        return; // fora da janela 09–20h SP
     const agora = new Date().toISOString();
-    // Carrega candidatos: fila pendente, excluindo tipos imediatos (têm loop próprio)
     const { data: pendentes } = await supabase
         .from('notificacoes_enviadas')
-        .select('id, conta_id, parcela_id, cliente_id, tipo')
+        .select('id, conta_id, parcela_id, cobranca_id, cliente_id, tipo, mensagem_final')
         .eq('canal', 'whatsapp')
         .eq('status', 'fila')
         .not('tipo', 'in', '("pagamento_confirmado","boasvindas")')
@@ -32,27 +121,54 @@ export async function processarFilaWhatsApp(supabase, manager) {
         .limit(30);
     if (!pendentes?.length)
         return;
+    const todosContaIds = [...new Set(pendentes.map(n => n.conta_id))];
+    const { data: configs } = await supabase
+        .from('configuracoes')
+        .select('conta_id, horario_inicio, horario_fim, intervalo_min_seg, intervalo_max_seg, meta_api_ativo, meta_access_token, meta_phone_number_id')
+        .in('conta_id', todosContaIds);
+    const cfgMap = new Map((configs ?? []).map((c) => [c.conta_id, c]));
     const porConta = new Map();
     for (const n of pendentes) {
         const contaId = n.conta_id;
-        if (!porConta.has(contaId) && manager.hasSocket(contaId)) {
-            // hasSocket() retorna false durante warmup de 60s — mensagem fica na fila
+        if (porConta.has(contaId))
+            continue;
+        const cfg = cfgMap.get(contaId);
+        const hasMeta = !!(cfg?.meta_api_ativo && cfg.meta_access_token && cfg.meta_phone_number_id);
+        if (hasMeta || manager.hasSocket(contaId)) {
             porConta.set(contaId, n);
         }
     }
     if (!porConta.size)
-        return; // nenhuma conta pronta ainda
+        return;
     for (const [contaId, notif] of porConta) {
-        await processarUmaNotificacao(supabase, manager, contaId, notif);
-        // Anti-ban: intervalo obrigatório entre contas
-        if (dentroDaJanela()) {
-            await sleep(intervalAleatorio()); // 45–80s
+        const cfg = cfgMap.get(contaId);
+        const hasMeta = !!(cfg?.meta_api_ativo && cfg?.meta_access_token && cfg?.meta_phone_number_id);
+        const hInicio = horaStr(cfg?.horario_inicio ?? '09:00');
+        const hFim = horaStr(cfg?.horario_fim ?? '20:00');
+        const intMin = ((cfg?.intervalo_min_seg ?? 45) * 1_000);
+        const intMax = ((cfg?.intervalo_max_seg ?? 80) * 1_000);
+        if (!TIPOS_SEM_JANELA.has(notif.tipo) && !dentroDaJanela(hInicio, hFim)) {
+            continue;
+        }
+        await processarUmaNotificacao(supabase, manager, contaId, notif, false, cfg);
+        if (!hasMeta) {
+            await sleep(intervalAleatorio(intMin, intMax));
         }
     }
 }
 // ── Processar uma notificação com retry e fallback ───────────────────────────
-async function processarUmaNotificacao(supabase, manager, contaId, notif, semDigitacao = false) {
-    // ── 1. Buscar template ────────────────────────────────────────────────────
+async function processarUmaNotificacao(supabase, manager, contaId, notif, semDigitacao = false, contaCfg) {
+    if (notif.tipo === 'agendada') {
+        await processarAgendada(supabase, manager, contaId, notif, semDigitacao, contaCfg);
+        return;
+    }
+    const metaCfg = extrairMetaCfg(contaCfg);
+    // ── Caminho Meta Cloud API ────────────────────────────────────────────────
+    if (metaCfg) {
+        await processarUmaNotificacaoMeta(supabase, metaCfg, contaId, notif);
+        return;
+    }
+    // ── Caminho Baileys (uazapi) ──────────────────────────────────────────────
     const { data: cfg } = await supabase
         .from('notificacoes_config')
         .select('template_whatsapp')
@@ -65,48 +181,52 @@ async function processarUmaNotificacao(supabase, manager, contaId, notif, semDig
         await marcarFalhou(supabase, notif.id);
         return;
     }
-    // ── 2. Buscar dados do cliente ────────────────────────────────────────────
     const { data: cliente } = await supabase
         .from('clientes')
         .select('celular, deleted_at')
         .eq('id', notif.cliente_id)
         .maybeSingle();
     if (!cliente) {
-        logger.warn({ notifId: notif.id }, 'Cliente não encontrado — cancelando');
         await cancelarNotif(supabase, notif.id);
         return;
     }
     if (cliente.deleted_at) {
-        logger.info({ notifId: notif.id }, 'Cliente deletado — cancelando notificação');
         await cancelarNotif(supabase, notif.id);
         return;
     }
     const celular = cliente.celular;
     if (!celular) {
-        logger.warn({ notifId: notif.id }, 'Celular ausente — marcando como falhou');
         await marcarFalhou(supabase, notif.id);
         return;
     }
-    // ── 3. Resolver variáveis (#NOME#, #VALOR#, etc.) ────────────────────────
+    let parcelaId = notif.parcela_id;
+    if (!parcelaId && notif.cobranca_id) {
+        const { data: primeiraParc } = await supabase
+            .from('parcelas')
+            .select('id')
+            .eq('cobranca_id', notif.cobranca_id)
+            .order('numero', { ascending: true })
+            .limit(1)
+            .maybeSingle();
+        parcelaId = primeiraParc?.id ?? null;
+    }
+    if (!parcelaId) {
+        await marcarFalhou(supabase, notif.id);
+        return;
+    }
     let mensagem;
     try {
         mensagem = await resolverVariaveis(supabase, {
-            contaId,
-            parcelaId: notif.parcela_id ?? notif.id,
-            clienteId: notif.cliente_id,
-            template,
+            contaId, parcelaId, clienteId: notif.cliente_id, template, cobrancaId: notif.cobranca_id,
         });
     }
     catch (err) {
         logger.error({ notifId: notif.id, err }, 'Erro ao resolver variáveis — reagendando');
-        // Falha de variável pode ser transiente (DB lento): reagenda no lugar de descartar
         await reagendar(supabase, notif.id);
         return;
     }
-    // ── 4. Enviar com retry ───────────────────────────────────────────────────
     let ultimoErro;
     for (let tentativa = 1; tentativa <= MAX_RETRIES; tentativa++) {
-        // Re-verificar socket a cada tentativa (pode ter caído entre uma e outra)
         if (!manager.hasSocket(contaId, semDigitacao)) {
             logger.warn({ notifId: notif.id, tentativa }, 'Socket indisponível — reagendando');
             await reagendar(supabase, notif.id);
@@ -114,43 +234,104 @@ async function processarUmaNotificacao(supabase, manager, contaId, notif, semDig
         }
         try {
             await manager.enviarMensagem(contaId, celular, mensagem, semDigitacao);
-            await supabase.from('notificacoes_enviadas').update({
-                status: 'enviado',
-                mensagem_final: mensagem,
-                enviado_em: new Date().toISOString(),
-            }).eq('id', notif.id);
-            logger.info({ contaId, notifId: notif.id, tentativa }, 'WhatsApp: enviado com sucesso');
-            return; // ← sucesso, saída do loop
+            await marcarEnviado(supabase, notif.id, mensagem);
+            logger.info({ contaId, notifId: notif.id, tentativa, via: 'baileys' }, 'WhatsApp: enviado');
+            return;
         }
         catch (err) {
             ultimoErro = err;
             logger.warn({ contaId, notifId: notif.id, tentativa, err }, `Tentativa ${tentativa}/${MAX_RETRIES} falhou`);
-            if (tentativa < MAX_RETRIES) {
-                await sleep(RETRY_DELAY_MS); // aguarda 5s antes de tentar de novo
-            }
+            if (tentativa < MAX_RETRIES)
+                await sleep(RETRY_DELAY_MS);
         }
     }
-    // ── 5. Todas as tentativas falharam ──────────────────────────────────────
     logger.error({ contaId, notifId: notif.id, ultimoErro }, 'WhatsApp: todas as tentativas falharam');
     if (!dentroDaJanela()) {
-        // Já saímos da janela — reagenda para amanhã às 09h (não descarta)
         await reagendar(supabase, notif.id);
     }
     else {
-        // Falha dentro da janela (número inválido, bloqueado, etc.) → marca como falhou
         await marcarFalhou(supabase, notif.id);
     }
 }
-// ── Loop imediato: pagamento_confirmado e boasvindas — sem typing, poll a cada 3s ──
-// Chamado em paralelo com processarFilaWhatsApp. Não aplica intervalo anti-ban
-// entre contas pois são confirmações transacionais (não marketing).
-export async function processarFilaImediata(supabase, manager) {
-    if (!dentroDaJanela())
+// ── Envio via Meta com template pré-aprovado ─────────────────────────────────
+async function processarUmaNotificacaoMeta(supabase, metaCfg, contaId, notif) {
+    const tmpl = META_TEMPLATE_MAP[notif.tipo];
+    if (!tmpl) {
+        logger.warn({ notifId: notif.id, tipo: notif.tipo }, 'Meta: sem template para este tipo — falhou');
+        await marcarFalhou(supabase, notif.id);
         return;
+    }
+    const { data: cliente } = await supabase
+        .from('clientes')
+        .select('celular, deleted_at')
+        .eq('id', notif.cliente_id)
+        .maybeSingle();
+    if (!cliente) {
+        await cancelarNotif(supabase, notif.id);
+        return;
+    }
+    if (cliente.deleted_at) {
+        await cancelarNotif(supabase, notif.id);
+        return;
+    }
+    const celular = cliente.celular;
+    if (!celular) {
+        await marcarFalhou(supabase, notif.id);
+        return;
+    }
+    // Resolve ID da parcela (boasvindas/pagamento_confirmado usam 1ª parcela da cobrança)
+    let parcelaId = notif.parcela_id;
+    if (!parcelaId && notif.cobranca_id) {
+        const { data: primeiraParc } = await supabase
+            .from('parcelas')
+            .select('id')
+            .eq('cobranca_id', notif.cobranca_id)
+            .order('numero', { ascending: true })
+            .limit(1)
+            .maybeSingle();
+        parcelaId = primeiraParc?.id ?? null;
+    }
+    const vars = await resolverParamsTemplate(supabase, notif.cliente_id, parcelaId);
+    if (!vars) {
+        logger.warn({ notifId: notif.id }, 'Meta: dados do cliente/parcela não encontrados — cancelando');
+        await cancelarNotif(supabase, notif.id);
+        return;
+    }
+    // Monta parâmetros conforme quantidade esperada pelo template
+    const parametros = tmpl.params === 2
+        ? [vars.nome, vars.valor]
+        : [vars.nome, vars.valor, vars.data];
+    // Mensagem final para salvar no histórico
+    const mensagemFinal = parametros.join(' | ');
+    let ultimoErro;
+    for (let tentativa = 1; tentativa <= MAX_RETRIES; tentativa++) {
+        try {
+            await enviarViaMetaTemplate(metaCfg, celular, tmpl.nome, tmpl.idioma, parametros);
+            await marcarEnviado(supabase, notif.id, mensagemFinal);
+            logger.info({ contaId, notifId: notif.id, tentativa, via: 'meta', template: tmpl.nome }, 'WhatsApp: enviado');
+            return;
+        }
+        catch (err) {
+            ultimoErro = err;
+            logger.warn({ contaId: notif.conta_id, notifId: notif.id, tentativa, err }, `Meta tentativa ${tentativa}/${MAX_RETRIES} falhou`);
+            if (tentativa < MAX_RETRIES)
+                await sleep(RETRY_DELAY_MS);
+        }
+    }
+    logger.error({ contaId: notif.conta_id, notifId: notif.id, ultimoErro }, 'Meta: todas as tentativas falharam');
+    if (!dentroDaJanela()) {
+        await reagendar(supabase, notif.id);
+    }
+    else {
+        await marcarFalhou(supabase, notif.id);
+    }
+}
+// ── Loop imediato: pagamento_confirmado e boasvindas ─────────────────────────
+export async function processarFilaImediata(supabase, manager) {
     const agora = new Date().toISOString();
     const { data: pendentes } = await supabase
         .from('notificacoes_enviadas')
-        .select('id, conta_id, parcela_id, cliente_id, tipo')
+        .select('id, conta_id, parcela_id, cobranca_id, cliente_id, tipo, mensagem_final')
         .eq('canal', 'whatsapp')
         .eq('status', 'fila')
         .in('tipo', ['pagamento_confirmado', 'boasvindas'])
@@ -159,37 +340,122 @@ export async function processarFilaImediata(supabase, manager) {
         .limit(10);
     if (!pendentes?.length)
         return;
+    const todosContaIds = [...new Set(pendentes.map(n => n.conta_id))];
+    const { data: configs } = await supabase
+        .from('configuracoes')
+        .select('conta_id, meta_api_ativo, meta_access_token, meta_phone_number_id')
+        .in('conta_id', todosContaIds);
+    const cfgMap = new Map((configs ?? []).map((c) => [c.conta_id, c]));
     const porConta = new Map();
     for (const n of pendentes) {
         const contaId = n.conta_id;
-        if (!porConta.has(contaId) && manager.hasSocket(contaId, true)) {
+        if (porConta.has(contaId))
+            continue;
+        const cfg = cfgMap.get(contaId);
+        const hasMeta = !!(cfg?.meta_api_ativo && cfg.meta_access_token && cfg.meta_phone_number_id);
+        if (hasMeta || manager.hasSocket(contaId, true)) {
             porConta.set(contaId, n);
         }
     }
     if (!porConta.size)
         return;
+    let i = 0;
     for (const [contaId, notif] of porConta) {
-        await processarUmaNotificacao(supabase, manager, contaId, notif, true);
+        const cfg = cfgMap.get(contaId);
+        const hasMeta = !!(cfg?.meta_api_ativo && cfg?.meta_access_token && cfg?.meta_phone_number_id);
+        if (i++ > 0 && !hasMeta)
+            await sleep(5_000);
+        await processarUmaNotificacao(supabase, manager, contaId, notif, true, cfg);
     }
 }
+// ── Mensagem agendada avulsa (sem parcela — texto livre) ─────────────────────
+async function processarAgendada(supabase, manager, contaId, notif, semDigitacao, contaCfg) {
+    const template = notif.mensagem_final?.trim();
+    if (!template) {
+        await marcarFalhou(supabase, notif.id);
+        return;
+    }
+    const { data: cliente } = await supabase
+        .from('clientes')
+        .select('celular, deleted_at')
+        .eq('id', notif.cliente_id)
+        .maybeSingle();
+    if (!cliente) {
+        await cancelarNotif(supabase, notif.id);
+        return;
+    }
+    if (cliente.deleted_at) {
+        await cancelarNotif(supabase, notif.id);
+        return;
+    }
+    const celular = cliente.celular;
+    if (!celular) {
+        await marcarFalhou(supabase, notif.id);
+        return;
+    }
+    const mensagem = await resolverVariaveisLeves(supabase, {
+        contaId, clienteId: notif.cliente_id, template,
+    });
+    const metaCfg = extrairMetaCfg(contaCfg);
+    let ultimoErro;
+    for (let tentativa = 1; tentativa <= MAX_RETRIES; tentativa++) {
+        if (!metaCfg && !manager.hasSocket(contaId, semDigitacao)) {
+            await reagendar(supabase, notif.id);
+            return;
+        }
+        try {
+            if (metaCfg) {
+                await enviarViaMetaTexto(metaCfg, celular, mensagem);
+            }
+            else {
+                await manager.enviarMensagem(contaId, celular, mensagem, semDigitacao);
+            }
+            await marcarEnviado(supabase, notif.id, mensagem);
+            return;
+        }
+        catch (err) {
+            ultimoErro = err;
+            if (tentativa < MAX_RETRIES)
+                await sleep(RETRY_DELAY_MS);
+        }
+    }
+    logger.error({ contaId, notifId: notif.id, ultimoErro }, 'Agendada WA: todas as tentativas falharam');
+    await marcarFalhou(supabase, notif.id);
+}
 // ── Helpers de estado ────────────────────────────────────────────────────────
+async function marcarEnviado(supabase, notifId, mensagemFinal) {
+    const { error } = await supabase.from('notificacoes_enviadas').update({
+        status: 'enviado',
+        mensagem_final: mensagemFinal,
+        enviado_em: new Date().toISOString(),
+    }).eq('id', notifId).eq('status', 'fila');
+    if (error)
+        logger.error({ notifId, error }, 'WA: falha ao marcar enviado');
+}
 async function reagendar(supabase, notifId) {
     const amanha = addDias(hojeEmSP(), 1);
-    await supabase
+    const { error } = await supabase
         .from('notificacoes_enviadas')
         .update({ agendado_para: new Date(`${amanha}T09:00:00-03:00`).toISOString() })
         .eq('id', notifId);
-    logger.info({ notifId }, 'Reagendado para amanhã às 09h');
+    if (error)
+        logger.error({ notifId, error }, 'WA: falha ao reagendar');
+    else
+        logger.info({ notifId }, 'Reagendado para amanhã às 09h');
 }
 async function marcarFalhou(supabase, notifId) {
-    await supabase
+    const { error } = await supabase
         .from('notificacoes_enviadas')
         .update({ status: 'falhou' })
         .eq('id', notifId);
+    if (error)
+        logger.error({ notifId, error }, 'WA: falha ao marcar como falhou');
 }
 async function cancelarNotif(supabase, notifId) {
-    await supabase
+    const { error } = await supabase
         .from('notificacoes_enviadas')
         .update({ status: 'cancelado' })
         .eq('id', notifId);
+    if (error)
+        logger.error({ notifId, error }, 'WA: falha ao cancelar notif');
 }
