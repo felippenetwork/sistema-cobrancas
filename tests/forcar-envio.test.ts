@@ -55,8 +55,8 @@ function uazapi(opts: { conectada?: boolean; envioOk?: boolean } = {}) {
     }
     if (url.endsWith('/send/text')) {
       return opts.envioOk === false
-        ? { ok: false, status: 500, text: async () => 'stack trace interno da uazapi' }
-        : { ok: true, text: async () => 'ok' }
+        ? { ok: false, status: 500, json: async () => ({ error: 'stack trace interno da uazapi' }) }
+        : { ok: true, json: async () => ({}) }
     }
     throw new Error(`fetch inesperado: ${url}`)
   })
@@ -91,6 +91,36 @@ describe('forcarEnvioAction — uazapi', () => {
     uazapi({ conectada: false })
     const res = await forcarEnvioAction('n1')
     expect(res.error).toMatch(/desconectado/i)
+    expect(status(db)).toBe('fila')
+  })
+
+  // Achado real (2026-09-19): a versão antiga fazia o próprio fetch em
+  // '/instance/all' e tratava QUALQUER falha (rede, 429 de rate limit da
+  // uazapi) como "instância não encontrada" — reportando "WhatsApp
+  // desconectado" mesmo com a conexão ok, só porque a checagem em si esbarrou
+  // num rate limit transitório. Corrigido reutilizando getAllInstances()/
+  // UazapiRateLimitError de lib/uazapi.ts (mesmo helper do cron).
+  it('rate limit (429) ao consultar instâncias: NÃO reporta "desconectado", pede para tentar de novo', async () => {
+    const db = cenario({ status: 'fila' })
+    mocks.fetch.mockImplementation(async (url: string) => {
+      if (url.endsWith('/instance/all')) return { status: 429, ok: false }
+      throw new Error(`fetch inesperado: ${url}`)
+    })
+    const res = await forcarEnvioAction('n1')
+    expect(res.error).toMatch(/rate limit/i)
+    expect(res.error).not.toMatch(/desconectado/i)
+    expect(status(db)).toBe('fila')
+  })
+
+  it('rate limit (429) ao enviar: NÃO reporta como recusa definitiva, pede para tentar de novo', async () => {
+    const db = cenario({ status: 'fila' })
+    mocks.fetch.mockImplementation(async (url: string) => {
+      if (url.endsWith('/instance/all')) return { ok: true, json: async () => [{ name: NOME_INSTANCIA, status: 'connected', token: 'tok' }] }
+      if (url.endsWith('/send/text'))    return { status: 429, ok: false }
+      throw new Error(`fetch inesperado: ${url}`)
+    })
+    const res = await forcarEnvioAction('n1')
+    expect(res.error).toMatch(/rate limit/i)
     expect(status(db)).toBe('fila')
   })
 

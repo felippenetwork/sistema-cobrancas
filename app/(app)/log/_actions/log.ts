@@ -6,6 +6,7 @@ import { revalidatePath } from 'next/cache'
 import { encontrarOuCriarAtendimento } from '@/lib/atendimento/encontrar-ou-criar'
 import { resolverVariaveis, resolverVariaveisLeves, VariaveisIndisponiveisError } from '@/lib/whatsapp/resolver-variaveis'
 import { atualizarStatusNotificacao } from '@/lib/whatsapp/status-notificacao'
+import { getAllInstances, instName, sendText, UazapiRateLimitError } from '@/lib/uazapi'
 
 async function getContaId() {
   const supabase = await createClient()
@@ -304,25 +305,26 @@ export async function forcarEnvioAction(id: string): Promise<{ error?: string }>
     }
   }
 
-  const uazapiUrl   = (process.env.UAZAPI_URL ?? '').replace(/\/$/, '')
-  const globalToken = process.env.UAZAPI_ADMIN_TOKEN ?? process.env.UAZAPI_GLOBAL_TOKEN ?? ''
-
-  if (!uazapiUrl || !globalToken) {
+  if (!process.env.UAZAPI_ADMIN_TOKEN && !process.env.UAZAPI_GLOBAL_TOKEN) {
     return falhar('Nenhum provedor WhatsApp configurado (Meta API ou UazAPI).')
   }
 
-  const instName = `quita${(contaId).replace(/-/g, '').slice(0, 10)}`
+  // Usa os mesmos helpers do cron (lib/uazapi.ts) em vez de reimplementar a
+  // checagem aqui: achado real (2026-09-19) — a versão antiga fazia o próprio
+  // fetch em '/instance/all' e tratava QUALQUER falha (rede, 429 de rate limit
+  // da uazapi) como "instância não encontrada", reportando "WhatsApp
+  // desconectado" mesmo quando a conexão estava ok e foi só um rate limit
+  // transitório — exatamente o que a skill whatsapp-uazapi proíbe.
   let instanceToken: string | null = null
   try {
-    const resp = await fetch(`${uazapiUrl}/instance/all`, { headers: { admintoken: globalToken } })
-    if (resp.ok) {
-      const all = await resp.json()
-      if (Array.isArray(all)) {
-        const inst = all.find((i: any) => i.name === instName)
-        if (inst?.status === 'connected') instanceToken = inst.token as string
-      }
+    const instances = await getAllInstances()
+    const inst = instances.find(i => i.name === instName(contaId))
+    if (inst?.status === 'connected') instanceToken = inst.token
+  } catch (err) {
+    if (err instanceof UazapiRateLimitError) {
+      return falhar('Servidor WhatsApp ocupado agora (rate limit). Tente novamente em alguns segundos.')
     }
-  } catch {
+    console.error('[forcarEnvio] falha ao consultar instâncias uazapi', { id, contaId, err })
     return falhar('Erro ao conectar ao servidor WhatsApp.')
   }
 
@@ -331,18 +333,14 @@ export async function forcarEnvioAction(id: string): Promise<{ error?: string }>
   }
 
   try {
-    const resp = await fetch(`${uazapiUrl}/send/text`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json', token: instanceToken },
-      body:    JSON.stringify({ number: celular, text: mensagem }),
-    })
-    if (!resp.ok) {
-      // Detalhe da uazapi vai para o log do servidor, não para a tela (SEG-M3).
-      console.error('[forcarEnvio] uazapi recusou o envio', { id, contaId, status: resp.status, corpo: (await resp.text()).slice(0, 300) })
-      return falhar('A uazapi recusou o envio. Confira a conexão do WhatsApp e tente novamente.')
+    await sendText(instanceToken, celular, mensagem)
+  } catch (err) {
+    if (err instanceof UazapiRateLimitError) {
+      return falhar('Servidor WhatsApp ocupado agora (rate limit). Tente novamente em alguns segundos.')
     }
-  } catch {
-    return falhar('Erro de rede ao enviar a mensagem.')
+    // Detalhe da uazapi vai para o log do servidor, não para a tela (SEG-M3).
+    console.error('[forcarEnvio] uazapi recusou o envio', { id, contaId, err })
+    return falhar('Falha ao enviar pela uazapi (rede ou recusa do provedor). Tente novamente.')
   }
 
   // A mensagem JÁ FOI enviada: gravar o status com repetição, sem nunca devolver o original.
