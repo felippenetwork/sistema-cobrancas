@@ -43,13 +43,14 @@ export async function salvarMetaApiAction(
     const accessToken   = (formData.get('meta_access_token')    as string)?.trim() || null
     const phoneNumberId = (formData.get('meta_phone_number_id') as string)?.trim() || null
     const wabaId        = (formData.get('meta_waba_id')         as string)?.trim() || null
+    const appSecret     = (formData.get('meta_app_secret')      as string)?.trim() || null
 
-    const { error } = await supabase
-      .from('configuracoes')
-      .upsert(
-        { conta_id: contaId, meta_access_token: accessToken, meta_phone_number_id: phoneNumberId, meta_waba_id: wabaId },
-        { onConflict: 'conta_id' },
-      )
+    // meta_app_secret ainda não está em types/database.ts (achado SIN-M2 já
+    // conhecido — tipos gerados à mão estão defasados do schema real).
+    const { error } = await (supabase.from('configuracoes') as any).upsert(
+      { conta_id: contaId, meta_access_token: accessToken, meta_phone_number_id: phoneNumberId, meta_waba_id: wabaId, meta_app_secret: appSecret },
+      { onConflict: 'conta_id' },
+    )
 
     if (error) return { error: error.message }
 

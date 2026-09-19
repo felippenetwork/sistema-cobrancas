@@ -85,6 +85,7 @@ export async function criarClienteAction(
     const { count } = await supabase
       .from('clientes')
       .select('*', { count: 'exact', head: true })
+      .eq('conta_id', contaId)
       .is('deleted_at', null)
     if ((count ?? 0) >= limite) {
       return { error: `Limite de ${limite} clientes atingido. Contate o suporte para ampliar o plano.` }
@@ -93,13 +94,13 @@ export async function criarClienteAction(
     // CPF único por conta — só verifica se foi informado
     if (cpf) {
       const { data: cpfDuplicado } = await supabase
-        .from('clientes').select('id').eq('cpf', cpf).is('deleted_at', null).maybeSingle()
+        .from('clientes').select('id').eq('conta_id', contaId).eq('cpf', cpf).is('deleted_at', null).maybeSingle()
       if (cpfDuplicado) return { error: 'CPF já cadastrado para outro cliente desta conta.' }
     }
 
     // Celular único por conta
     const { data: celDuplicado } = await supabase
-      .from('clientes').select('id').eq('celular', celular).is('deleted_at', null).maybeSingle()
+      .from('clientes').select('id').eq('conta_id', contaId).eq('celular', celular).is('deleted_at', null).maybeSingle()
     if (celDuplicado) return { error: 'Celular já cadastrado para outro cliente desta conta.' }
 
     const { data: novo, error } = await supabase.from('clientes').insert({
@@ -135,7 +136,7 @@ export async function atualizarClienteAction(
   const clienteId = formData.get('cliente_id') as string
 
   try {
-    const { supabase } = await getConta()
+    const { supabase, contaId } = await getConta()
     const campos = extrairCampos(formData)
     const validated = validarCampos(campos)
     if ('error' in validated) return validated as ActionState
@@ -144,13 +145,13 @@ export async function atualizarClienteAction(
     // CPF único excluindo o próprio cliente — só verifica se foi informado
     if (cpf) {
       const { data: cpfDuplicado } = await supabase
-        .from('clientes').select('id').eq('cpf', cpf).neq('id', clienteId).is('deleted_at', null).maybeSingle()
+        .from('clientes').select('id').eq('conta_id', contaId).eq('cpf', cpf).neq('id', clienteId).is('deleted_at', null).maybeSingle()
       if (cpfDuplicado) return { error: 'CPF já cadastrado para outro cliente desta conta.' }
     }
 
     // Celular único excluindo o próprio cliente
     const { data: celDuplicado } = await supabase
-      .from('clientes').select('id').eq('celular', celular).neq('id', clienteId).is('deleted_at', null).maybeSingle()
+      .from('clientes').select('id').eq('conta_id', contaId).eq('celular', celular).neq('id', clienteId).is('deleted_at', null).maybeSingle()
     if (celDuplicado) return { error: 'Celular já cadastrado para outro cliente desta conta.' }
 
     const { error } = await supabase
@@ -164,7 +165,8 @@ export async function atualizarClienteAction(
         tipo_integracao: campos.tipoIntegracao,
         login_externo:   campos.loginExterno,
       })
-      .eq('id', clienteId)   // RLS garante que só altera cliente da própria conta
+      .eq('id', clienteId)
+      .eq('conta_id', contaId)   // defesa em profundidade — não confiar só no RLS (ISO-N3)
     if (error) return { error: error.message }
 
   } catch (e: unknown) {

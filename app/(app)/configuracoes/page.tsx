@@ -19,6 +19,7 @@ type Data = {
     meta_api_ativo?: boolean | null
     meta_phone_number_id?: string | null
     meta_waba_id?: string | null
+    meta_app_secret?: string | null
     ld_username?: string | null
     ld_password?: string | null
     efi_client_id?:     string | null
@@ -44,6 +45,7 @@ export default function ConfiguracoesPage() {
   const [localPart, setLocalPart]         = useState('')
   const [loading, setLoading]             = useState(true)
   const [showToken, setShowToken]         = useState(false)
+  const [showMetaAppSecret, setShowMetaAppSecret] = useState(false)
   const [showLdPassword, setShowLdPassword]   = useState(false)
   const [showEfiSecret, setShowEfiSecret]     = useState(false)
   const [efiSandbox, setEfiSandbox]           = useState(false)
@@ -70,7 +72,7 @@ export default function ConfiguracoesPage() {
 
     const [{ data: cfgRaw }, { data: rem }] = await Promise.all([
       (sb.from('configuracoes') as any)
-        .select('contato, cpf_cnpj, endereco, nome_comercial, meta_access_token, meta_api_ativo, meta_phone_number_id, meta_waba_id, ld_username, ld_password, efi_client_id, efi_client_secret, efi_pix_key, efi_cert_base64, efi_sandbox')
+        .select('contato, cpf_cnpj, endereco, nome_comercial, meta_access_token, meta_api_ativo, meta_phone_number_id, meta_waba_id, meta_app_secret, ld_username, ld_password, efi_client_id, efi_client_secret, efi_pix_key, efi_cert_base64, efi_sandbox')
         .eq('conta_id', conta.id)
         .maybeSingle(),
       sb.from('email_remetente').select('local_part, from_name').eq('conta_id', conta.id).maybeSingle(),
@@ -327,6 +329,30 @@ export default function ConfiguracoesPage() {
                 </button>
               </div>
               <p className="text-[10px] text-muted-foreground">Token de sistema permanente — não usa tokens de usuário que expiram</p>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className={LABEL}>App Secret</label>
+              <div className="relative">
+                <input
+                  name="meta_app_secret"
+                  type={showMetaAppSecret ? 'text' : 'password'}
+                  defaultValue={data?.cfg?.meta_app_secret ?? ''}
+                  placeholder="Chave secreta do aplicativo"
+                  className={INPUT + ' pr-10'}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowMetaAppSecret(v => !v)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {showMetaAppSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                Meta Developers → seu app → Configurações básicas → Chave secreta do aplicativo.
+                Usada pra confirmar que os eventos do webhook vieram mesmo da Meta — sem isso, mensagens recebidas via Meta param de ser aceitas.
+              </p>
             </div>
           </div>
         </section>

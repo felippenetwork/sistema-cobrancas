@@ -28,14 +28,14 @@ Mas a migração de arquitetura (worker/Baileys → uazapi direto) abriu buracos
 | SEG-A3 | ❌ ABERTO (parcial) | ALTO | Zod só em 3 de ~18 `_actions`; resto valida na mão | `configuracoes/_actions/configuracoes.ts` e outros |
 | SEG-A4 | ❌ ABERTO | ALTO | Ações do tenant (cancelar, dar baixa, excluir) não geram auditoria — só ações de admin geram | `cobrancas.ts`, `parcelas.ts`, `clientes.ts` |
 | SEG-A5 | ❌ ABERTO, escopo maior | ALTO | Token uazapi **+ agora também** secret/certificado EfiBank e senha LookDefense em texto claro no banco | `configuracoes.ts:98-114`; `lib/lookdefense/renovar-imediato.ts:66-80` |
-| SEG-A6 | 🔁 MUDOU DE FORMA | ALTO | Webhook uazapi só valida segredo `if (webhookSecret)` — sem a env setada, aceita qualquer requisição (mesmo antipadrão do SEG-C1 antigo) | `app/api/webhook/uazapi/route.ts:10-18` |
+| SEG-A6 | ✅ RESOLVIDO (2026-09-19) | — | Webhook uazapi agora recusa (500) se `UAZAPI_WEBHOOK_SECRET` não estiver configurado, em vez de aceitar sem validar | `app/api/webhook/uazapi/route.ts:7-20` |
 | SEG-M2 | ✅ RESOLVIDO | — | Middleware + layout bloqueiam conta suspensa/expirada | `middleware.ts:70-82` |
 | SEG-M3 | ❌ ABERTO | MÉDIO | Resposta bruta da uazapi devolvida ao client em falha de envio | `log/_actions/log.ts:298-301` |
 | SEG-M4 | ❌ ABERTO, piorou | MÉDIO | Erro do Supabase devolvido cru em quase toda action de configurações | `configuracoes.ts:27,54,81,116,143` |
 | SEG-M5 | 💤 dormente | BAIXO | `/health` do worker sem auth, mas worker não roda | `worker/src/index.ts:147` |
 | SEG-B1 | ❌ ABERTO | BAIXO | Senha mínima validada só no client | `app/(auth)/nova-senha/page.tsx:20-23` |
 | SEG-B2 | ❌ ABERTO | BAIXO | `pg_cron` apaga notificações após 10 dias sem auditoria | `0002_correcoes.sql:108-111` |
-| **SEG-N1** | 🆕 **CRÍTICO** | **CRÍTICO** | **`POST /api/webhooks/whatsapp` (Meta + uazapi) não valida NENHUMA assinatura/segredo — qualquer requisição externa injeta mensagem/atendimento falso em qualquer conta via `?conta=<uuid>` ou resolução por celular** | `app/api/webhooks/whatsapp/route.ts:24-146` |
+| **SEG-N1** | ✅ **RESOLVIDO (2026-09-19)** | — | Webhook agora valida `X-Hub-Signature-256` da Meta com o `meta_app_secret` da conta (migration 0032) e o segredo compartilhado da uazapi; 10 testes de regressão em `tests/webhook-whatsapp-auth.test.ts` (7 falham contra a versão antiga, provado com git stash) | `app/api/webhooks/whatsapp/route.ts` |
 | SEG-N2 | 🆕 | MÉDIO | Webhook EfiBank autentica com o mesmo `CRON_SECRET` dos crons internos — vazar um compromete o outro | `app/api/webhooks/efibank/route.ts:11-14` |
 
 ## FRENTE 2 — Isolamento multi-tenant
@@ -46,10 +46,10 @@ Mas a migração de arquitetura (worker/Baileys → uazapi direto) abriu buracos
 | ISO-A2, A3, A4, A6, A7, A8 | ✅ RESOLVIDOS | — | Todas as mutations corrigidas: `conta_id` explícito, RPC atômica, soft-delete via Server Action | `cobrancas.ts`, `meios.ts`, `parcelas.ts`, `clientes.ts` |
 | ISO-A5 | ❌ ABERTO | ALTO | `cobrarManualAction` não deriva `conta_id` da sessão, usa o da parcela | `parcelas.ts:21-51` |
 | ISO-M1 | ❌ ABERTO | MÉDIO | Vínculo instância→conta por convenção de nome, não consulta real | `log/_actions/log.ts:273-283` |
-| ISO-M2 | ❌ ABERTO | MÉDIO | Contagem de limite de clientes sem `conta_id` explícito | `clientes/_actions/clientes.ts:84-90` |
+| ISO-M2 | ✅ RESOLVIDO (2026-09-19) | — | Contagem de limite de clientes agora filtra `conta_id` | `clientes/_actions/clientes.ts:84-90` |
 | ISO-M3 | ✅ RESOLVIDO | — | Erro de `local_part` duplicado agora é genérico | `configuracoes.ts:162-164` |
 | ISO-B1 | 💤 dormente | BAIXO | Worker sem `conta_id`, mas morto | `worker/src/*` |
-| **ISO-N3** | 🆕 | **ALTO** | **`atualizarClienteAction` reintroduziu o padrão já corrigido no vizinho (`excluirClienteAction`): descarta `contaId`, filtra só por `id`, comentário diz "RLS garante"** | `clientes/_actions/clientes.ts:131-177` |
+| **ISO-N3** | ✅ **RESOLVIDO (2026-09-19)** | — | `atualizarClienteAction` e as verificações de CPF/celular duplicado (também em `criarClienteAction`) agora filtram `conta_id` explicitamente | `clientes/_actions/clientes.ts` |
 | ISO-N4 | 🆕 | MÉDIO | `renovarLookDefenseImediato` usa service role e 4 UPDATEs em `baixas_externas` sem `conta_id` | `lib/lookdefense/renovar-imediato.ts:71-111` |
 
 ## FRENTE 3 — Regras de negócio e financeiro
@@ -132,10 +132,16 @@ Isso é mais estrutural do que qualquer bug encontrado:
 ## Plano de ondas (revisado)
 
 ### ONDA 0 — Segurança ativa agora (fazer antes de qualquer coisa)
-1. **SEG-N1** — assinar/autenticar `POST /api/webhooks/whatsapp` (Meta tem `X-Hub-Signature-256`; uazapi precisa de segredo compartilhado próprio, igual ao `webhook/uazapi` já tem)
-2. **SEG-A6** — tornar `UAZAPI_WEBHOOK_SECRET` obrigatório (falhar se ausente, não aceitar sem validar)
-3. **ISO-N3** — corrigir `atualizarClienteAction` (mesmo padrão do ISO-A7 vizinho)
-4. **RN-C1** — decisão do Felippe: remover a geração imediata dos 3 lugares e confiar só no scheduler (ver skill `regras-financeiras` §3.2)
+1. ~~**SEG-N1**~~ ✅ feito em 2026-09-19
+2. ~~**SEG-A6**~~ ✅ feito em 2026-09-19
+3. ~~**ISO-N3**~~ ✅ feito em 2026-09-19 (+ ISO-M2 de brinde)
+4. **RN-C1** — ainda aberto, decisão do Felippe: remover a geração imediata dos 3 lugares e confiar só no scheduler (ver skill `regras-financeiras` §3.2)
+
+**Passos manuais pendentes para a Onda 0 funcionar em produção** — a correção de código sozinha faz o webhook de mensagens recusar tudo até isso ser feito:
+- Aplicar a migration `supabase/migrations/0032_meta_app_secret.sql` no Supabase (adiciona `configuracoes.meta_app_secret`)
+- Garantir `UAZAPI_WEBHOOK_SECRET` configurado na Vercel (já documentado no `.env.example`)
+- Cada conta que usa Meta Cloud API precisa colar o **App Secret** (Meta Developers → Configurações básicas) em Configurações → WhatsApp Business API — sem isso, o webhook dela passa a devolver 401
+- Contas já conectadas na uazapi têm o webhook registrado SEM `&secret=` na URL — precisam reiniciar a conexão uma vez (ou ter o webhook re-registrado) para voltar a receber mensagens no atendimento. Lembretes e cobranças enviados não são afetados (saem pelo cron, não por este webhook)
 
 ### ONDA 1 — Risco de dinheiro e mensagem duplicada
 1. **TST-C5 + TST-C3** — teste de idempotência do cron de WhatsApp e de atomicidade da RPC de baixa (o bug de duplicidade já aconteceu uma vez em produção, commit `3a13093`, sem prova de regressão)

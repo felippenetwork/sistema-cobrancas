@@ -26,7 +26,9 @@ import {
 function webhookUrlDaConta(contaId: string): string | null {
   const base = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, '')
   if (!base) return null
-  return `${base}/api/webhooks/whatsapp?conta=${contaId}`
+  const secret = process.env.UAZAPI_WEBHOOK_SECRET
+  const query  = secret ? `conta=${contaId}&secret=${secret}` : `conta=${contaId}`
+  return `${base}/api/webhooks/whatsapp?${query}`
 }
 
 type AdminClient = ReturnType<typeof createAdminClient>

@@ -91,6 +91,7 @@ Já houve incidente de credencial exposta em projeto anterior. Regras permanente
 - `NEXT_PUBLIC_` só para valores realmente públicos.
 - **Toda variável de ambiente nova é documentada em `.env.example` na mesma tarefa que a introduz.** Achado real deste projeto: `UAZAPI_URL`/`UAZAPI_ADMIN_TOKEN` (SIN-C2) e as credenciais de Twilio/LookDefense/EfiBank ficaram de fora do `.env.example` por meses — regra violada, não repetir.
 - Vazou → rotacionar IMEDIATAMENTE (Supabase, Mercado Pago, EfiBank, uazapi) e atualizar na Vercel.
+- **Credenciais de integração por conta hoje ficam em texto claro no banco (SEG-A5, aberto):** `conexoes.uazapi_instance_token`, e em `configuracoes`: `meta_access_token`, `meta_app_secret` (novo, migration 0032), `efi_client_secret`, `efi_cert_base64`, `ld_password`. Ao tocar qualquer uma dessas colunas, avaliar criptografia em repouso (ex.: `pgsodium`/Vault do Supabase ou cifra na aplicação com chave fora do banco) em vez de acrescentar mais um segredo em claro.
 - **Rotação programada:** a cada 6 meses ou quando alguém com acesso sair, rotacionar service role e tokens de integração.
 - **Ambientes separados:** projeto Supabase de dev ≠ produção; chaves distintas; NUNCA dados reais (telefones/dívidas de verdade) em dev ou teste. Segredo de produção nunca marcado para Preview na Vercel quando previews são publicamente acessíveis.
 
@@ -103,8 +104,9 @@ Já houve incidente de credencial exposta em projeto anterior. Regras permanente
 
 ## 8. Webhooks (Mercado Pago, EfiBank, uazapi)
 
-- Validar assinatura/segredo compartilhado antes de processar; inválido → 401 sem side effects.
-- **Achado aberto:** o webhook do Mercado Pago processa payload sem validar assinatura quando `MP_WEBHOOK_SECRET` não está configurado (SEG-C1) — a validação precisa ser obrigatória, nunca condicional à variável existir. Mesmo cuidado vale para o webhook uazapi (SEG-A6, hoje sem verificação de assinatura).
+- Validar assinatura/segredo compartilhado antes de processar; inválido → 401 sem side effects. **Segredo não configurado no servidor também é recusa** (fail closed) — nunca `if (secret) { validar }` que aceita tudo quando a env some.
+- Estado atual (auditoria 2026-09-19): Mercado Pago (HMAC obrigatório), webhook de conexão uazapi (`UAZAPI_WEBHOOK_SECRET` obrigatório) e webhook de mensagens `/api/webhooks/whatsapp` (Meta: `X-Hub-Signature-256` validado com o `configuracoes.meta_app_secret` da conta — cada conta tem seu próprio app Meta; uazapi: `UAZAPI_WEBHOOK_SECRET` via `?secret=`) estão todos corretos. Testes de regressão: `tests/webhook-whatsapp-auth.test.ts`. **Webhook novo nasce assim desde o primeiro commit, nunca "depois eu valido".**
+- `[ainda aberto]` Webhook EfiBank autentica com o mesmo `CRON_SECRET` dos crons internos (SEG-N2) — vazar um compromete o outro; separar em segredo próprio.
 - Idempotência por ID de evento — EfiBank já implementa isso corretamente (marca `concluida` antes de processar, ver `regras-financeiras`).
 - Ação crítica (liberar acesso, marcar pago) → confirmar via API do provedor, não confiar só no payload.
 
@@ -114,7 +116,7 @@ Já houve incidente de credencial exposta em projeto anterior. Regras permanente
 
 - Token da instância (`uazapi_instance_token`) por conta, nunca exposto ao navegador. **Achado aberto (SEG-A5): esse token está gravado em texto claro na tabela `conexoes`** — criptografar em repouso é o correto ao tocar essa coluna, não uma melhoria opcional.
 - Cliente desconectou/churn → desconectar a instância na uazapi.
-- Webhook de conexão (`app/api/webhook/uazapi`) confirma o segredo compartilhado antes de atualizar status — sem isso, qualquer um pode forjar desconexão ou QR falso (SEG-A6).
+- Webhook de conexão (`app/api/webhook/uazapi`) e de mensagens (`app/api/webhooks/whatsapp`) exigem o segredo compartilhado (`UAZAPI_WEBHOOK_SECRET`, injetado como `&secret=` na URL registrada pela action de conexão) — sem isso, qualquer um forjaria desconexão, QR falso ou mensagem de cliente. Conta já conectada antes dessa exigência precisa reiniciar a conexão uma vez para re-registrar o webhook com o segredo.
 
 ## 10. Endurecimento do app e da hospedagem (Vercel)
 

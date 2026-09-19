@@ -1,7 +1,15 @@
 // Webhook WhatsApp — recebe mensagens de clientes via uazapi ou Meta Cloud API.
-// URL a configurar no uazapi: https://seu-dominio.com/api/webhooks/whatsapp?conta=UUID
+// URL a configurar no uazapi: https://seu-dominio.com/api/webhooks/whatsapp?conta=UUID&secret=UAZAPI_WEBHOOK_SECRET
 // URL Meta: https://seu-dominio.com/api/webhooks/whatsapp (GET para verificação + POST para eventos)
+//
+// Segurança (SEG-N1, auditoria 2026-09-19): as duas origens são autenticadas
+// antes de processar qualquer coisa. Meta assina cada requisição com
+// X-Hub-Signature-256 usando o App Secret DAQUELA conta (cada conta tem seu
+// próprio app Meta — coluna configuracoes.meta_app_secret); uazapi usa o
+// segredo compartilhado da plataforma (UAZAPI_WEBHOOK_SECRET), igual ao
+// webhook de conexão. Sem o segredo certo, 401 — nunca processar sem validar.
 
+import { createHmac, timingSafeEqual } from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { processarMidiaMeta } from '@/lib/media/processar-midia-meta'
@@ -26,10 +34,27 @@ export async function POST(req: NextRequest) {
     const contaId  = req.nextUrl.searchParams.get('conta') ?? null
     const supabase = createAdminClient()
 
-    const body     = await req.json()
+    // Ler como texto primeiro: a assinatura da Meta é calculada sobre os bytes
+    // crus do corpo, não sobre o objeto já parseado.
+    const rawBody = await req.text()
+    const body    = JSON.parse(rawBody)
 
     // ── Meta Cloud API ────────────────────────────────────────────────────────
     if (body?.object === 'whatsapp_business_account') {
+      const phoneIdValidacao = body.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id as string | undefined
+      const contaValidacao   = phoneIdValidacao
+        ? await resolverContaPorMetaPhoneId(supabase, phoneIdValidacao)
+        : contaId
+
+      const assinaturaValida = contaValidacao
+        ? await validarAssinaturaMeta(supabase, contaValidacao, rawBody, req.headers.get('x-hub-signature-256'))
+        : false
+
+      if (!assinaturaValida) {
+        console.warn('[webhook/whatsapp] assinatura Meta ausente/inválida ou meta_app_secret não configurado', { contaValidacao })
+        return NextResponse.json({ ok: false }, { status: 401 })
+      }
+
       for (const entry of body.entry ?? []) {
         for (const change of entry.changes ?? []) {
           const value = change.value ?? {}
@@ -77,6 +102,17 @@ export async function POST(req: NextRequest) {
         }
       }
       return NextResponse.json({ ok: true })
+    }
+
+    // ── uazapi (EventType ou event) — exige segredo compartilhado da plataforma ──
+    const pareceUazapi = !!(body?.EventType || body?.event)
+    if (pareceUazapi) {
+      const uazapiSecret  = process.env.UAZAPI_WEBHOOK_SECRET
+      const secretRecebido = req.nextUrl.searchParams.get('secret') ?? req.headers.get('x-webhook-secret')
+      if (!uazapiSecret || secretRecebido !== uazapiSecret) {
+        console.warn('[webhook/whatsapp] segredo uazapi ausente ou inválido')
+        return NextResponse.json({ ok: false }, { status: 401 })
+      }
     }
 
     // ── uazapiGO: body.EventType + phone em body.chat.phone ──────────────────
@@ -368,6 +404,30 @@ async function salvarMensagem(
   if (error && error.code !== '23505') {
     console.error('[webhook/whatsapp] salvarMensagem', error, params)
   }
+}
+
+async function validarAssinaturaMeta(
+  supabase: ReturnType<typeof createAdminClient>,
+  contaId: string,
+  rawBody: string,
+  signatureHeader: string | null,
+): Promise<boolean> {
+  if (!signatureHeader) return false
+
+  const { data } = await supabase
+    .from('configuracoes')
+    .select('meta_app_secret')
+    .eq('conta_id', contaId)
+    .maybeSingle()
+
+  const secret = (data as { meta_app_secret?: string | null } | null)?.meta_app_secret
+  if (!secret) return false
+
+  const esperado = 'sha256=' + createHmac('sha256', secret).update(rawBody).digest('hex')
+  const a = Buffer.from(esperado)
+  const b = Buffer.from(signatureHeader)
+  if (a.length !== b.length) return false
+  return timingSafeEqual(a, b)
 }
 
 async function resolverContaPorMetaPhoneId(
