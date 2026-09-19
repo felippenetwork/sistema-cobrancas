@@ -142,11 +142,11 @@ export async function forcarEnvioAction(id: string): Promise<{ error?: string }>
       .eq('tipo', notif.tipo as any)
       .maybeSingle()
 
-    const corpoCustom = ((cfgTmpl as any)?.meta_template_corpo as string | null) ?? ''
-    const tmpl = (cfgTmpl as any)?.meta_template_nome
+    const corpoCustom = cfgTmpl?.meta_template_corpo ?? ''
+    const tmpl = cfgTmpl?.meta_template_nome
       ? {
-          nome:   (cfgTmpl as any).meta_template_nome as string,
-          idioma: ((cfgTmpl as any).meta_template_idioma as string | null) ?? 'pt_BR',
+          nome:   cfgTmpl.meta_template_nome,
+          idioma: cfgTmpl.meta_template_idioma ?? 'pt_BR',
           params: (corpoCustom.includes('{{3}}') ? 3 : corpoCustom.includes('{{2}}') ? 2 : 1) as 2 | 3,
           corpo:  corpoCustom,
         }

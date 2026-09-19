@@ -19,16 +19,15 @@ export async function getEfiCreds(contaId: string): Promise<EfiCreds | null> {
     .eq('conta_id', contaId)
     .maybeSingle()
 
-  const c = data as any
-  if (!c?.efi_client_id || !c?.efi_client_secret || !c?.efi_pix_key || !c?.efi_cert_base64) {
+  if (!data?.efi_client_id || !data.efi_client_secret || !data.efi_pix_key || !data.efi_cert_base64) {
     return null
   }
   return {
-    clientId:     c.efi_client_id     as string,
-    clientSecret: c.efi_client_secret as string,
-    pixKey:       c.efi_pix_key       as string,
-    certBase64:   c.efi_cert_base64   as string,
-    sandbox:      !!(c.efi_sandbox),
+    clientId:     data.efi_client_id,
+    clientSecret: data.efi_client_secret,
+    pixKey:       data.efi_pix_key,
+    certBase64:   data.efi_cert_base64,
+    sandbox:      !!data.efi_sandbox,
   }
 }
 

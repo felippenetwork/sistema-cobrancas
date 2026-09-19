@@ -371,9 +371,9 @@ export async function GET(req: NextRequest) {
 
   // Mapa de override de template: `${contaId}:${tipo}` → {nome, idioma, corpo}
   const tmplOverride = new Map(
-    (notifConfigs ?? []).map((nc: any) => [
+    (notifConfigs ?? []).map(nc => [
       `${nc.conta_id}:${nc.tipo}`,
-      { nome: nc.meta_template_nome, idioma: nc.meta_template_idioma, corpo: nc.meta_template_corpo },
+      { nome: nc.meta_template_nome as string, idioma: nc.meta_template_idioma as string, corpo: nc.meta_template_corpo as string },
     ])
   )
 

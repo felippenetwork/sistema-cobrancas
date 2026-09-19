@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { encontrarOuCriarAtendimento } from '@/lib/atendimento/encontrar-ou-criar'
 import { atualizarStatusNotificacao } from '@/lib/whatsapp/status-notificacao'
+import type { NotifTipo } from '@/lib/notificacao/tipos'
 
 const META_TEMPLATES: Record<string, { nome: string; idioma: string; params: 2 | 3; corpo: string }> = {
   '5d':                 { nome: 'cobranca_5d',           idioma: 'pt_BR', params: 3, corpo: 'Olá, *{{1}}*! Sua fatura de *{{2}}* vence em *5 dias* ({{3}}). Para dúvidas, responda esta mensagem.' },
@@ -89,14 +90,14 @@ export async function enviarWhatsAppImediato(
     .from('notificacoes_config')
     .select('meta_template_nome, meta_template_idioma, meta_template_corpo')
     .eq('conta_id', contaId)
-    .eq('tipo', tipo as any)
+    .eq('tipo', tipo as NotifTipo)
     .maybeSingle()
 
-  const corpoCustom = ((cfgTmpl as any)?.meta_template_corpo as string | null) ?? ''
-  const tmpl = (cfgTmpl as any)?.meta_template_nome
+  const corpoCustom = cfgTmpl?.meta_template_corpo ?? ''
+  const tmpl = cfgTmpl?.meta_template_nome
     ? {
-        nome:   (cfgTmpl as any).meta_template_nome as string,
-        idioma: ((cfgTmpl as any).meta_template_idioma as string | null) ?? 'pt_BR',
+        nome:   cfgTmpl.meta_template_nome,
+        idioma: cfgTmpl.meta_template_idioma ?? 'pt_BR',
         params: (corpoCustom.includes('{{3}}') ? 3 : corpoCustom.includes('{{2}}') ? 2 : 1) as 2 | 3,
         corpo:  corpoCustom,
       }
@@ -114,12 +115,12 @@ export async function enviarWhatsAppImediato(
     .eq('conta_id', contaId)
     .maybeSingle()
 
-  if (!cliente || (cliente as any).deleted_at || !(cliente as any).celular) {
+  if (!cliente || cliente.deleted_at || !cliente.celular) {
     await liberar('cliente_invalido')
     return false
   }
-  const celular = (cliente as any).celular as string
-  const nome    = ((cliente as any).nome as string) || 'Cliente'
+  const celular = cliente.celular
+  const nome    = cliente.nome || 'Cliente'
 
   // Resolver parcela
   let pid = parcelaId
@@ -129,7 +130,7 @@ export async function enviarWhatsAppImediato(
       .eq('cobranca_id', cobrancaId)
       .eq('conta_id', contaId)
       .order('numero', { ascending: true }).limit(1).maybeSingle()
-    pid = (p as any)?.id ?? null
+    pid = p?.id ?? null
   }
 
   let valor = ''
@@ -144,8 +145,8 @@ export async function enviarWhatsAppImediato(
       await liberar('parcela_indisponivel')
       return false
     }
-    valor = formatarMoeda(Number((parcela as any).valor ?? 0))
-    data  = formatarData((parcela as any).data_vencimento ?? '')
+    valor = formatarMoeda(Number(parcela.valor ?? 0))
+    data  = formatarData(parcela.data_vencimento ?? '')
   }
 
   const parametros    = tmpl.params === 2 ? [nome, valor] : [nome, valor, data]

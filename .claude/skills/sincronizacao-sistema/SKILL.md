@@ -35,7 +35,7 @@ Regra: se o grep encontrou 8 usos, os 8 são atualizados na mesma tarefa. Mudan�
 
 ### Mudança de schema (coluna/tabela nova, tipo alterado)
 
-Ordem fixa: migration SQL (com índice, se filtrada) → policies RLS (4 operações, ver skill `isolamento-de-contas`) → regenerar types (`supabase gen types typescript`) → `tsc --noEmit` aponta os pontos quebrados, corrigir um a um → queries/server actions → componentes/telas → rotas de cron, se lerem/gravarem essa tabela → seeds/fixtures, se existirem.
+Ordem fixa: migration SQL (com índice, se filtrada) → policies RLS (4 operações, ver skill `isolamento-de-contas`) → atualizar `types/database.ts` (à mão a partir da migration, ou `supabase gen types typescript` quando houver token) → `tsc --noEmit` aponta os pontos quebrados, corrigir um a um → queries/server actions → componentes/telas → rotas de cron, se lerem/gravarem essa tabela → seeds/fixtures, se existirem.
 
 ### Renomear ou remover coluna (NUNCA fazer direto — expand/contract)
 
@@ -108,7 +108,7 @@ LEFT JOIN clientes cl ON cl.id = c.cliente_id
 WHERE cl.id IS NULL LIMIT 10;  -- adaptar às relações alteradas
 ```
 
-**3. Types sincronizados:** regenerar (`supabase gen types typescript`) e `git diff` no arquivo de types — diff inesperado = schema e código dessincronizados.
+**3. Types sincronizados:** toda tabela/coluna criada em `supabase/migrations/` existe em `types/database.ts` (conferir as migrations desde a última sincronização registrada no cabeçalho do arquivo); com token, regenerar (`supabase gen types typescript`) e `git diff` — diff inesperado = schema e código dessincronizados. `as any` no acesso a tabela/coluna é o sinal.
 
 **4. `.env.example` sincronizado:** toda env lida por `process.env` no código tem entrada em `.env.example`. Rodar `grep -rn "process.env\." app lib` e comparar com o arquivo — é exatamente o tipo de achado (SIN-C2) que já escapou três vezes neste projeto.
 

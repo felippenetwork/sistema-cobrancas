@@ -21,10 +21,9 @@ export async function criarCobrancaPix(
   if (!creds) return { erro: 'EfiBanK não configurado. Acesse Configurações → EfiBanK PIX.' }
 
   const supabase = createAdminClient()
-  const db = supabase as any
 
   // Reutiliza cobrança ativa não expirada
-  const { data: existing } = await db
+  const { data: existing } = await supabase
     .from('cobrancas_pix')
     .select('txid, pix_copia_cola, qr_code_base64, link_pagamento, expira_em')
     .eq('conta_id', contaId)
@@ -33,14 +32,13 @@ export async function criarCobrancaPix(
     .gt('expira_em', new Date().toISOString())
     .maybeSingle()
 
-  if (existing && (existing as any).pix_copia_cola) {
-    const e = existing as any
+  if (existing?.pix_copia_cola && existing.expira_em) {
     return {
-      txid:          e.txid,
-      pixCopiaCola:  e.pix_copia_cola,
-      qrCodeBase64:  e.qr_code_base64   ?? null,
-      linkPagamento: e.link_pagamento    ?? null,
-      expiraEm:      e.expira_em,
+      txid:          existing.txid,
+      pixCopiaCola:  existing.pix_copia_cola,
+      qrCodeBase64:  existing.qr_code_base64 ?? null,
+      linkPagamento: existing.link_pagamento ?? null,
+      expiraEm:      existing.expira_em,
     }
   }
 
@@ -84,8 +82,9 @@ export async function criarCobrancaPix(
 
     if (!pixCopiaCola) return { erro: 'Não foi possível obter o código PIX. Tente novamente.' }
 
-    // Persiste
-    await db.from('cobrancas_pix').upsert({
+    // Persiste. Sem a linha em cobrancas_pix o webhook de pagamento não acha o txid e o
+    // pagamento fica sem baixa — então um PIX que não foi gravado NÃO pode ser entregue.
+    const { error: persistErr } = await supabase.from('cobrancas_pix').upsert({
       conta_id:       contaId,
       parcela_id:     parcelaId,
       txid,
@@ -95,7 +94,12 @@ export async function criarCobrancaPix(
       qr_code_base64: qrCodeBase64,
       link_pagamento: linkPagamento,
       expira_em:      expiraEm,
-    } as any, { onConflict: 'conta_id,txid' })
+    }, { onConflict: 'conta_id,txid' })
+
+    if (persistErr) {
+      console.error('[criarCobrancaPix] falha ao gravar cobrança PIX — código NÃO entregue', { contaId, parcelaId, txid, persistErr })
+      return { erro: 'Não foi possível registrar a cobrança PIX. Tente novamente.' }
+    }
 
     return { txid, pixCopiaCola, qrCodeBase64, linkPagamento, expiraEm }
   } catch (err: any) {

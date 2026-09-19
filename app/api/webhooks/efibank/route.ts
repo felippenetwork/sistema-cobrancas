@@ -5,6 +5,17 @@ import { calcularVencimento } from '@/lib/utils/parcelas'
 import { enviarWhatsAppImediato } from '@/lib/whatsapp/enviar-imediato'
 import { renovarLookDefenseImediato } from '@/lib/lookdefense/renovar-imediato'
 
+// Retorno da RPC baixar_parcela (migration 0013).
+type ResultadoBaixaParcela = {
+  ok: boolean
+  erro?: string
+  parcela_id?: string
+  cobranca_id?: string
+  conta_id?: string
+  recorrente?: boolean
+  cliente_id?: string | null
+}
+
 export async function POST(req: NextRequest) {
   try {
     // Token de segurança na URL (?token=CRON_SECRET)
@@ -14,18 +25,17 @@ export async function POST(req: NextRequest) {
     }
 
     const body    = await req.json()
-    const pixList = (body?.pix ?? []) as any[]
+    const pixList = (body?.pix ?? []) as { txid?: string }[]
     if (!pixList.length) return NextResponse.json({ ok: true })
 
     const supabase = createAdminClient()
-    const db = supabase as any
 
     for (const pix of pixList) {
-      const txid = pix.txid as string | undefined
+      const txid = pix.txid
       if (!txid) continue
 
       // Localiza a cobrança PIX pelo txid
-      const { data: cobPix } = await db
+      const { data: cobPix } = await supabase
         .from('cobrancas_pix')
         .select('id, conta_id, parcela_id, status')
         .eq('txid', txid)
@@ -34,11 +44,11 @@ export async function POST(req: NextRequest) {
       if (!cobPix) { console.warn('[efibank webhook] txid não encontrado:', txid); continue }
       if (cobPix.status === 'concluida') continue
 
-      const contaId   = cobPix.conta_id   as string
-      const parcelaId = cobPix.parcela_id as string
+      const contaId   = cobPix.conta_id
+      const parcelaId = cobPix.parcela_id
 
       // Marca como concluída antes de baixar (idempotência)
-      await db.from('cobrancas_pix')
+      await supabase.from('cobrancas_pix')
         .update({ status: 'concluida', pago_em: new Date().toISOString() })
         .eq('id', cobPix.id)
 
@@ -50,14 +60,14 @@ export async function POST(req: NextRequest) {
         p_hoje:       hoje,
       })
 
-      const result       = rpcData as any
+      const result = rpcData as ResultadoBaixaParcela | null
       if (rpcErr || !result?.ok) {
         console.error('[efibank webhook] rpc erro:', rpcErr, rpcData)
         continue
       }
-      const contaIdFinal = result.conta_id  as string
+      const contaIdFinal = result.conta_id    as string
       const cobrancaId   = result.cobranca_id as string
-      const clienteId    = result.cliente_id  as string | null
+      const clienteId    = result.cliente_id ?? null
 
       if (!clienteId) continue
 
@@ -69,7 +79,7 @@ export async function POST(req: NextRequest) {
         .eq('tipo', 'pagamento_confirmado')
         .maybeSingle()
 
-      if ((cfgNotif as any)?.ativo_whatsapp) {
+      if (cfgNotif?.ativo_whatsapp) {
         const agora = new Date().toISOString()
         const { data: notif } = await supabase.from('notificacoes_enviadas').insert({
           conta_id:      contaIdFinal,
@@ -82,8 +92,8 @@ export async function POST(req: NextRequest) {
           agendado_para: agora,
         }).select('id').single()
 
-        if ((notif as any)?.id) {
-          await enviarWhatsAppImediato(contaIdFinal, (notif as any).id, parcelaId, cobrancaId, clienteId, 'pagamento_confirmado')
+        if (notif?.id) {
+          await enviarWhatsAppImediato(contaIdFinal, notif.id, parcelaId, cobrancaId, clienteId, 'pagamento_confirmado')
         }
       }
 
@@ -94,17 +104,17 @@ export async function POST(req: NextRequest) {
         .eq('id', clienteId)
         .maybeSingle()
 
-      if ((cli as any)?.login_externo && (cli as any)?.tipo_integracao) {
+      if (cli?.login_externo && cli.tipo_integracao) {
         const { data: baixaExt } = await supabase.from('baixas_externas').insert({
           conta_id:        contaIdFinal,
           cliente_id:      clienteId,
           parcela_id:      parcelaId,
-          login_externo:   (cli as any).login_externo,
-          tipo_integracao: (cli as any).tipo_integracao,
+          login_externo:   cli.login_externo,
+          tipo_integracao: cli.tipo_integracao,
         }).select('id').single()
 
-        if ((baixaExt as any)?.id) {
-          await renovarLookDefenseImediato(contaIdFinal, (baixaExt as any).id, (cli as any).login_externo, 0)
+        if (baixaExt?.id) {
+          await renovarLookDefenseImediato(contaIdFinal, baixaExt.id, cli.login_externo, 0)
         }
       }
 

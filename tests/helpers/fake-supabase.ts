@@ -4,9 +4,9 @@
 // injeção de falhas — nada de rede, nada de banco real.
 
 type Linha = Record<string, any>
-type Operacao = 'select' | 'update' | 'insert'
+type Operacao = 'select' | 'update' | 'insert' | 'upsert'
 type Filtro =
-  | { tipo: 'eq' | 'neq' | 'lte' | 'is'; col: string; val: unknown }
+  | { tipo: 'eq' | 'neq' | 'lte' | 'gt' | 'is'; col: string; val: unknown }
   | { tipo: 'in'; col: string; val: unknown[] }
   | { tipo: 'not-is'; col: string; val: unknown }
 
@@ -52,6 +52,7 @@ export class FakeDb {
   private construtor(tabela: string) {
     const consulta: Consulta = { tabela, operacao: 'select', filtros: [] }
     let inserir: Linha[] = []
+    let conflito: string[] = []
     let retornaLinhas = false
     let ordem: { col: string; asc: boolean } | undefined
     let limite: number | undefined
@@ -73,6 +74,7 @@ export class FakeDb {
           case 'eq':     return v === f.val
           case 'neq':    return v !== f.val
           case 'lte':    return v != null && (v as any) <= (f.val as any)
+          case 'gt':     return v != null && (v as any) > (f.val as any)
           case 'is':     return f.val === null ? v == null : v === f.val
           case 'in':     return f.val.includes(v)
           case 'not-is': return f.val === null ? v != null : v !== f.val
@@ -83,6 +85,16 @@ export class FakeDb {
       if (consulta.operacao === 'insert') {
         resultado = inserir.map(l => ({ id: `fake-${++this.seq}`, ...l }))
         this.linhas(tabela).push(...resultado)
+      } else if (consulta.operacao === 'upsert') {
+        resultado = inserir.map(nova => {
+          const existente = conflito.length
+            ? this.linhas(tabela).find(l => conflito.every(c => l[c] === nova[c]))
+            : undefined
+          if (existente) return Object.assign(existente, nova)
+          const criada = { id: `fake-${++this.seq}`, ...nova }
+          this.linhas(tabela).push(criada)
+          return criada
+        })
       } else if (consulta.operacao === 'update') {
         resultado = this.linhas(tabela).filter(casa)
         resultado.forEach(l => Object.assign(l, consulta.patch))
@@ -111,6 +123,13 @@ export class FakeDb {
       eq(col: string, val: unknown) { consulta.filtros.push({ tipo: 'eq', col, val }); return api },
       neq(col: string, val: unknown) { consulta.filtros.push({ tipo: 'neq', col, val }); return api },
       lte(col: string, val: unknown) { consulta.filtros.push({ tipo: 'lte', col, val }); return api },
+      gt(col: string, val: unknown) { consulta.filtros.push({ tipo: 'gt', col, val }); return api },
+      upsert(linhas: Linha | Linha[], opts?: { onConflict?: string }) {
+        consulta.operacao = 'upsert'
+        inserir = Array.isArray(linhas) ? linhas : [linhas]
+        conflito = (opts?.onConflict ?? '').split(',').map(c => c.trim()).filter(Boolean)
+        return api
+      },
       is(col: string, val: unknown) { consulta.filtros.push({ tipo: 'is', col, val }); return api },
       in(col: string, val: unknown[]) { consulta.filtros.push({ tipo: 'in', col, val }); return api },
       not(col: string, op: string, val: unknown) {

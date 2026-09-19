@@ -1,4 +1,7 @@
-// Generated from supabase/migrations/* — update after schema changes via:
+// Espelho do schema em supabase/migrations/*, mantido À MÃO (última sincronização: migration 0032).
+// Toda migration que cria/altera tabela ou coluna atualiza este arquivo na MESMA tarefa — tabela ou
+// coluna faltando aqui vira `as any` no código (foi assim que cobrancas_pix e mensagens_rapidas
+// ficaram sem tipo). Para regenerar do banco real (precisa de SUPABASE_ACCESS_TOKEN):
 //   npx supabase gen types typescript --project-id jbtqrxnpxisnboiqwyrb > types/database.ts
 
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[]
@@ -246,6 +249,11 @@ export type Database = {
           contato: string | null
           conta_id: string
           cpf_cnpj: string | null
+          efi_cert_base64: string | null
+          efi_client_id: string | null
+          efi_client_secret: string | null
+          efi_pix_key: string | null
+          efi_sandbox: boolean
           endereco: string | null
           horario_fim: string
           horario_inicio: string
@@ -255,6 +263,7 @@ export type Database = {
           ld_username: string | null
           meta_access_token: string | null
           meta_api_ativo: boolean
+          meta_app_secret: string | null
           meta_phone_number_id: string | null
           meta_waba_id: string | null
           nome_comercial: string | null
@@ -268,6 +277,11 @@ export type Database = {
           contato?: string | null
           conta_id: string
           cpf_cnpj?: string | null
+          efi_cert_base64?: string | null
+          efi_client_id?: string | null
+          efi_client_secret?: string | null
+          efi_pix_key?: string | null
+          efi_sandbox?: boolean
           endereco?: string | null
           horario_fim?: string
           horario_inicio?: string
@@ -277,6 +291,7 @@ export type Database = {
           ld_username?: string | null
           meta_access_token?: string | null
           meta_api_ativo?: boolean
+          meta_app_secret?: string | null
           meta_phone_number_id?: string | null
           meta_waba_id?: string | null
           nome_comercial?: string | null
@@ -290,6 +305,11 @@ export type Database = {
           contato?: string | null
           conta_id?: string
           cpf_cnpj?: string | null
+          efi_cert_base64?: string | null
+          efi_client_id?: string | null
+          efi_client_secret?: string | null
+          efi_pix_key?: string | null
+          efi_sandbox?: boolean
           endereco?: string | null
           horario_fim?: string
           horario_inicio?: string
@@ -299,6 +319,7 @@ export type Database = {
           ld_username?: string | null
           meta_access_token?: string | null
           meta_api_ativo?: boolean
+          meta_app_secret?: string | null
           meta_phone_number_id?: string | null
           meta_waba_id?: string | null
           nome_comercial?: string | null
@@ -520,6 +541,7 @@ export type Database = {
           tipo: string
           status: string
           wa_id: string | null
+          midia_url: string | null
           recebido_em: string
           lida: boolean
         }
@@ -534,6 +556,7 @@ export type Database = {
           tipo?: string
           status?: string
           wa_id?: string | null
+          midia_url?: string | null
           recebido_em?: string
           lida?: boolean
         }
@@ -548,6 +571,7 @@ export type Database = {
           tipo?: string
           status?: string
           wa_id?: string | null
+          midia_url?: string | null
           recebido_em?: string
           lida?: boolean
         }
@@ -566,6 +590,9 @@ export type Database = {
           created_at: string
           horario: string
           id: string
+          meta_template_corpo: string | null
+          meta_template_idioma: string | null
+          meta_template_nome: string | null
           template_email: string | null
           template_whatsapp: string | null
           tipo: NotifTipo
@@ -579,6 +606,9 @@ export type Database = {
           created_at?: string
           horario?: string
           id?: string
+          meta_template_corpo?: string | null
+          meta_template_idioma?: string | null
+          meta_template_nome?: string | null
           template_email?: string | null
           template_whatsapp?: string | null
           tipo: NotifTipo
@@ -592,6 +622,9 @@ export type Database = {
           created_at?: string
           horario?: string
           id?: string
+          meta_template_corpo?: string | null
+          meta_template_idioma?: string | null
+          meta_template_nome?: string | null
           template_email?: string | null
           template_whatsapp?: string | null
           tipo?: NotifTipo
@@ -973,6 +1006,81 @@ export type Database = {
           { foreignKeyName: 'campanha_dest_campanha_id_fkey'; columns: ['campanha_id']; isOneToOne: false; referencedRelation: 'campanhas_wa'; referencedColumns: ['id'] },
           { foreignKeyName: 'campanha_dest_conta_id_fkey'; columns: ['conta_id']; isOneToOne: false; referencedRelation: 'contas'; referencedColumns: ['id'] },
         ]
+      }
+      cobrancas_pix: {
+        Row: {
+          id: string
+          conta_id: string
+          parcela_id: string
+          txid: string
+          valor: number
+          status: string
+          pix_copia_cola: string | null
+          qr_code_base64: string | null
+          link_pagamento: string | null
+          expira_em: string | null
+          pago_em: string | null
+          criado_em: string
+        }
+        Insert: {
+          id?: string
+          conta_id: string
+          parcela_id: string
+          txid: string
+          valor: number
+          status?: string
+          pix_copia_cola?: string | null
+          qr_code_base64?: string | null
+          link_pagamento?: string | null
+          expira_em?: string | null
+          pago_em?: string | null
+          criado_em?: string
+        }
+        Update: {
+          id?: string
+          conta_id?: string
+          parcela_id?: string
+          txid?: string
+          valor?: number
+          status?: string
+          pix_copia_cola?: string | null
+          qr_code_base64?: string | null
+          link_pagamento?: string | null
+          expira_em?: string | null
+          pago_em?: string | null
+          criado_em?: string
+        }
+        Relationships: [
+          { foreignKeyName: 'cobrancas_pix_conta_id_fkey'; columns: ['conta_id']; isOneToOne: false; referencedRelation: 'contas'; referencedColumns: ['id'] },
+          { foreignKeyName: 'cobrancas_pix_parcela_id_fkey'; columns: ['parcela_id']; isOneToOne: false; referencedRelation: 'parcelas'; referencedColumns: ['id'] },
+        ]
+      }
+      mensagens_rapidas: {
+        Row: {
+          id: string
+          conta_id: string
+          titulo: string
+          texto: string
+          ordem: number
+          criado_em: string
+        }
+        Insert: {
+          id?: string
+          conta_id: string
+          titulo: string
+          texto: string
+          ordem?: number
+          criado_em?: string
+        }
+        Update: {
+          id?: string
+          conta_id?: string
+          titulo?: string
+          texto?: string
+          ordem?: number
+          criado_em?: string
+        }
+        Relationships: [{ foreignKeyName: 'mensagens_rapidas_conta_id_fkey'; columns: ['conta_id']; isOneToOne: false; referencedRelation: 'contas'; referencedColumns: ['id'] }]
       }
     }
     Views: Record<never, never>

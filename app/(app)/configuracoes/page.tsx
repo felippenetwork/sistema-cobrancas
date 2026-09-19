@@ -71,7 +71,7 @@ export default function ConfiguracoesPage() {
     if (!conta) return
 
     const [{ data: cfgRaw }, { data: rem }] = await Promise.all([
-      (sb.from('configuracoes') as any)
+      sb.from('configuracoes')
         .select('contato, cpf_cnpj, endereco, nome_comercial, meta_access_token, meta_api_ativo, meta_phone_number_id, meta_waba_id, meta_app_secret, ld_username, ld_password, efi_client_id, efi_client_secret, efi_pix_key, efi_cert_base64, efi_sandbox')
         .eq('conta_id', conta.id)
         .maybeSingle(),
@@ -81,8 +81,8 @@ export default function ConfiguracoesPage() {
     const cfg = cfgRaw as Data['cfg']
     setData({ cfg, rem, domain: plat?.dominio_email_operador ?? null })
     setLocalPart(rem?.local_part ?? '')
-    setEfiSandbox(!!(cfg as any)?.efi_sandbox)
-    setEfiCert((cfg as any)?.efi_cert_base64 ?? '')
+    setEfiSandbox(!!cfg?.efi_sandbox)
+    setEfiCert(cfg?.efi_cert_base64 ?? '')
     setLoading(false)
 
     if (preserveScroll && scrollSaveRef.current > 0) {

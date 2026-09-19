@@ -55,8 +55,8 @@ Nenhuma linha de código antes desta fase (exceção: mudanças triviais como ty
 
 ## Padrões TypeScript
 
-- `strict: true` sempre. Zero `any` novo; tipo desconhecido → `unknown` e estreitar. **Achado aberto (COD-A2):** o projeto ainda tem `as any` pervasivo, principalmente por falta de `database.types.ts` gerado — ao tocar um arquivo com isso, corrigir a ocorrência tocada, não a base inteira de uma vez fora do escopo.
-- Tipos do banco gerados pelo Supabase (`supabase gen types typescript`) são a fonte da verdade — nunca redeclarar shapes de tabela na mão.
+- `strict: true` sempre. Zero `any` novo; tipo desconhecido → `unknown` e estreitar. **Achado aberto (COD-A2):** ainda há ~112 ocorrências de `any` em `app/`+`lib/` (eram 152 em 2026-09-19; as causadas por tipo de tabela/coluna faltando já saíram) — ao tocar um arquivo com isso, corrigir a ocorrência tocada, não a base inteira de uma vez fora do escopo.
+- `types/database.ts` é o espelho tipado do schema. Hoje é **mantido à mão** (sem `SUPABASE_ACCESS_TOKEN` no ambiente não dá para rodar `supabase gen types`): **toda migration que cria/altera tabela ou coluna atualiza esse arquivo na MESMA tarefa** (última sincronização: migration 0032). `as any` porque "a tabela/coluna não está nos types" é o sintoma de que essa regra foi esquecida — foi assim que `cobrancas_pix` e `mensagens_rapidas` passaram meses sem tipo, inclusive dentro do webhook que confirma pagamento PIX. Nunca redeclarar shapes de tabela em outro lugar.
 - Valores monetários: regra do projeto é **centavos como `number` inteiro**; formatar para R$ só na borda da UI. **Achado aberto (COD-A1):** o banco hoje usa `numeric(12,2)` e há `parseFloat` em produção — migrar é mudança de schema, alinhar antes (freio de emergência acima), não fazer de passagem.
 - Datas: armazenar em UTC (`timestamptz`); converter para `America/Sao_Paulo` apenas na exibição e na interpretação de "janela de envio". Toda lógica de agendamento declara timezone explicitamente.
 

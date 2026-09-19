@@ -45,9 +45,7 @@ export async function salvarMetaApiAction(
     const wabaId        = (formData.get('meta_waba_id')         as string)?.trim() || null
     const appSecret     = (formData.get('meta_app_secret')      as string)?.trim() || null
 
-    // meta_app_secret ainda não está em types/database.ts (achado SIN-M2 já
-    // conhecido — tipos gerados à mão estão defasados do schema real).
-    const { error } = await (supabase.from('configuracoes') as any).upsert(
+    const { error } = await supabase.from('configuracoes').upsert(
       { conta_id: contaId, meta_access_token: accessToken, meta_phone_number_id: phoneNumberId, meta_waba_id: wabaId, meta_app_secret: appSecret },
       { onConflict: 'conta_id' },
     )
@@ -102,7 +100,7 @@ export async function salvarEfiBankAction(
     const certBase64   = (formData.get('efi_cert_base64')   as string)?.trim() || null
     const sandbox      = formData.get('efi_sandbox') === 'true'
 
-    const { error } = await (supabase.from('configuracoes') as any).upsert(
+    const { error } = await supabase.from('configuracoes').upsert(
       {
         conta_id:          contaId,
         efi_client_id:     clientId,
