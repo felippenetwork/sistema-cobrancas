@@ -1,0 +1,169 @@
+# Auditoria Cobranx — 2026-09-19 (atualiza `auditoria-skills.md` de 2026-07-02)
+**Ramo:** `main` | **Esforço:** 6 agentes paralelos × 6 frentes, contra as skills já consolidadas (`.claude/skills/`, ver `project-skills-consolidadas` na memória)
+
+---
+
+## Sumário executivo
+
+Desde julho, boa parte do trabalho pesado foi feito de verdade: a baixa de parcela virou atômica (RPC `baixar_parcela`), os dois achados **CRÍTICOS** de segurança de julho (webhook Mercado Pago sem assinatura, descadastro sem autenticação) foram corrigidos corretamente, os headers de segurança (`next.config.ts`) existem, o padrão sistêmico de `conta_id` descartado foi corrigido em 7 das 8 ocorrências originais, e a suíte de testes saiu de 1 arquivo/0 teste financeiro para 64 testes passando.
+
+Mas a migração de arquitetura (worker/Baileys → uazapi direto) abriu buracos novos, o hábito de "ignorar `error`"/"colar `as any`" continua sendo reintroduzido em código novo, e a maior descoberta desta rodada não é um bug — é uma ausência estrutural: **o Cobranx não tem porta de entrada.** Não existe landing page, não existe cadastro self-service, não existe página de preços. Hoje só se vira cliente do Cobranx sendo cadastrado manualmente pelo Felippe.
+
+**Os 3 problemas mais graves agora:**
+
+1. **`POST /api/webhooks/whatsapp` não valida nenhuma assinatura/segredo** — qualquer requisição externa pode injetar mensagem/atendimento falso em qualquer conta. Pior achado técnico desta rodada (novo, crítico).
+2. **RN-C1 (parcela recorrente gerada no pagamento) está em produção em 3 lugares**, não 1 — as duas actions de baixa manual e o webhook EfiBank. Continua sem correção.
+3. **Não existe landing page, preço público nem cadastro self-service** — o domínio manda direto pro login. Isso não é um "achado de design", é a lacuna que mais impede vender hoje.
+
+---
+
+## FRENTE 1 — Segurança
+
+| ID | Status | Gravidade | Achado | Arquivo:linha |
+|---|---|---|---|---|
+| SEG-C1 | ✅ RESOLVIDO | — | Webhook Mercado Pago exige `MP_WEBHOOK_SECRET` e valida HMAC obrigatoriamente | `app/api/mercadopago/webhook/route.ts:11-40` |
+| SEG-C2 | ✅ RESOLVIDO | — | Descadastro exige token HMAC validado com `timingSafeEqual` | `app/api/descadastrar/[clienteId]/route.ts:16-31` |
+| SEG-A1 | ✅ RESOLVIDO | — | Headers de segurança completos (HSTS, CSP, X-Frame, nosniff, Referrer-Policy, Permissions-Policy) | `next.config.ts:1-39` |
+| SEG-A2 | ❌ ABERTO | ALTO | Nenhum rate limit em login/cadastro/recuperação/webhooks | — |
+| SEG-A3 | ❌ ABERTO (parcial) | ALTO | Zod só em 3 de ~18 `_actions`; resto valida na mão | `configuracoes/_actions/configuracoes.ts` e outros |
+| SEG-A4 | ❌ ABERTO | ALTO | Ações do tenant (cancelar, dar baixa, excluir) não geram auditoria — só ações de admin geram | `cobrancas.ts`, `parcelas.ts`, `clientes.ts` |
+| SEG-A5 | ❌ ABERTO, escopo maior | ALTO | Token uazapi **+ agora também** secret/certificado EfiBank e senha LookDefense em texto claro no banco | `configuracoes.ts:98-114`; `lib/lookdefense/renovar-imediato.ts:66-80` |
+| SEG-A6 | 🔁 MUDOU DE FORMA | ALTO | Webhook uazapi só valida segredo `if (webhookSecret)` — sem a env setada, aceita qualquer requisição (mesmo antipadrão do SEG-C1 antigo) | `app/api/webhook/uazapi/route.ts:10-18` |
+| SEG-M2 | ✅ RESOLVIDO | — | Middleware + layout bloqueiam conta suspensa/expirada | `middleware.ts:70-82` |
+| SEG-M3 | ❌ ABERTO | MÉDIO | Resposta bruta da uazapi devolvida ao client em falha de envio | `log/_actions/log.ts:298-301` |
+| SEG-M4 | ❌ ABERTO, piorou | MÉDIO | Erro do Supabase devolvido cru em quase toda action de configurações | `configuracoes.ts:27,54,81,116,143` |
+| SEG-M5 | 💤 dormente | BAIXO | `/health` do worker sem auth, mas worker não roda | `worker/src/index.ts:147` |
+| SEG-B1 | ❌ ABERTO | BAIXO | Senha mínima validada só no client | `app/(auth)/nova-senha/page.tsx:20-23` |
+| SEG-B2 | ❌ ABERTO | BAIXO | `pg_cron` apaga notificações após 10 dias sem auditoria | `0002_correcoes.sql:108-111` |
+| **SEG-N1** | 🆕 **CRÍTICO** | **CRÍTICO** | **`POST /api/webhooks/whatsapp` (Meta + uazapi) não valida NENHUMA assinatura/segredo — qualquer requisição externa injeta mensagem/atendimento falso em qualquer conta via `?conta=<uuid>` ou resolução por celular** | `app/api/webhooks/whatsapp/route.ts:24-146` |
+| SEG-N2 | 🆕 | MÉDIO | Webhook EfiBank autentica com o mesmo `CRON_SECRET` dos crons internos — vazar um compromete o outro | `app/api/webhooks/efibank/route.ts:11-14` |
+
+## FRENTE 2 — Isolamento multi-tenant
+
+| ID | Status | Gravidade | Achado | Arquivo:linha |
+|---|---|---|---|---|
+| ISO-A1 | ❌ ABERTO, escopo maior | ALTO | Dashboard/cobranças/caixa/log/clientes seguem sem `conta_id` explícito, só RLS | várias páginas |
+| ISO-A2, A3, A4, A6, A7, A8 | ✅ RESOLVIDOS | — | Todas as mutations corrigidas: `conta_id` explícito, RPC atômica, soft-delete via Server Action | `cobrancas.ts`, `meios.ts`, `parcelas.ts`, `clientes.ts` |
+| ISO-A5 | ❌ ABERTO | ALTO | `cobrarManualAction` não deriva `conta_id` da sessão, usa o da parcela | `parcelas.ts:21-51` |
+| ISO-M1 | ❌ ABERTO | MÉDIO | Vínculo instância→conta por convenção de nome, não consulta real | `log/_actions/log.ts:273-283` |
+| ISO-M2 | ❌ ABERTO | MÉDIO | Contagem de limite de clientes sem `conta_id` explícito | `clientes/_actions/clientes.ts:84-90` |
+| ISO-M3 | ✅ RESOLVIDO | — | Erro de `local_part` duplicado agora é genérico | `configuracoes.ts:162-164` |
+| ISO-B1 | 💤 dormente | BAIXO | Worker sem `conta_id`, mas morto | `worker/src/*` |
+| **ISO-N3** | 🆕 | **ALTO** | **`atualizarClienteAction` reintroduziu o padrão já corrigido no vizinho (`excluirClienteAction`): descarta `contaId`, filtra só por `id`, comentário diz "RLS garante"** | `clientes/_actions/clientes.ts:131-177` |
+| ISO-N4 | 🆕 | MÉDIO | `renovarLookDefenseImediato` usa service role e 4 UPDATEs em `baixas_externas` sem `conta_id` | `lib/lookdefense/renovar-imediato.ts:71-111` |
+
+## FRENTE 3 — Regras de negócio e financeiro
+
+| ID | Status | Gravidade | Achado | Arquivo:linha |
+|---|---|---|---|---|
+| **RN-C1** | ❌ **ABERTO, em 3 lugares** (não 1) | **CRÍTICO** | Geração imediata de parcela recorrente na baixa existe em `baixarParcelaAction`, `baixarParcelaComConfirmacaoAction` **e** no webhook EfiBank — o comentário no topo do arquivo dizendo "NÃO gerar aqui" contradiz o próprio código abaixo | `cobrancas/_actions/parcelas.ts:146-191,320-351`; `webhooks/efibank/route.ts:111-153` |
+| RN-A1 | ✅ RESOLVIDO | — | Baixa agora é RPC transacional (`baixar_parcela`, migration 0013) — parcela+lançamento+cancelamento em uma transação | `0013_baixar_parcela_rpc.sql` |
+| RN-A2 | 🔁 melhorou | BAIXO | Passos secundários (notificação, próxima parcela) ainda fora da transação mas agora logam erro | `parcelas.ts` |
+| RN-M1, M2 | ✅ RESOLVIDOS | — | Boas-vindas respeita config de canal; janela/intervalo lidos de `configuracoes` no caminho ativo | `cobrancas.ts:119-137`; `cron/whatsapp-uazapi/route.ts:229-247` |
+| RN-M3 | 🔁 **piorou** | MÉDIO | Cálculo de vencimento duplicado agora em **3 lugares** (`lib/utils/parcelas.ts`, `worker/src/scheduler.ts` morto, e uma terceira cópia própria em `app/api/cron/scheduler/route.ts`, que é o ativo) | `cron/scheduler/route.ts:42-50` |
+| RN-M4 | ✅ resolvido (era falso positivo) | — | Índice único já cobre `pagamento_confirmado` | `0003_fix_idempotencia_manual.sql` |
+| COD-A1 | ❌ ABERTO | ALTO | `numeric(12,2)` + `parseFloat` continuam, dívida consciente não migrada | `lib/utils/format.ts` |
+| **RN-N1** | 🆕 (gap de documentação) | MÉDIO | Já existe limite de plano real em produção (`contas.limite_clientes`, default 100) — a skill dizia `[A DEFINIR]` como se nada existisse | `0001_schema_inicial.sql:64`; `clientes/_actions/clientes.ts:18-30` |
+
+## FRENTE 4 — Qualidade de código e sincronização
+
+| ID | Status | Gravidade | Achado |
+|---|---|---|---|
+| COD-A2 | ❌ ABERTO, piorou | ALTO | 152 ocorrências de `any`/`as any` em `app/`+`lib/` (top: `enviar-imediato.ts`, `atendimento/renovar.ts`, `cron/whatsapp/route.ts`) |
+| COD-M1 | 🔁 migrou pro código vivo | ALTO | Update de status pós-envio no cron ignora `error` — falha de UPDATE deixa job preso em "processando" pra sempre |
+| COD-M3, M4, M6 | ✅ RESOLVIDOS | — | Erros verificados e logados com contexto |
+| COD-M5 | ✅ RESOLVIDO | — | `order()` explícito na listagem principal |
+| COD-B1 | 🔁 migrou | BAIXO | `resolverVariaveis` não checa erro — falha vira placeholder vazio silencioso |
+| COD-B2 | 🔁 parcial | BAIXO | Duplicação app-side eliminada; resta só cópia no worker morto |
+| SIN-C1, C2, A1, A2, A3, M1 | ✅ RESOLVIDOS | — | Tipos de notificação atualizados, `.env.example` sincronizado, token gravado pela arquitetura direta, headers consistentes, policy de UPDATE criada |
+| **SIN-M2** | ❌ **ABERTO, pior do que descrito** | ALTO | `types/database.ts` é mantido à mão, desatualizado — faltam `cobrancas_pix` e `mensagens_rapidas` (usadas em produção via `supabase as any` **dentro do webhook que confirma pagamento PIX**) | `types/database.ts`; `webhooks/efibank/route.ts:20-21` |
+| PERF-A1 | ✅ resolvido (majoritário) | — | N+1+N do scheduler resolvido com queries batched |
+| PERF-M1, M2, B1 | ❌ ABERTOS, migraram | MÉDIO/BAIXO | Índice sem `canal`, inserts sequenciais, loop serial de contas — mesmos gargalos, agora dentro do cron de 1min |
+| PERF-B2 | ✅ RESOLVIDO | — | Query redundante removida |
+
+**Segredo commitado:** nenhum encontrado (`.gitignore` corretos, busca por padrões de chave não achou nada). **TODO/FIXME em produção:** zero.
+
+## FRENTE 5 — Testes
+
+| ID | Status | Gravidade | Achado |
+|---|---|---|---|
+| TST-C1 | ❌ ABERTO | ALTO | 64 testes hoje (era 0 relevante), mas só cobrem funções puras + RLS de 2 tabelas — zero teste de action/cron/webhook |
+| TST-C2 | ✅ RESOLVIDO | — | `calcularVencimento` com 7 casos, incluindo dia 31→fev bissexto/não-bissexto |
+| **TST-C3** | ❌ **ABERTO** | **ALTO** | RPC `baixar_parcela` existe mas **nenhum teste** força falha no meio ou confirma atomicidade |
+| TST-C4 | ✅ RESOLVIDO | — | Relógio controlado com `vi.useFakeTimers()` |
+| **TST-C5** | ❌ **CRÍTICO, migrado** | **CRÍTICO** | Zero teste nas rotas de cron ativas (`whatsapp`, `whatsapp-uazapi`, `scheduler`); um bug real de duplicidade de envio já foi corrigido em produção (commit `3a13093`) **sem nunca ganhar teste de regressão** |
+| TST-A1 | ❌ ABERTO | ALTO | Só `clientes` e `contas` têm teste de isolamento — **faltam 20 tabelas** (parcelas, notificacoes_enviadas, lancamentos, conexoes, cobrancas_pix...) |
+| TST-A2 | ❌ ABERTO | ALTO | Playwright não instalado, zero E2E |
+
+`vitest run`: **64/64 passando.**
+
+## FRENTE 6 — Design ("cara de IA")
+
+| ID | Status | Gravidade | Achado |
+|---|---|---|---|
+| DES-A1 | ❌ ABERTO | ALTO | Cores hardcoded em `conexao/page.tsx` sobreviveram à reescrita pra uazapi |
+| **DES-A2** | ❌ **ABERTO, piorou** | ALTO | **Zero `loading.tsx`/`error.tsx` em todas as 22 rotas** (era 7 en julho) |
+| DES-M1 | ❌ ABERTO, piorou | MÉDIO | `shadow-2xl` agora em 11 pontos (era 3) |
+| DES-M2 a M6 | ❌ ABERTOS | MÉDIO/BAIXO | Dropdown com shadow-xl, badge sempre verde, status cru, confirmação sem descrever impacto, poucos `aria-label` (25 no app todo) |
+| DES-B1, B2 | ✅ RESOLVIDOS | — | Badge `rounded-full` (regra da skill mudou pra refletir isso), zero `select('*')` |
+| **DES-N1** | 🆕 | ALTO | **`mensagens-rapidas/page.tsx` inteira em tema claro** dentro do produto dark, sem nenhuma variante — provavelmente ilegível |
+| **DES-N2** | 🆕 | ALTO | `app/privacidade/page.tsx` confirmado 100% `style={}` inline, tema claro — única página institucional fora do padrão |
+| DES-N3 | 🆕 | MÉDIO | Cores Tailwind cruas em mais 6 arquivos (`wa-templates`, `configuracoes`, `atendimento`, `disparos`) |
+| DES-N4 | 🆕 | BAIXO | Roxo/violeta usado como cor de categoria, proibido |
+| **DES-N5** | 🆕 | **ALTO** | **Mensagens reais de WhatsApp** (`app/api/cron/whatsapp/route.ts`) usam emoji repetido em excesso (`🎉...🎉`, `🤩...🤩`, `🥳...🥳`) — comunicação de marca real ao cliente final, não só UI interna. Nota: os templates padrão em `lib/notificacao/tipos.ts` (editáveis pelo operador) estão bem melhores, só com 1 emoji a mais do recomendado — são dois codepaths diferentes com disciplina diferente |
+| DES-N9 | 🆕 (estratégico) | **ALTO** | **Não existe `app/page.tsx` na raiz** — middleware redireciona todo visitante deslogado direto pra `/login`. Não há hero, prova social, preços, nem footer institucional porque a página não existe |
+| DES-N8 | 🆕 | — | Confirma: Termos de Uso não existe em nenhum lugar |
+
+---
+
+## O que mais falta pra "SaaS profissional pronto pra vender" (síntese das 3 frentes comerciais)
+
+Isso é mais estrutural do que qualquer bug encontrado:
+
+1. **Não existe landing page, preço público nem cadastro self-service.** Hoje o Cobranx só ganha cliente novo se o Felippe cadastrar manualmente pelo `/admin`. Não dá pra "vender" um produto que ninguém consegue assinar sozinho.
+2. **Cancelamento/reativação de assinatura também é 100% manual** — a tela de plano expirado literalmente manda "entrar em contato com o suporte".
+3. **Termos de Uso não existe.** Política de Privacidade existe mas está com tema claro quebrado e cita só "WhatsApp Business API (Meta)", desatualizada frente à arquitetura real (uazapi).
+4. **Nenhum CNPJ/razão social visível em lugar nenhum do produto.**
+5. Favicon é o padrão do Next.js; não há `error.tsx`/`global-error.tsx` de marca; sem `sitemap.xml`/`robots.txt`/Open Graph.
+6. Copy da UI é tecnicamente correta em português (nenhum erro de concordância/crase achado), mas genérica em pontos (empty state de clientes sem CTA, e-mail de boas-vindas "Bem-vindo! Cadastro realizado"). As mensagens de cobrança ao cliente final, essas sim, estão com tom bom — é o ponto mais maduro do produto hoje.
+
+---
+
+## Plano de ondas (revisado)
+
+### ONDA 0 — Segurança ativa agora (fazer antes de qualquer coisa)
+1. **SEG-N1** — assinar/autenticar `POST /api/webhooks/whatsapp` (Meta tem `X-Hub-Signature-256`; uazapi precisa de segredo compartilhado próprio, igual ao `webhook/uazapi` já tem)
+2. **SEG-A6** — tornar `UAZAPI_WEBHOOK_SECRET` obrigatório (falhar se ausente, não aceitar sem validar)
+3. **ISO-N3** — corrigir `atualizarClienteAction` (mesmo padrão do ISO-A7 vizinho)
+4. **RN-C1** — decisão do Felippe: remover a geração imediata dos 3 lugares e confiar só no scheduler (ver skill `regras-financeiras` §3.2)
+
+### ONDA 1 — Risco de dinheiro e mensagem duplicada
+1. **TST-C5 + TST-C3** — teste de idempotência do cron de WhatsApp e de atomicidade da RPC de baixa (o bug de duplicidade já aconteceu uma vez em produção, commit `3a13093`, sem prova de regressão)
+2. **SIN-M2** — gerar `database.types.ts` de verdade (`supabase gen types typescript`), eliminar `supabase as any` no webhook EfiBank
+3. **COD-M1** — tratar erro do UPDATE de status pós-envio no cron (job não pode ficar preso em "processando")
+4. **SEG-A5** — criptografar em repouso: token uazapi, secret/certificado EfiBank, senha LookDefense
+
+### ONDA 2 — A porta de entrada (maior alavanca comercial)
+1. Landing page (`app/page.tsx`) seguindo `design-system` §6 + `copywriting-conversao`
+2. Página de preços com os limites reais de plano (hoje só existe `limite_clientes = 100` hardcoded — decisão de produto: virar tabela de planos de verdade primeiro)
+3. Cadastro self-service (hoje é só admin-provisionado)
+4. Termos de Uso (não existe) + reestilizar Política de Privacidade pro tema dark + atualizar conteúdo (uazapi, EfiBank, Mercado Pago)
+5. Cancelamento de assinatura self-service
+6. Favicon, `error.tsx`/`global-error.tsx` de marca, meta tags/OG, `sitemap.xml`
+
+### ONDA 3 — Cara de IA e polimento visual
+1. `loading.tsx`/`error.tsx` em todas as 22 rotas (hoje zero)
+2. `mensagens-rapidas/page.tsx` — reescrever pro tema dark (está inteira fora do padrão)
+3. Cores hardcoded (`conexao`, `wa-templates`, `configuracoes`, `atendimento`, `disparos`) → tokens
+4. Emoji em excesso nas mensagens reais de `app/api/cron/whatsapp/route.ts` (unificar com o padrão mais comedido de `lib/notificacao/tipos.ts`)
+5. `shadow-2xl`/`shadow-xl` → `shadow-sm`; roxo/violeta → remover; `aria-label` em botões-ícone
+
+### ONDA 4 — Dívida técnica de fundo
+1. Rate limiting (SEG-A2), Zod em todas as actions (SEG-A3), auditoria de ações do tenant (SEG-A4)
+2. Reduzir os 152 `any`/`as any` (COD-A2), unificar o cálculo de vencimento nas 3 cópias (RN-M3)
+3. Testes de isolamento nas 20 tabelas restantes (TST-A1), instalar Playwright e cobrir os 5 fluxos vitais (TST-A2)
+4. Migrar dinheiro para centavos inteiros (COD-A1) — mudança de schema, alinhar antes
+
+---
+
+*Este documento substitui `auditoria-skills.md` (2026-07-02) como referência corrente. O arquivo antigo fica preservado como histórico.*

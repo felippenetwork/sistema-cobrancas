@@ -39,11 +39,11 @@ Suíte verde não prova que a suíte protege — prova só que, hoje, nada quebr
 
 ## Obrigatórios (o contrato de qualidade do produto)
 
-1. **Cálculo financeiro** (`calcularValorAtualizado`, `calcularVencimento`): multa aplicada 1x; juros pro-rata por dia; centavos exatos sem float; parcela com vencimento dia 31 → último dia de fevereiro; valores zero e negativos rejeitados. **Achado aberto (TST-C2): `calcularVencimento` ainda sem teste** — prioridade ao tocar essa função.
+1. **Cálculo financeiro** (`calcularValorAtualizado`, `calcularVencimento`): multa aplicada 1x; juros pro-rata por dia; centavos exatos sem float; parcela com vencimento dia 31 → último dia de fevereiro; valores zero e negativos rejeitados. `calcularVencimento` já tem 7 casos cobertos em `tests/utils.test.ts` (TST-C2 resolvido, 2026-09-19) — manter esse padrão de cobertura ao alterar a função.
 2. **Régua**: datas geradas corretas em America/Sao_Paulo (incluindo virada de dia/UTC); notificação fora da janela reagendada, nunca perdida; **baixa/cancelamento cancela TODAS as futuras na mesma transação** (o teste mais importante do produto).
 3. **Máquina de estados**: transições inválidas rejeitadas (paga não volta a pendente; cancelada é final).
-4. **Idempotência**: processar o mesmo evento de cron ou webhook 2x = 1 mensagem enviada, 1 baixa, 1 registro. **Achado aberto (RN-A1): baixa de parcela não é atômica** (6 operações sequenciais sem transação) — cobrir com teste que force falha no meio da sequência antes de considerar a RPC de baixa confiável.
-5. **Isolamento de conta e provisionamento**: já especificados em `isolamento-de-contas` — rodam na mesma suíte. **Achado aberto (TST-A1): RLS testado só em `clientes` e `contas`** — expandir para `parcelas`, `lancamentos`, `notificacoes_enviadas` é prioridade alta, não opcional.
+4. **Idempotência**: processar o mesmo evento de cron ou webhook 2x = 1 mensagem enviada, 1 baixa, 1 registro. A baixa já é atômica via RPC Postgres (`baixar_parcela`, migration 0013 — RN-A1 resolvido), mas **nenhum teste força falha no meio da RPC nem confirma a atomicidade** (TST-C3, ainda aberto) — prioridade alta. Mais grave ainda: **zero teste cobre a idempotência do cron de WhatsApp** (`app/api/cron/whatsapp-uazapi`, `app/api/cron/whatsapp`) — um bug real de envio duplicado já foi corrigido em produção (commit `3a13093`, "atomic claim em notificacoes") sem nunca ganhar um teste de regressão (TST-C5).
+5. **Isolamento de conta e provisionamento**: já especificados em `isolamento-de-contas` — rodam na mesma suíte. **Achado aberto (TST-A1): RLS testado só em `clientes` e `contas`, faltam ~20 tabelas** (`parcelas`, `notificacoes_enviadas`, `lancamentos`, `conexoes`, `cobrancas_pix`...) — expandir é prioridade alta, não opcional. Ver `docs/auditoria-2026-09-19.md` para a lista completa.
 6. **Regra do bug (regressão):** todo bug corrigido ganha, na mesma tarefa, um teste que falharia antes da correção.
 
 ## Padrões de escrita

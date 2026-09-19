@@ -1,3 +1,5 @@
+> **⚠️ Superseded por [`auditoria-2026-09-19.md`](./auditoria-2026-09-19.md).** Este documento fica só como histórico — vários achados aqui já foram corrigidos, outros pioraram ou migraram para código novo (arquitetura de WhatsApp mudou de worker/Baileys para uazapi direto). Usar o arquivo novo como referência corrente.
+
 # Auditoria Cobranx — PROMPT MESTRE v2
 **Data:** 2026-07-02 | **Ramo:** `auditoria-skills` | **Esforço:** 6 agentes paralelos × 8 frentes
 

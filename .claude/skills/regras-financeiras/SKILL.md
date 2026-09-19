@@ -49,7 +49,7 @@ description: Fonte única da verdade das regras de negócio do Cobranx — gera�
 ### 3.2 Baixa automática via PIX (EfiBank) — integração real, não documentada até esta revisão
 - `app/api/webhooks/efibank/route.ts` recebe notificação de PIX pago da EfiBank e chama a mesma RPC `baixar_parcela` automaticamente pelo `txid` em `cobrancas_pix`, com idempotência (marca `concluida` antes de processar).
 - Ao confirmar, dispara notificação `pagamento_confirmado` (se o canal estiver ativo na conta) e, se o cliente tiver `login_externo`/`tipo_integracao`, aciona a renovação LookDefense (ver §5).
-- **⚠️ Achado ainda não corrigido (RN-C1, já registrado em `docs/auditoria-skills.md` de 2026-07-02):** este webhook gera a próxima parcela recorrente IMEDIATAMENTE quando `abertas === 0`, **violando diretamente a regra §2.2**. Isso pode fazer o lembrete D-5/D-3 do próximo ciclo nunca disparar, se a baixa acontecer perto da data em que o scheduler geraria a parcela de qualquer forma. **Não copiar esse padrão em código novo.** Corrigir (remover a geração imediata do webhook e depender só do scheduler) é uma mudança em lógica de pagamento — passa pelos freios de emergência da skill `codigo-cobranx`, alinhar com o Felippe antes de mexer.
+- **⚠️ Achado ainda não corrigido e maior do que se pensava (RN-C1 — ver `docs/auditoria-2026-09-19.md`):** a geração imediata da próxima parcela recorrente ao dar baixa (`abertas === 0`) existe em **3 lugares**, não só neste webhook: `baixarParcelaAction` e `baixarParcelaComConfirmacaoAction` (`app/(app)/cobrancas/_actions/parcelas.ts`) fazem exatamente a mesma coisa — inclusive com um comentário no topo do arquivo dizendo "NÃO gerar próxima parcela recorrente aqui" que o próprio código abaixo contradiz. Isso viola diretamente a regra §2.2 e pode fazer o lembrete D-5/D-3 do próximo ciclo nunca disparar. **Não copiar esse padrão em código novo.** Corrigir (remover os 3 blocos e depender só de `gerarParcelasRecorrentes` em `app/api/cron/scheduler/route.ts`, que já implementa a regra corretamente) é uma mudança em lógica de pagamento em três pontos — passa pelos freios de emergência da skill `codigo-cobranx`, alinhar com o Felippe antes de mexer.
 - EfiBank é usada para cobrança PIX do **cliente final** (quem deve). Não confundir com Mercado Pago, que cobra a **assinatura do SaaS** do dono da conta (ver §6).
 
 ## 4. Valor da parcela
@@ -102,8 +102,9 @@ Todos os indicadores de período são do **mês selecionado**. A tela abre no **
 
 Cobra o **dono da conta** (quem usa o Cobranx), não o cliente final — não confundir com EfiBank (§3.2).
 
-- `[CONFIRMAR]` Entrada de contas: cadastro self-service aberto OU provisionamento apenas pelo admin?
-- `[A DEFINIR]` Tabela de planos × limites (preencher com o Felippe antes de qualquer tela de upgrade/pricing):
+- `[CONFIRMAR]` Entrada de contas: **hoje é só provisionamento manual pelo admin** (`app/admin/contas/nova`) — não existe cadastro self-service em lugar nenhum do produto (confirmado em auditoria de 2026-09-19). Se a meta é vender sem depender do Felippe cadastrar cada cliente, isso é a lacuna nº 1, maior que qualquer ajuste de UI.
+- Já existe um limite real em produção, não documentado até agora: `contas.limite_clientes` (default 100), verificado em `criarClienteAction` antes de cadastrar cliente novo. Isso é "1 plano só" hardcoded — não uma tabela de planos.
+- `[A DEFINIR]` Tabela de planos × limites de verdade (preencher com o Felippe antes de qualquer tela de upgrade/pricing):
 
 | Plano | Preço | Cobranças ativas | Clientes | Instâncias WhatsApp | Mensagens/mês |
 |---|---|---|---|---|---|
@@ -128,7 +129,7 @@ Regra já documentada aqui que MUDA (não uma lacuna nova) exige responder, ante
 3. Encontrou `[A DEFINIR]`/`[CONFIRMAR]` no caminho → seguir o protocolo do topo deste documento.
 
 ## Antipadrões — NÃO fazer
-- ❌ Gerar parcela recorrente no pagamento (quebra lembretes) — inclusive no webhook EfiBank, que já faz isso hoje (§3.2, corrigir com alinhamento prévio).
+- ❌ Gerar parcela recorrente no pagamento (quebra lembretes) — inclusive nas duas actions de baixa manual E no webhook EfiBank, que já fazem isso hoje em 3 lugares (§3.2, corrigir com alinhamento prévio).
 - ❌ `float` para dinheiro.
 - ❌ Indicador "a receber" somando todas as parcelas em vez de só as do mês.
 - ❌ Dois caminhos de baixa com comportamento diferente (manual e PIX chamam a mesma RPC — manter assim).
@@ -144,4 +145,5 @@ Regra já documentada aqui que MUDA (não uma lacuna nova) exige responder, ante
 - 2026-07-02 — Janela de envio 09:00–20:00 BRT com intervalos aleatórios. [decisão de projeto original]
 - 2026-09-18 — Documentadas EfiBank (baixa PIX automática) e LookDefense (renovação IPTV) como integrações reais desta skill, antes não documentadas. RN-C1 (geração de parcela no webhook EfiBank) permanece violação conhecida, não corrigida nesta revisão — aguarda decisão explícita.
 - 2026-09-18 — Twilio removido do código (app, webhook, configurações) por decisão do Felippe; não é mais um canal do produto.
+- 2026-09-19 — Auditoria completa (`docs/auditoria-2026-09-19.md`) confirmou RN-C1 em 3 pontos (não 1) e achou limite de plano real já em produção (`limite_clientes`) que não estava documentado. Confirmado também que não existe cadastro self-service — toda conta é provisionada manualmente pelo admin.
 ```
