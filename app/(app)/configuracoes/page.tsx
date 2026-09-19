@@ -474,7 +474,7 @@ export default function ConfiguracoesPage() {
               <li>Baixe o certificado <strong>.p12</strong> em Meus Certificados</li>
               <li>Converta para Base64: <code className="bg-muted px-1 rounded">base64 -i certificado.p12</code> (Mac/Linux) ou use um conversor online</li>
               <li>Informe sua chave PIX (CPF/CNPJ, telefone, e-mail ou chave aleatória)</li>
-              <li>Configure o webhook na EfiBanK: URL → <code className="bg-muted px-1 rounded">https://www.cobranx.site/api/webhooks/efibank?token=SEU_CRON_SECRET</code></li>
+              <li>Configure o webhook na EfiBanK (o token é o valor de EFIBANK_WEBHOOK_SECRET na Vercel; se essa variável não existir, use o CRON_SECRET): URL → <code className="bg-muted px-1 rounded">https://www.cobranx.site/api/webhooks/efibank?token=SEU_TOKEN</code></li>
             </ol>
           </div>
 

@@ -26,10 +26,15 @@ export type FalhaInjetada = {
   vezes: number
 }
 
+export type ResultadoRpc = { data: any; error: { message: string } | null }
+
 export class FakeDb {
   readonly tabelas: Record<string, Linha[]>
   readonly consultas: Consulta[] = []
   falhas: FalhaInjetada[] = []
+  /** Funções RPC: cada teste registra a implementação (em JS) da função SQL que quer simular. */
+  rpcs: Record<string, (args: any) => Promise<ResultadoRpc> | ResultadoRpc> = {}
+  readonly chamadasRpc: { nome: string; args: any }[] = []
   private seq = 0
 
   constructor(tabelas: Record<string, Linha[]> = {}) {
@@ -46,7 +51,15 @@ export class FakeDb {
   }
 
   cliente() {
-    return { from: (tabela: string) => this.construtor(tabela) }
+    return {
+      from: (tabela: string) => this.construtor(tabela),
+      rpc: async (nome: string, args: any): Promise<ResultadoRpc> => {
+        this.chamadasRpc.push({ nome, args })
+        const impl = this.rpcs[nome]
+        if (!impl) throw new Error(`FakeDb: rpc "${nome}" não registrada`)
+        return impl(args)
+      },
+    }
   }
 
   private construtor(tabela: string) {
@@ -54,10 +67,12 @@ export class FakeDb {
     let inserir: Linha[] = []
     let conflito: string[] = []
     let retornaLinhas = false
+    let contar = false
+    let soContagem = false
     let ordem: { col: string; asc: boolean } | undefined
     let limite: number | undefined
 
-    const executar = async (unica: boolean): Promise<{ data: any; error: any }> => {
+    const executar = async (unica: boolean): Promise<{ data: any; error: any; count?: number }> => {
       this.consultas.push({ ...consulta, filtros: [...consulta.filtros] })
 
       const falha = this.falhas.find(f =>
@@ -109,6 +124,7 @@ export class FakeDb {
 
       const devolve = consulta.operacao === 'select' || retornaLinhas
       if (!devolve) return { data: null, error: null }
+      if (contar && soContagem) return { data: null, error: null, count: resultado.length }
       if (unica) {
         if (resultado.length > 1) return { data: null, error: { message: 'mais de uma linha', code: 'PGRST116' } }
         return { data: resultado[0] ?? null, error: null }
@@ -117,7 +133,12 @@ export class FakeDb {
     }
 
     const api: any = {
-      select() { if (consulta.operacao !== 'select') retornaLinhas = true; return api },
+      select(_colunas?: string, opts?: { count?: string; head?: boolean }) {
+        if (consulta.operacao !== 'select') retornaLinhas = true
+        if (opts?.count) contar = true
+        if (opts?.head) soContagem = true
+        return api
+      },
       update(patch: Linha) { consulta.operacao = 'update'; consulta.patch = patch; return api },
       insert(linhas: Linha | Linha[]) { consulta.operacao = 'insert'; inserir = Array.isArray(linhas) ? linhas : [linhas]; return api },
       eq(col: string, val: unknown) { consulta.filtros.push({ tipo: 'eq', col, val }); return api },

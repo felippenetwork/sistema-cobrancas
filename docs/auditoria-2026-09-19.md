@@ -9,11 +9,13 @@ Desde julho, boa parte do trabalho pesado foi feito de verdade: a baixa de parce
 
 Mas a migração de arquitetura (worker/Baileys → uazapi direto) abriu buracos novos, o hábito de "ignorar `error`"/"colar `as any`" continua sendo reintroduzido em código novo, e a maior descoberta desta rodada não é um bug — é uma ausência estrutural: **o Cobranx não tem porta de entrada.** Não existe landing page, não existe cadastro self-service, não existe página de preços. Hoje só se vira cliente do Cobranx sendo cadastrado manualmente pelo Felippe.
 
-**Os 3 problemas mais graves agora:**
+**Os 3 problemas mais graves — situação ao fim de 2026-09-19:**
 
-1. **`POST /api/webhooks/whatsapp` não valida nenhuma assinatura/segredo** — qualquer requisição externa pode injetar mensagem/atendimento falso em qualquer conta. Pior achado técnico desta rodada (novo, crítico).
-2. **RN-C1 (parcela recorrente gerada no pagamento) está em produção em 3 lugares**, não 1 — as duas actions de baixa manual e o webhook EfiBank. Continua sem correção.
-3. **Não existe landing page, preço público nem cadastro self-service** — o domínio manda direto pro login. Isso não é um "achado de design", é a lacuna que mais impede vender hoje.
+1. ~~`POST /api/webhooks/whatsapp` sem validação de assinatura~~ — **resolvido** (Meta: `X-Hub-Signature-256` com o App Secret da conta; uazapi: segredo compartilhado; 10 testes).
+2. **Qualquer atendente lê e altera as credenciais da conta (SEG-N4)** — inclusive as do EfiBank, o que permite desviar PIX. Aberto, precisa de decisão.
+3. **Não existe landing page, preço público nem cadastro self-service** — o domínio manda direto pro login. É a lacuna que mais impede vender.
+
+Outros pontos que pedem decisão sua: **RN-C1** (reanalisado: é decisão de produto, ver `regras-financeiras` §2.2) e **SEG-N5** (webhook EfiBank confia no corpo da notificação; confirmar via API exige o escopo `cob.read`).
 
 ---
 
@@ -36,7 +38,6 @@ Mas a migração de arquitetura (worker/Baileys → uazapi direto) abriu buracos
 | SEG-B1 | ❌ ABERTO | BAIXO | Senha mínima validada só no client | `app/(auth)/nova-senha/page.tsx:20-23` |
 | SEG-B2 | ❌ ABERTO | BAIXO | `pg_cron` apaga notificações após 10 dias sem auditoria | `0002_correcoes.sql:108-111` |
 | **SEG-N1** | ✅ **RESOLVIDO (2026-09-19)** | — | Webhook agora valida `X-Hub-Signature-256` da Meta com o `meta_app_secret` da conta (migration 0032) e o segredo compartilhado da uazapi; 10 testes de regressão em `tests/webhook-whatsapp-auth.test.ts` (7 falham contra a versão antiga, provado com git stash) | `app/api/webhooks/whatsapp/route.ts` |
-| SEG-N2 | 🆕 | MÉDIO | Webhook EfiBank autentica com o mesmo `CRON_SECRET` dos crons internos — vazar um compromete o outro | `app/api/webhooks/efibank/route.ts:11-14` |
 
 ## FRENTE 2 — Isolamento multi-tenant
 
@@ -56,7 +57,7 @@ Mas a migração de arquitetura (worker/Baileys → uazapi direto) abriu buracos
 
 | ID | Status | Gravidade | Achado | Arquivo:linha |
 |---|---|---|---|---|
-| **RN-C1** | ❌ **ABERTO, em 3 lugares** (não 1) | **CRÍTICO** | Geração imediata de parcela recorrente na baixa existe em `baixarParcelaAction`, `baixarParcelaComConfirmacaoAction` **e** no webhook EfiBank — o comentário no topo do arquivo dizendo "NÃO gerar aqui" contradiz o próprio código abaixo | `cobrancas/_actions/parcelas.ts:146-191,320-351`; `webhooks/efibank/route.ts:111-153` |
+| **RN-C1** | ⚠️ **REANALISADO (2026-09-19) — é decisão de produto, não bug simples** | **DECISÃO** | Eram "3 lugares", na verdade **4** (`baixarParcelaAction`, `baixarParcelaComConfirmacaoAction`, `renovarParcelaAction`, webhook EfiBank) que geram a próxima parcela na baixa — deliberadamente ("garante UX imediata"; o modal tem "próximo vencimento" editável que depende disso). E o scheduler **não** gera por data como a regra escrita afirma: só cria a próxima quando não há NENHUMA parcela aberta. Remover a geração na baixa (minha proposta anterior) quebraria o modal e a contagem de "Cobranças ativas" até o cron rodar. Nada foi alterado. Opções e custos em `regras-financeiras` §2.2 | `cobrancas/_actions/parcelas.ts`, `atendimento/_actions/renovar.ts`, `webhooks/efibank/route.ts`, `cron/scheduler/route.ts` |
 | RN-A1 | ✅ RESOLVIDO | — | Baixa agora é RPC transacional (`baixar_parcela`, migration 0013) — parcela+lançamento+cancelamento em uma transação | `0013_baixar_parcela_rpc.sql` |
 | RN-A2 | 🔁 melhorou | BAIXO | Passos secundários (notificação, próxima parcela) ainda fora da transação mas agora logam erro | `parcelas.ts` |
 | RN-M1, M2 | ✅ RESOLVIDOS | — | Boas-vindas respeita config de canal; janela/intervalo lidos de `configuracoes` no caminho ativo | `cobrancas.ts:119-137`; `cron/whatsapp-uazapi/route.ts:229-247` |
@@ -84,7 +85,10 @@ Mas a migração de arquitetura (worker/Baileys → uazapi direto) abriu buracos
 | **SIN-M2** | ✅ **RESOLVIDO na prática (2026-09-19)** — mas ainda à mão | — | `types/database.ts` atualizado com o schema real até a migration 0032: tabelas `cobrancas_pix` e `mensagens_rapidas`, colunas `efi_*`, `meta_app_secret`, `meta_template_*`, `midia_url`. O `supabase as any` do webhook EfiBank saiu. **Continua mantido à mão** (o cabeçalho do arquivo agora diz isso e manda atualizar na mesma tarefa de toda migration). Para regenerar do banco real falta um `SUPABASE_ACCESS_TOKEN` — `npx supabase gen types typescript --project-id jbtqrxnpxisnboiqwyrb` | `types/database.ts` |
 | **COD-N4** | ✅ **RESOLVIDO (2026-09-19)** | ALTO | `criarCobrancaPix` ignorava o erro ao gravar em `cobrancas_pix` e entregava o código PIX mesmo assim; quando o cliente pagasse, o webhook não acharia o `txid` e o pagamento ficaria sem baixa. Agora devolve erro e não entrega o código. Teste falha contra a versão antiga | `lib/efibank/pix.ts` |
 | **SEG-N4** | ❌ **ABERTO — precisa da sua decisão** | **ALTO** | **Qualquer membro da equipe (inclusive `atendente`) lê e altera as credenciais da conta.** A migration 0020 fez `conta_do_usuario()` incluir `membros_conta`, e as policies de `configuracoes` (`cfg_sel/ins/upd`) usam essa função: pelo client anon do navegador um atendente lê `meta_access_token`, `meta_app_secret`, `efi_client_secret`, `efi_cert_base64` (certificado .p12), `ld_password` e pode **trocar as credenciais EfiBank pelas de outra conta — desviando os PIX dos clientes**. A separação de papéis existe só na interface | `supabase/migrations/0020_multi_atendimento.sql:154`, `0001_schema_inicial.sql:364`; `configuracoes/page.tsx` lê tudo no browser |
-| **PAG-N1** | ❌ **ABERTO — precisa da sua decisão (mesmo webhook do RN-C1)** | **ALTO** | Webhook EfiBank marca `cobrancas_pix` como `concluida` **antes** de chamar `baixar_parcela`. Se a RPC falhar (banco fora, timeout), a cobrança fica `concluida` com a parcela em aberto, o webhook devolve 200 mesmo assim (a EfiBank não reenvia) e a repetição é ignorada por `status === 'concluida'`: **cliente pagou, parcela continua aberta e os lembretes seguem sendo enviados**. Correção proposta: chamar a RPC primeiro (ela já é idempotente), só marcar `concluida` depois de sucesso ou de "já paga", e responder 5xx em falha transitória para a EfiBank reenviar | `webhooks/efibank/route.ts:40-57` |
+| **PAG-N1** | ✅ **RESOLVIDO (2026-09-19)** | — | Webhook EfiBank agora dá a baixa ANTES de marcar `concluida`; falha transitória responde 5xx (a EfiBank reenvia); parcela já paga encerra a cobrança sem repetir efeitos; PIX pago sem parcela vira erro para revisão manual. 26 testes (7 falham contra a versão anterior) | `webhooks/efibank/route.ts`, `tests/webhook-efibank.test.ts` |
+| **SEG-N2** | ✅ **RESOLVIDO (opt-in) (2026-09-19)** | MÉDIO | Webhook aceita segredo próprio `EFIBANK_WEBHOOK_SECRET` (comparação em tempo constante); quando configurado o `CRON_SECRET` deixa de valer nele. Sem a variável continua aceitando `CRON_SECRET` (legado) — **para fechar de vez: criar a variável na Vercel e trocar o `?token=` na URL cadastrada na EfiBank** | `webhooks/efibank/route.ts`, `.env.example` |
+| **SEG-N5** | ❌ **ABERTO — validar escopo antes** | MÉDIO | O webhook EfiBank ainda confia no corpo da notificação (quem souber um `txid` e o token forja uma baixa). A regra de segurança pede confirmar via API (`GET /v2/cob/{txid}`), o que exige o escopo `cob.read` na aplicação EfiBank — sem ele todo pagamento ficaria em reenvio. Conferir o escopo no painel da EfiBank e só então ativar | `webhooks/efibank/route.ts` |
+| **ISO-N5** | ❌ **ABERTO** | MÉDIO | `renovarParcelaAction(parcelaId, cobrancaId)` usa o `cobrancaId` **vindo do cliente** para gravar a notificação e gerar a próxima parcela (deveria usar `result.cobranca_id` da RPC), e não checa o erro do `insert` da próxima parcela | `atendimento/_actions/renovar.ts:187-316` |
 | PERF-A1 | ✅ resolvido (majoritário) | — | N+1+N do scheduler resolvido com queries batched |
 | PERF-M1, M2, B1 | ❌ ABERTOS, migraram | MÉDIO/BAIXO | Índice sem `canal`, inserts sequenciais, loop serial de contas — mesmos gargalos, agora dentro do cron de 1min |
 | PERF-B2 | ✅ RESOLVIDO | — | Query redundante removida |
@@ -143,7 +147,7 @@ Isso é mais estrutural do que qualquer bug encontrado:
 1. ~~**SEG-N1**~~ ✅ feito em 2026-09-19
 2. ~~**SEG-A6**~~ ✅ feito em 2026-09-19
 3. ~~**ISO-N3**~~ ✅ feito em 2026-09-19 (+ ISO-M2 de brinde)
-4. **RN-C1** — ainda aberto, decisão do Felippe: remover a geração imediata dos 3 lugares e confiar só no scheduler (ver skill `regras-financeiras` §3.2)
+4. **RN-C1** — reanalisado: contradição entre a regra escrita e o produto, precisa de decisão do Felippe entre 3 opções (ver skill `regras-financeiras` §2.2). Não é para remover a geração na baixa
 
 **Passos manuais pendentes para a Onda 0 funcionar em produção** — a correção de código sozinha faz o webhook de mensagens recusar tudo até isso ser feito:
 - Aplicar a migration `supabase/migrations/0032_meta_app_secret.sql` no Supabase (adiciona `configuracoes.meta_app_secret`)

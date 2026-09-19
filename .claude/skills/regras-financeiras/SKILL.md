@@ -28,11 +28,18 @@ description: Fonte única da verdade das regras de negócio do Cobranx — gera�
 - **Dia inexistente no mês** (ex.: 31 em fevereiro) → vencimento vai para o **último dia daquele mês**.
 - Quando todas as parcelas estão pagas → `cobranca.status = concluida`.
 
-### 2.2 Recorrente (REGRA CRÍTICA — atualmente violada em produção, ver §3.2)
+### 2.2 Recorrente — `[A DEFINIR]` contradição entre a regra escrita e o produto (RN-C1)
 - Checkbox "Recorrente" → `qtd_parcelas` é **ignorado** (recorrência é infinita até cancelar).
-- **Parcela é gerada POR DATA, nunca por pagamento.** O sistema mantém **sempre 1 parcela em aberto à frente**, criada antecipadamente pelo scheduler (`app/api/cron/scheduler/route.ts`).
-- **Por que (não violar):** se a próxima parcela só nascesse no momento do pagamento, os lembretes "5/3/2/1 dia antes" do próximo ciclo NUNCA disparariam para quem paga atrasado, no dia, ou não paga. Gerar por data garante que o lembrete sempre tenha alvo.
-- ❌ **PROIBIDO:** gerar a próxima parcela "ao dar baixa". Quem propuser isso está quebrando os lembretes.
+- **Regra escrita (original do projeto):** a parcela é gerada POR DATA, nunca por pagamento; sempre 1 parcela em aberto à frente, criada pelo scheduler. **Por quê:** se a próxima parcela só nascer no pagamento, quem paga atrasado (ou não paga) perde os lembretes 5/3/2/1 dias antes do ciclo seguinte.
+- **O que o código faz de fato (auditoria 2026-09-19):**
+  - Ao dar baixa, **4 caminhos** geram a próxima parcela na hora quando não sobrou nenhuma aberta: `baixarParcelaAction`, `baixarParcelaComConfirmacaoAction` (aceita um "próximo vencimento" escolhido no modal e cascateia o valor novo), `renovarParcelaAction` (Atendimento) e o webhook EfiBank. O comentário no código diz que isso "garante UX imediata" e que o scheduler é a rede de segurança — decisão deliberada, não descuido.
+  - O scheduler (`app/api/cron/scheduler`, `gerarParcelasRecorrentes`) **não** gera por data: só cria a próxima quando a cobrança recorrente não tem NENHUMA parcela aberta — na prática "depois do pagamento", com atraso de até uma rodada do cron.
+  - Ou seja: **a geração por data descrita na regra escrita não existe em lugar nenhum.** Quem não paga nunca ganha a parcela seguinte; quem paga atrasado ganha a seguinte tarde (perde os primeiros lembretes).
+- **Opções (decisão do Felippe — não implementar nenhuma sem escolher):**
+  1. *Manter e reescrever esta regra* para descrever o comportamento real (geração na baixa + scheduler de segurança). Custo: o problema dos lembretes perdidos do pagador atrasado continua.
+  2. *Geração por data de verdade:* o scheduler cria a próxima parcela quando a atual vence (paga ou não) e a baixa deixa de gerar. Custo: inadimplente acumula uma parcela vencida por mês; o "próximo vencimento" do modal deixa de existir como está; mexe nos KPIs de "a receber" e "em aberto".
+  3. *Híbrido:* manter a geração na baixa e acrescentar no scheduler a criação por data só quando a parcela atual está vencida há N dias.
+- **Até a decisão:** não remover nem ampliar a geração na baixa. Ao mexer nesses 4 pontos por outro motivo, preservar o comportamento (`tests/webhook-efibank.test.ts` cobre o do webhook). Os 4 pontos duplicam a mesma lógica — extrair para uma função única é o passo que facilita qualquer das opções.
 - Cancelar a recorrente interrompe a geração futura; parcelas já abertas permanecem.
 
 ## 3. Baixa de pagamento ("Pago")
@@ -47,9 +54,11 @@ description: Fonte única da verdade das regras de negócio do Cobranx — gera�
 - Baixa manual não confirma pagamento real — "recebido" reflete o que o usuário marcou.
 
 ### 3.2 Baixa automática via PIX (EfiBank) — integração real, não documentada até esta revisão
-- `app/api/webhooks/efibank/route.ts` recebe notificação de PIX pago da EfiBank e chama a mesma RPC `baixar_parcela` automaticamente pelo `txid` em `cobrancas_pix`, com idempotência (marca `concluida` antes de processar).
+- `app/api/webhooks/efibank/route.ts` recebe notificação de PIX pago da EfiBank e chama a mesma RPC `baixar_parcela` automaticamente pelo `txid` em `cobrancas_pix`. A baixa vem primeiro e só depois a cobrança PIX é marcada `concluida` (ver abaixo).
 - Ao confirmar, dispara notificação `pagamento_confirmado` (se o canal estiver ativo na conta) e, se o cliente tiver `login_externo`/`tipo_integracao`, aciona a renovação LookDefense (ver §5).
-- **⚠️ Achado ainda não corrigido e maior do que se pensava (RN-C1 — ver `docs/auditoria-2026-09-19.md`):** a geração imediata da próxima parcela recorrente ao dar baixa (`abertas === 0`) existe em **3 lugares**, não só neste webhook: `baixarParcelaAction` e `baixarParcelaComConfirmacaoAction` (`app/(app)/cobrancas/_actions/parcelas.ts`) fazem exatamente a mesma coisa — inclusive com um comentário no topo do arquivo dizendo "NÃO gerar próxima parcela recorrente aqui" que o próprio código abaixo contradiz. Isso viola diretamente a regra §2.2 e pode fazer o lembrete D-5/D-3 do próximo ciclo nunca disparar. **Não copiar esse padrão em código novo.** Corrigir (remover os 3 blocos e depender só de `gerarParcelasRecorrentes` em `app/api/cron/scheduler/route.ts`, que já implementa a regra corretamente) é uma mudança em lógica de pagamento em três pontos — passa pelos freios de emergência da skill `codigo-cobranx`, alinhar com o Felippe antes de mexer.
+- **Geração da próxima parcela recorrente aqui é o comportamento atual e segue igual — a decisão está pendente (RN-C1, ver §2.2).** Não copiar esse padrão em código novo enquanto a decisão não sair.
+- **Ordem e idempotência (PAG-N1, corrigido em 2026-09-19):** a baixa (RPC `baixar_parcela`, idempotente) roda ANTES de marcar a cobrança PIX como `concluida`. Falha transitória (RPC, leitura do banco) responde **5xx para a EfiBank reenviar** e não encerra a cobrança; parcela já paga encerra a cobrança sem repetir efeitos; PIX pago sem parcela vira erro para revisão manual (200, sem reenvio infinito). Os efeitos (confirmação por WhatsApp, renovação LookDefense) são duráveis por conta própria — ficam em `fila`/`baixas_externas` para os crons — e um erro neles não pede reenvio.
+- O webhook autentica por `?token=`: `EFIBANK_WEBHOOK_SECRET` (próprio; quando existe, o `CRON_SECRET` deixa de valer aqui) ou, sem ele, `CRON_SECRET` (legado). **Ainda confia no corpo da notificação** — a regra de segurança pede confirmar a baixa consultando a EfiBank (`GET /v2/cob/{txid}`, exige o escopo `cob.read` na aplicação); não implementado porque, sem esse escopo, todo pagamento ficaria em reenvio. Validar o escopo antes.
 - EfiBank é usada para cobrança PIX do **cliente final** (quem deve). Não confundir com Mercado Pago, que cobra a **assinatura do SaaS** do dono da conta (ver §6).
 
 ## 4. Valor da parcela
@@ -129,7 +138,7 @@ Regra já documentada aqui que MUDA (não uma lacuna nova) exige responder, ante
 3. Encontrou `[A DEFINIR]`/`[CONFIRMAR]` no caminho → seguir o protocolo do topo deste documento.
 
 ## Antipadrões — NÃO fazer
-- ❌ Gerar parcela recorrente no pagamento (quebra lembretes) — inclusive nas duas actions de baixa manual E no webhook EfiBank, que já fazem isso hoje em 3 lugares (§3.2, corrigir com alinhamento prévio).
+- ❌ Alterar a geração da próxima parcela recorrente (na baixa ou no scheduler) sem a decisão do Felippe registrada — é a contradição aberta RN-C1 (§2.2).
 - ❌ `float` para dinheiro.
 - ❌ Indicador "a receber" somando todas as parcelas em vez de só as do mês.
 - ❌ Dois caminhos de baixa com comportamento diferente (manual e PIX chamam a mesma RPC — manter assim).
@@ -145,5 +154,6 @@ Regra já documentada aqui que MUDA (não uma lacuna nova) exige responder, ante
 - 2026-07-02 — Janela de envio 09:00–20:00 BRT com intervalos aleatórios. [decisão de projeto original]
 - 2026-09-18 — Documentadas EfiBank (baixa PIX automática) e LookDefense (renovação IPTV) como integrações reais desta skill, antes não documentadas. RN-C1 (geração de parcela no webhook EfiBank) permanece violação conhecida, não corrigida nesta revisão — aguarda decisão explícita.
 - 2026-09-18 — Twilio removido do código (app, webhook, configurações) por decisão do Felippe; não é mais um canal do produto.
-- 2026-09-19 — Auditoria completa (`docs/auditoria-2026-09-19.md`) confirmou RN-C1 em 3 pontos (não 1) e achou limite de plano real já em produção (`limite_clientes`) que não estava documentado. Confirmado também que não existe cadastro self-service — toda conta é provisionada manualmente pelo admin.
+- 2026-09-19 — Auditoria completa (`docs/auditoria-2026-09-19.md`) achou limite de plano real já em produção (`limite_clientes`) que não estava documentado. Confirmado também que não existe cadastro self-service — toda conta é provisionada manualmente pelo admin.
+- 2026-09-19 — RN-C1 reanalisado: não é uma "violação simples". São 4 caminhos que geram a parcela na baixa (decisão de UX deliberada, com modal de "próximo vencimento") e o scheduler não gera por data. Vira `[A DEFINIR]` em §2.2 com 3 opções; nada foi removido. PAG-N1 (ordem do webhook EfiBank) corrigido.
 ```

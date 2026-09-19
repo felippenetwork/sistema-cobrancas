@@ -37,7 +37,7 @@ Nenhuma linha de código antes desta fase (exceção: mudanças triviais como ty
 
 **Freios de emergência** — parar e alinhar mesmo com pedido aparentemente claro:
 - Alterar schema de tabela core (`contas`, `clientes`, `cobrancas`, `parcelas`, `notificacoes_enviadas`)
-- Alterar lógica de envio/agendamento/recorrência (risco de disparo indevido, ban de número, ou repetir a violação RN-C1 já conhecida — ver `regras-financeiras`)
+- Alterar lógica de envio/agendamento/recorrência (risco de disparo indevido, ban de número, ou mexer na geração de parcela recorrente — contradição RN-C1 com decisão pendente, ver `regras-financeiras` §2.2)
 - Alterar pagamento/assinatura ou webhooks (Mercado Pago, EfiBank)
 - Alterar autenticação, RLS ou qualquer área das skills `seguranca-cobranx` / `isolamento-de-contas`
 - Excluir dados ou código "aparentemente morto" (provar que está morto: grep + auditoria de uso — `worker/` já está confirmado morto, mas qualquer outra suspeita exige a mesma prova)
