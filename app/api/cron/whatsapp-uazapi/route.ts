@@ -16,7 +16,7 @@
 // worker antigo, essencial para o badge "WhatsApp desconectado" da Dashboard
 // continuar refletindo a realidade sem ninguém rodando 24/7.
 
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { encontrarOuCriarAtendimento } from '@/lib/atendimento/encontrar-ou-criar'
 import { resolverVariaveis, resolverVariaveisLeves, VariaveisIndisponiveisError } from '@/lib/whatsapp/resolver-variaveis'
@@ -459,6 +459,30 @@ async function processarCampanha(
   return enviados
 }
 
+// ── Envio de verdade de todas as contas elegíveis — é aqui que moram os sleep()
+// reais do ritmo anti-ban (15-80s por mensagem), então uma execução com fila
+// pode levar minutos. Ver o comentário no GET sobre por que isso roda em
+// segundo plano (after()) em vez de dentro do tempo de resposta do cron. ──────
+
+async function processarContas(
+  supabase: Supabase,
+  elegiveis: { contaId: string; token: string; cfg: ContaCfg }[],
+  inicioExecucao: number,
+): Promise<{ enviadas: number; contasProcessadas: number }> {
+  const resultados = await Promise.allSettled(
+    elegiveis.map(c => processarConta(supabase, c.contaId, c.token, c.cfg, inicioExecucao, BUDGET_MS)),
+  )
+
+  resultados.forEach((r, i) => {
+    if (r.status === 'rejected') {
+      console.error('[cron/whatsapp-uazapi] conta falhou', { contaId: elegiveis[i].contaId, motivo: r.reason })
+    }
+  })
+
+  const enviadas = resultados.reduce((soma, r) => soma + (r.status === 'fulfilled' ? r.value : 0), 0)
+  return { enviadas, contasProcessadas: elegiveis.length }
+}
+
 // ── Handler ───────────────────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
@@ -496,24 +520,33 @@ export async function GET(req: NextRequest) {
 
   const cfgMap = new Map((configs ?? []).map(c => [c.conta_id as string, c]))
 
-  const elegiveis = conectadas.filter(c => {
-    const cfg     = cfgMap.get(c.conta_id as string)
-    const hasMeta = !!(cfg?.meta_api_ativo && cfg.meta_access_token && cfg.meta_phone_number_id)
-    return !hasMeta
-  })
+  const elegiveis = conectadas
+    .filter(c => {
+      const cfg     = cfgMap.get(c.conta_id as string)
+      const hasMeta = !!(cfg?.meta_api_ativo && cfg.meta_access_token && cfg.meta_phone_number_id)
+      return !hasMeta
+    })
+    .map(c => ({
+      contaId: c.conta_id as string,
+      token:   c.uazapi_instance_token as string,
+      cfg:     cfgMap.get(c.conta_id as string),
+    }))
 
-  const resultados = await Promise.allSettled(
-    elegiveis.map(c => processarConta(
-      supabase,
-      c.conta_id as string,
-      c.uazapi_instance_token as string,
-      cfgMap.get(c.conta_id as string),
-      inicioExecucao,
-      BUDGET_MS,
-    )),
-  )
+  if (!elegiveis.length) return NextResponse.json({ ok: true, enviadas: 0, contasProcessadas: 0 })
 
-  const enviadas = resultados.reduce((soma, r) => soma + (r.status === 'fulfilled' ? r.value : 0), 0)
-
-  return NextResponse.json({ ok: true, enviadas, contasProcessadas: elegiveis.length })
+  // O envio de verdade pausa de propósito 15-80s entre mensagens (ritmo anti-ban
+  // exigido pela skill whatsapp-uazapi) — o cron externo (cron-job.org, plano
+  // free) tem timeout FIXO de 30s, bem menor que isso, e passou a marcar toda
+  // chamada como falha assim que sobrou mais de 1 lembrete na fila. `after()`
+  // devolve a resposta já (a Vercel aguenta até maxDuration=300s) e mantém a
+  // função rodando em segundo plano até o envio de verdade terminar.
+  try {
+    after(() => processarContas(supabase, elegiveis, inicioExecucao))
+    return NextResponse.json({ ok: true, iniciado: true, contasElegiveis: elegiveis.length })
+  } catch {
+    // after() só lança fora de uma requisição real do Next (ex.: teste chamando
+    // o handler direto, sem o request scope do runtime) — processa na hora.
+    const resultado = await processarContas(supabase, elegiveis, inicioExecucao)
+    return NextResponse.json({ ok: true, ...resultado })
+  }
 }

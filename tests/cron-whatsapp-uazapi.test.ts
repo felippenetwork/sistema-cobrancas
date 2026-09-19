@@ -17,10 +17,21 @@ const mocks = vi.hoisted(() => {
     resolverVariaveis: vi.fn(),
     resolverVariaveisLeves: vi.fn(),
     encontrarOuCriarAtendimento: vi.fn(),
+    // Por padrão (sem mockImplementation), lança — reproduz o after() de verdade
+    // fora de uma requisição real do Next, que é a situação de todo teste aqui
+    // (chamamos GET() direto). Testes que precisam do caminho "produção" trocam
+    // a implementação para capturar o callback em vez de lançar.
+    after: vi.fn((_cb: () => Promise<unknown>): void => {
+      throw new Error('`after` was called outside a request scope.')
+    }),
   }
 })
 
 vi.mock('@/lib/supabase/admin', () => ({ createAdminClient: () => mocks.db.atual }))
+vi.mock('next/server', async importOriginal => ({
+  ...(await importOriginal<typeof import('next/server')>()),
+  after: mocks.after,
+}))
 vi.mock('@/lib/uazapi', () => ({
   instName: (contaId: string) => `inst-${contaId}`,
   getAllInstances: mocks.getAllInstances,
@@ -96,6 +107,9 @@ beforeEach(() => {
   mocks.resolverVariaveis.mockReset().mockResolvedValue('mensagem pronta')
   mocks.resolverVariaveisLeves.mockReset().mockResolvedValue('mensagem avulsa pronta')
   mocks.encontrarOuCriarAtendimento.mockReset().mockResolvedValue('atend-1')
+  mocks.after.mockReset().mockImplementation(() => {
+    throw new Error('`after` was called outside a request scope.')
+  })
 
   vi.spyOn(console, 'error').mockImplementation(() => {})
   vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -104,6 +118,45 @@ afterEach(() => {
   vi.useRealTimers()
   vi.restoreAllMocks()
   delete process.env.CRON_SECRET
+})
+
+// Achado real (2026-09-19): o cron-job.org (gatilho externo, ver skill
+// whatsapp-uazapi) tem timeout FIXO de 30s no plano usado, bem menor que o
+// ritmo anti-ban real (15-80s por mensagem) — toda execução com >0 mensagens
+// na fila estourava esse tempo e o serviço passou a marcar a chamada como
+// falha, travando os lembretes automáticos. Corrigido devolvendo a resposta
+// já (via after()) e processando de verdade em segundo plano.
+describe('resposta rápida ao cron externo (after) — timeout de 30s do cron-job.org', () => {
+  it('em produção (after real): responde antes de enviar, e o envio de verdade acontece em segundo plano', async () => {
+    const db = cenario()
+    let callback: (() => Promise<unknown>) | undefined
+    mocks.after.mockReset().mockImplementation((cb: () => Promise<unknown>) => { callback = cb })
+
+    const resposta = await GET(requisicao())
+    expect(await resposta.json()).toEqual({ ok: true, iniciado: true, contasElegiveis: 1 })
+    // A resposta já voltou — nada foi enviado nem reivindicado ainda.
+    expect(mocks.sendText).not.toHaveBeenCalled()
+    expect(nota(db).status).toBe('fila')
+
+    expect(callback).toBeDefined()
+    const trabalho = callback!()
+    await vi.advanceTimersByTimeAsync(400_000)
+    await trabalho
+
+    expect(mocks.sendText).toHaveBeenCalledTimes(1)
+    expect(nota(db).status).toBe('enviado')
+  })
+
+  it('sem contas elegíveis: responde na hora sem sequer chamar after()', async () => {
+    cenario({}, {}) // uma notificação em fila, mas sem conta conectada isolada abaixo
+    mocks.getAllInstances.mockResolvedValue([]) // nenhuma instância conectada
+    const db = new FakeDb({ conexoes: [], configuracoes: [], notificacoes_enviadas: [] })
+    mocks.db.atual = db.cliente()
+
+    const resposta = await GET(requisicao())
+    expect(await resposta.json()).toEqual({ ok: true, enviadas: 0 })
+    expect(mocks.after).not.toHaveBeenCalled()
+  })
 })
 
 describe('autenticação', () => {
