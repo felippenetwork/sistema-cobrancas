@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { getConta } from '@/lib/conta'
+import { createAdminClient } from '@/lib/supabase/admin'
 
 type Result = { error: string | null }
 
@@ -76,8 +77,10 @@ export async function atualizarModeloAction(
 export async function submeterAprovacaoAction(modeloId: string): Promise<Result> {
   try {
     const { supabase, contaId } = await getConta()
+    const admin = createAdminClient()
 
-    // Busca o modelo e as credenciais Meta em paralelo
+    // Modelo com o cliente do usuário; credenciais Meta com service role (ver nota
+    // em atendimento/_actions/mensagens.ts — SEG-N4 restringiu 'configuracoes' a dono/admin)
     const [{ data: modelo }, { data: cfg }] = await Promise.all([
       supabase
         .from('modelos_wa')
@@ -85,7 +88,7 @@ export async function submeterAprovacaoAction(modeloId: string): Promise<Result>
         .eq('id', modeloId)
         .eq('conta_id', contaId)
         .maybeSingle(),
-      supabase
+      admin
         .from('configuracoes')
         .select('meta_access_token, meta_waba_id')
         .eq('conta_id', contaId)

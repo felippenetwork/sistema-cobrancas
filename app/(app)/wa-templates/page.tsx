@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import { TemplatesClient } from './_components/templates-client'
 
@@ -24,7 +25,9 @@ export default async function WaTemplatesPage() {
 
   if (!contaId) redirect('/login')
 
-  const { data: cfg } = await supabase
+  // Service role — SEG-N4 restringiu 'configuracoes' a dono/admin; qualquer membro
+  // pode ver se a Meta API está configurada para saber se pode usar templates.
+  const { data: cfg } = await createAdminClient()
     .from('configuracoes')
     .select('meta_api_ativo, meta_access_token, meta_phone_number_id, meta_waba_id')
     .eq('conta_id', contaId)

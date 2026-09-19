@@ -38,10 +38,12 @@ const NAV_SISTEMA: NavItem[] = [
 
 export function AppSidebar({
   nomeEmpresa,
+  isOwner,
   isOpen = false,
   onClose,
 }: {
   nomeEmpresa: string
+  isOwner: boolean
   isOpen?: boolean
   onClose?: () => void
 }) {
@@ -119,15 +121,19 @@ export function AppSidebar({
           </Link>
         ))}
 
-        <p className="mb-1 mt-4 px-2 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
-          Sistema
-        </p>
-        {NAV_SISTEMA.map(item => (
-          <Link key={item.href} href={item.href} className={cls(item.href)} onClick={onClose}>
-            {item.icon}
-            {item.label}
-          </Link>
-        ))}
+        {isOwner && (
+          <>
+            <p className="mb-1 mt-4 px-2 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
+              Sistema
+            </p>
+            {NAV_SISTEMA.map(item => (
+              <Link key={item.href} href={item.href} className={cls(item.href)} onClick={onClose}>
+                {item.icon}
+                {item.label}
+              </Link>
+            ))}
+          </>
+        )}
       </nav>
 
       {/* Sair com confirmação */}

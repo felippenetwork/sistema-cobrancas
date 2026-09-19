@@ -41,6 +41,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   if (!conta) redirect('/sem-conta')
 
+  // Configurações (credenciais Meta/EfiBank/LookDefense) só existe para o dono da conta —
+  // membros convidados (admin ou atendente) nem conseguem carregar a página hoje. Esconder
+  // o link evita mandar a equipe para uma tela em branco.
+  const isOwner = !!contaOwner
+
   const hoje = new Date()
   hoje.setHours(0, 0, 0, 0)
 
@@ -52,7 +57,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (isBlocked) redirect('/plano-expirado')
 
   return (
-    <AppShell nomeEmpresa={conta.nome_empresa ?? ''}>
+    <AppShell nomeEmpresa={conta.nome_empresa ?? ''} isOwner={isOwner}>
       {children}
     </AppShell>
   )

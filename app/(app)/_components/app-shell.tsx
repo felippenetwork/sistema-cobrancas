@@ -16,9 +16,11 @@ const BOTTOM_NAV = [
 export function AppShell({
   children,
   nomeEmpresa,
+  isOwner,
 }: {
   children: React.ReactNode
   nomeEmpresa: string
+  isOwner: boolean
 }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const pathname = usePathname()
@@ -34,6 +36,7 @@ export function AppShell({
 
       <AppSidebar
         nomeEmpresa={nomeEmpresa}
+        isOwner={isOwner}
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
       />

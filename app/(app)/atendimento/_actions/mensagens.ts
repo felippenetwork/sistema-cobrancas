@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { getConta } from '@/lib/conta'
+import { createAdminClient } from '@/lib/supabase/admin'
 
 export type ActionState = { error: string | null }
 
@@ -12,6 +13,7 @@ export async function enviarRespostaAction(
 ): Promise<ActionState> {
   try {
     const { supabase, contaId } = await getConta()
+    const admin = createAdminClient()
 
     const celular       = (formData.get('celular')        as string)?.trim()
     const texto         = (formData.get('texto')          as string)?.trim()
@@ -20,14 +22,16 @@ export async function enviarRespostaAction(
     if (!celular) return { error: 'Celular inválido.' }
     if (!texto)   return { error: 'Mensagem vazia.' }
 
-    // Busca credenciais Meta + conexão uazapiGO em paralelo
+    // Credenciais são lidas com service role: getConta() já confirmou que o usuário
+    // pertence à conta, mas desde a migration 0033 um atendente não lê 'configuracoes'
+    // diretamente (SEG-N4) — só o dono/admin. Enviar mensagem continua sendo tarefa dele.
     const [{ data: cfg }, { data: conexao }] = await Promise.all([
-      supabase
+      admin
         .from('configuracoes')
         .select('meta_access_token, meta_phone_number_id, meta_api_ativo')
         .eq('conta_id', contaId)
         .maybeSingle(),
-      supabase
+      admin
         .from('conexoes')
         .select('uazapi_instance_token, status')
         .eq('conta_id', contaId)
@@ -135,9 +139,10 @@ export async function enviarTemplateAction(
 ): Promise<ActionState> {
   try {
     const { supabase, contaId } = await getConta()
+    const admin = createAdminClient()
 
-    // Credenciais Meta
-    const { data: cfg } = await supabase
+    // Credenciais Meta (service role — ver nota em enviarRespostaAction)
+    const { data: cfg } = await admin
       .from('configuracoes')
       .select('meta_access_token, meta_phone_number_id, meta_api_ativo')
       .eq('conta_id', contaId)
@@ -281,9 +286,10 @@ export async function iniciarConversaAction(
 ): Promise<{ error: string | null; atendimentoId?: string }> {
   try {
     const { supabase, contaId } = await getConta()
+    const admin = createAdminClient()
 
-    // Credenciais Meta
-    const { data: cfg } = await supabase
+    // Credenciais Meta (service role — ver nota em enviarRespostaAction)
+    const { data: cfg } = await admin
       .from('configuracoes')
       .select('meta_access_token, meta_phone_number_id, meta_api_ativo')
       .eq('conta_id', contaId)

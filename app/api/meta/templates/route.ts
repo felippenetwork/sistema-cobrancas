@@ -3,6 +3,7 @@
 
 import { NextResponse } from 'next/server'
 import { getConta } from '@/lib/conta'
+import { createAdminClient } from '@/lib/supabase/admin'
 
 export type MetaTemplate = {
   id: string
@@ -15,9 +16,13 @@ export type MetaTemplate = {
 
 export async function GET(req: Request) {
   try {
-    const { supabase, contaId } = await getConta()
+    const { contaId } = await getConta()
+    const admin = createAdminClient()
 
-    const { data: cfg } = await supabase
+    // Service role — getConta() já confirmou a conta; desde a 0033 (SEG-N4) um atendente
+    // não lê 'configuracoes' pela RLS, mas listar templates para responder o cliente continua
+    // sendo tarefa dele.
+    const { data: cfg } = await admin
       .from('configuracoes')
       .select('meta_access_token, meta_waba_id, meta_phone_number_id')
       .eq('conta_id', contaId)
