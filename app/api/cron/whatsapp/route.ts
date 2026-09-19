@@ -4,6 +4,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { encontrarOuCriarAtendimento } from '@/lib/atendimento/encontrar-ou-criar'
+import { atualizarStatusNotificacao, vereditoLembrete } from '@/lib/whatsapp/status-notificacao'
+import { cronAutorizado } from '@/lib/cron-auth'
 
 export const maxDuration = 300
 
@@ -145,18 +147,28 @@ async function processarNotificacao(
   hInicio: string,
   hFim: string,
   tmplOverride?: Map<string, { nome: string; idioma: string; corpo: string }>,
-): Promise<'enviado' | 'fora_janela' | 'sem_template' | 'erro'> {
+): Promise<'enviado' | 'fora_janela' | 'sem_template' | 'cancelado' | 'erro'> {
+
+  // Toda mudança de status é checada (COD-M1) — ignorar o `error` deixava a
+  // notificação presa em 'processando' para sempre.
+  const marcar = (patch: Parameters<typeof atualizarStatusNotificacao>[3], etapa: string, tentativas = 1) =>
+    atualizarStatusNotificacao(supabase, notif.conta_id, notif.id, patch, etapa, tentativas)
 
   // Claim atômico: garante que só um processo envia esta notificação.
-  const { data: claimed } = await supabase
+  const { data: claimed, error: claimErr } = await supabase
     .from('notificacoes_enviadas')
-    .update({ status: 'processando' as any })
+    .update({ status: 'processando' })
     .eq('id', notif.id)
+    .eq('conta_id', notif.conta_id)
     .eq('status', 'fila')
     .select('id')
     .maybeSingle()
 
-  if (!(claimed as any)?.id) {
+  if (claimErr) {
+    console.error('[cron/whatsapp] claim falhou', { notifId: notif.id, contaId: notif.conta_id, claimErr })
+    return 'erro'
+  }
+  if (!claimed?.id) {
     // Já reivindicado por envio imediato ou outro cron — não é erro, só ignorar.
     return 'enviado'
   }
@@ -164,8 +176,7 @@ async function processarNotificacao(
   // Verificar janela horária
   if (!TIPOS_SEM_JANELA.has(notif.tipo) && !dentroDaJanela(hInicio, hFim)) {
     // Devolve para fila para ser tentado na próxima janela
-    await supabase.from('notificacoes_enviadas')
-      .update({ status: 'fila' }).eq('id', notif.id)
+    await marcar({ status: 'fila' }, 'fora_janela')
     return 'fora_janela'
   }
 
@@ -177,8 +188,7 @@ async function processarNotificacao(
     : tmplBase
 
   if (!tmpl) {
-    await supabase.from('notificacoes_enviadas')
-      .update({ status: 'falhou' }).eq('id', notif.id)
+    await marcar({ status: 'falhou' }, 'sem_template')
     return 'sem_template'
   }
 
@@ -187,18 +197,17 @@ async function processarNotificacao(
     .from('clientes')
     .select('celular, deleted_at, nome')
     .eq('id', notif.cliente_id)
+    .eq('conta_id', notif.conta_id)
     .maybeSingle()
 
   if (!cliente || (cliente as any).deleted_at) {
-    await supabase.from('notificacoes_enviadas')
-      .update({ status: 'cancelado' }).eq('id', notif.id)
+    await marcar({ status: 'cancelado' }, 'cliente_inexistente')
     return 'erro'
   }
 
   const celular = (cliente as any).celular as string | null
   if (!celular) {
-    await supabase.from('notificacoes_enviadas')
-      .update({ status: 'falhou' }).eq('id', notif.id)
+    await marcar({ status: 'falhou' }, 'cliente_sem_celular')
     return 'erro'
   }
 
@@ -209,6 +218,7 @@ async function processarNotificacao(
       .from('parcelas')
       .select('id')
       .eq('cobranca_id', notif.cobranca_id)
+      .eq('conta_id', notif.conta_id)
       .order('numero', { ascending: true })
       .limit(1)
       .maybeSingle()
@@ -220,16 +230,27 @@ async function processarNotificacao(
   let data  = ''
 
   if (parcelaId) {
-    const { data: parcela } = await supabase
+    const { data: parcela, error: parcelaErr } = await supabase
       .from('parcelas')
       .select('valor, data_vencimento')
       .eq('id', parcelaId)
+      .eq('conta_id', notif.conta_id)
       .maybeSingle()
 
-    if (parcela) {
-      valor = formatarMoeda(Number((parcela as any).valor ?? 0))
-      data  = formatarData((parcela as any).data_vencimento ?? '')
+    // Nunca seguir com valor/vencimento em branco: o cliente receberia
+    // "fatura de  vence em ". Banco indisponível → tenta no próximo tick.
+    if (parcelaErr) {
+      console.error('[cron/whatsapp] leitura da parcela falhou', { notifId: notif.id, contaId: notif.conta_id, parcelaErr })
+      await marcar({ status: 'fila' }, 'parcela_indeterminada')
+      return 'erro'
     }
+    if (!parcela) {
+      await marcar({ status: 'cancelado' }, 'parcela_inexistente')
+      return 'cancelado'
+    }
+
+    valor = formatarMoeda(Number((parcela as any).valor ?? 0))
+    data  = formatarData((parcela as any).data_vencimento ?? '')
   }
 
   const nome = ((cliente as any).nome as string) || 'Cliente'
@@ -237,19 +258,51 @@ async function processarNotificacao(
 
   const textoMensagem = reconstruirTexto(tmpl.corpo, parametros)
 
+  // A baixa só cancela notificações em 'fila'; esta já foi reivindicada.
+  const veredito = await vereditoLembrete(supabase, notif.conta_id, notif)
+  if (veredito === 'cancelar') {
+    await marcar({ status: 'cancelado' }, 'parcela_paga_antes_do_envio')
+    return 'cancelado'
+  }
+  if (veredito === 'tentar_depois') {
+    await marcar({ status: 'fila' }, 'parcela_indeterminada')
+    return 'erro'
+  }
+
   try {
     await enviarTemplate(metaPhoneId, metaToken, celular, tmpl.nome, tmpl.idioma, parametros)
+  } catch (err: any) {
+    console.error('[cron/whatsapp] erro ao enviar', notif.id, err?.message)
 
-    const agora = new Date().toISOString()
+    // Fora da janela de serviço da Meta (131026) → reagenda para amanhã e volta a fila
+    if (err?.message?.includes('131026') || err?.message?.includes('outside')) {
+      const amanha = addDias(hojeEmSP(), 1)
+      await marcar(
+        { status: 'fila', agendado_para: new Date(`${amanha}T09:00:00-03:00`).toISOString() },
+        'fora_janela_meta',
+      )
+    } else {
+      await marcar({ status: 'falhou' }, 'envio_falhou')
+    }
 
-    // Marcar notificação como enviada
-    await supabase.from('notificacoes_enviadas').update({
-      status:         'enviado',
-      mensagem_final: textoMensagem,
-      enviado_em:     agora,
-    }).eq('id', notif.id)
+    return 'erro'
+  }
 
-    // Garantir que existe um atendimento e salvar a mensagem
+  // ── A partir daqui a mensagem JÁ FOI enviada: nada abaixo pode devolver a
+  // notificação para 'fila' ou marcá-la como falha (reenvio = cliente recebe 2x).
+  const gravado = await marcar(
+    { status: 'enviado', mensagem_final: textoMensagem, enviado_em: new Date().toISOString() },
+    'pos_envio',
+    3,
+  )
+  if (!gravado) {
+    console.error('[cron/whatsapp] MENSAGEM ENVIADA MAS STATUS NÃO GRAVADO — conferir manualmente', {
+      notifId: notif.id, contaId: notif.conta_id,
+    })
+  }
+
+  // Garantir que existe um atendimento e salvar a mensagem
+  try {
     const atendimentoId = await encontrarOuCriarAtendimento(
       supabase, notif.conta_id, celular,
       notif.cliente_id,
@@ -266,31 +319,17 @@ async function processarNotificacao(
       lida:           true,
     })
     if (mwaErr) console.error('[cron/whatsapp] mensagens_wa.insert', mwaErr)
-
-    return 'enviado'
-
-  } catch (err: any) {
-    console.error('[cron/whatsapp] erro ao enviar', notif.id, err?.message)
-
-    // Fora da janela de serviço da Meta (131026) → reagenda para amanhã e volta a fila
-    if (err?.message?.includes('131026') || err?.message?.includes('outside')) {
-      const amanha = addDias(hojeEmSP(), 1)
-      await supabase.from('notificacoes_enviadas')
-        .update({ status: 'fila', agendado_para: new Date(`${amanha}T09:00:00-03:00`).toISOString() })
-        .eq('id', notif.id)
-    } else {
-      await supabase.from('notificacoes_enviadas')
-        .update({ status: 'falhou' }).eq('id', notif.id)
-    }
-
-    return 'erro'
+  } catch (err) {
+    console.error('[cron/whatsapp] histórico de atendimento falhou (mensagem já enviada)', { notifId: notif.id, contaId: notif.conta_id, err })
   }
+
+  return 'enviado'
 }
 
 // ── Handler ───────────────────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
-  if (req.headers.get('authorization') !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!cronAutorizado(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -340,6 +379,7 @@ export async function GET(req: NextRequest) {
 
   let enviadas    = 0
   let foraJanela  = 0
+  let cancelados  = 0
   let erros       = 0
 
   for (const notif of pendentes) {
@@ -360,9 +400,10 @@ export async function GET(req: NextRequest) {
 
     if (resultado === 'enviado')          enviadas++
     else if (resultado === 'fora_janela') foraJanela++
+    else if (resultado === 'cancelado')   cancelados++
     else                                  erros++
   }
 
-  console.log(`[cron/whatsapp] enviadas=${enviadas} fora_janela=${foraJanela} erros=${erros}`)
-  return NextResponse.json({ ok: true, enviadas, foraJanela, erros })
+  console.log(`[cron/whatsapp] enviadas=${enviadas} fora_janela=${foraJanela} cancelados=${cancelados} erros=${erros}`)
+  return NextResponse.json({ ok: true, enviadas, foraJanela, cancelados, erros })
 }

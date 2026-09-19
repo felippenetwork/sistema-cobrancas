@@ -16,6 +16,19 @@ description: Arquitetura real de conexão e disparo WhatsApp deste projeto — u
 - **Meta Cloud API** (WhatsApp oficial, canal paralelo para quem tem número corporativo verificado) continua intocada, com seu próprio cron (`app/api/cron/whatsapp/route.ts`, também chamado a cada 1min pelo cron-job.org). Os dois canais não se misturam: uma conta usa uazapi OU Meta Cloud API.
 - **Código morto:** `worker/src/*` (incluindo `uazapi-manager.ts` e `whatsapp-worker.ts`) continua no repositório mas **não roda em lugar nenhum**. Não editar ali esperando efeito em produção; qualquer mudança de comportamento de envio/lembrete/campanha se faz em `app/api/cron/whatsapp-uazapi/route.ts`. Se um dia o worker for oficialmente reativado ou removido, é decisão explícita do dono do projeto — perguntar antes de assumir qualquer um dos dois caminhos.
 
+## Invariantes do envio (valem para o cron uazapi, o cron Meta, o envio imediato e o "Forçar envio")
+
+Todos vieram de bugs reais encontrados na auditoria de 2026-09-19 — cada um tem teste em `tests/` que falha se voltar.
+
+1. **Nunca reivindicar (`processando`) antes de saber que dá para enviar por aquele caminho.** `enviarWhatsAppImediato` é **só Meta**: conta uazapi deixa a notificação em `fila` para o cron da uazapi. Reivindicar e desistir deixava confirmação de pagamento e "Cobrar agora" presos para sempre (o cron só lê `fila`).
+2. **Depois de reivindicar, toda saída sem enviar devolve o status** (`fila`, ou o original no "Forçar"). Nada fica em `processando` por descuido.
+3. **Depois que a mensagem saiu, nada devolve a notificação para `fila` nem marca falha** — nem exceção no histórico de atendimento, nem erro ao gravar o status. O cron reenviaria e o cliente receberia 2x. Gravar `enviado` com repetição (3 tentativas) e, se o banco nunca aceitar, logar `MENSAGEM ENVIADA MAS STATUS NÃO GRAVADO` — mas não reenviar.
+4. **Toda mudança de status passa por `atualizarStatusNotificacao`** (`lib/whatsapp/status-notificacao.ts`): checa o `error`, escopa por `conta_id`, loga com contexto. Ignorar o retorno do `.update()` é o defeito que deixou jobs presos.
+5. **Última checagem antes de enviar lembrete (`vereditoLembrete`):** a baixa da parcela só cancela notificações em `fila`; uma já `processando` (esperando os 15–20s de digitação) seguia e cobrava quem acabou de pagar. Lembretes `5d/3d/2d/1d/dia/vencido1d` são conferidos contra a parcela imediatamente antes do envio; `paga` → cancela; erro de leitura → volta para `fila` (perder um lembrete é melhor que cobrar quem pagou). `pagamento_confirmado`, `manual`, `boasvindas` e `agendada` não passam por essa checagem.
+6. **Texto da mensagem nunca sai com dado errado:** `resolverVariaveis` lança `VariaveisIndisponiveisError` em vez de cair em `R$ 0,00`/campo vazio. `erro_banco` → volta para `fila` e tenta no próximo tick; `nao_encontrado` → cancela.
+7. **Erro no claim não vira laço quente:** se o UPDATE do claim falha, `break` (o próximo tick tenta de novo) — nunca `continue`.
+8. **Pendência de decisão:** não existe "reaper" de `processando` antigo. Precisa de uma coluna com o horário do claim (migration em tabela core) e de decidir o risco de reenvio; sem ela, um processo morto no meio do envio deixa a notificação presa. Ver `docs/auditoria-2026-09-19.md`.
+
 ## Modelo de conexão
 
 - **1 conta (tenant) = 1 instância uazapi = 1 número.** Nunca compartilhar instância entre contas.

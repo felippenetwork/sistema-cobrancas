@@ -19,7 +19,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { encontrarOuCriarAtendimento } from '@/lib/atendimento/encontrar-ou-criar'
-import { resolverVariaveis, resolverVariaveisLeves } from '@/lib/whatsapp/resolver-variaveis'
+import { resolverVariaveis, resolverVariaveisLeves, VariaveisIndisponiveisError } from '@/lib/whatsapp/resolver-variaveis'
+import { atualizarStatusNotificacao, vereditoLembrete } from '@/lib/whatsapp/status-notificacao'
+import { cronAutorizado } from '@/lib/cron-auth'
 import {
   instName,
   getAllInstances,
@@ -31,7 +33,6 @@ import {
 
 export const maxDuration = 300
 
-const CRON_SECRET  = process.env.CRON_SECRET
 const BUDGET_MS     = 270_000 // margem sob maxDuration=300 para a sincronização + resposta
 
 // Simulação de digitação/abertura de chat antes de QUALQUER envio automático
@@ -137,29 +138,51 @@ async function enviarNotificacao(
   contaId: string,
   token: string,
   notif: Notif,
-): Promise<'enviado' | 'falhou' | 'cancelado' | 'rate_limited'> {
+): Promise<'enviado' | 'falhou' | 'cancelado' | 'rate_limited' | 'adiado'> {
+  // Toda mudança de status é checada (COD-M1): ignorar o `error` deixava a
+  // notificação presa em 'processando' — nunca reenviada, nunca marcada como falha.
+  const marcar = (patch: Parameters<typeof atualizarStatusNotificacao>[3], etapa: string, tentativas = 1) =>
+    atualizarStatusNotificacao(supabase, contaId, notif.id, patch, etapa, tentativas)
+
   const { data: cliente } = await supabase
-    .from('clientes').select('celular, deleted_at').eq('id', notif.cliente_id).maybeSingle()
+    .from('clientes').select('celular, deleted_at').eq('id', notif.cliente_id).eq('conta_id', contaId).maybeSingle()
 
   if (!cliente || cliente.deleted_at) {
-    await supabase.from('notificacoes_enviadas').update({ status: 'cancelado' }).eq('id', notif.id)
+    await marcar({ status: 'cancelado' }, 'cliente_inexistente')
     return 'cancelado'
   }
   const celular = cliente.celular as string | null
   if (!celular) {
-    await supabase.from('notificacoes_enviadas').update({ status: 'falhou' }).eq('id', notif.id)
+    await marcar({ status: 'falhou' }, 'cliente_sem_celular')
     return 'falhou'
   }
 
   let mensagem: string
 
+  // Falha ao montar o texto NUNCA vira mensagem com valor/nome errados: banco
+  // indisponível → volta para a fila e tenta no próximo tick; dado inexistente
+  // (parcela apagada) → cancela.
+  const semVariaveis = async (err: unknown): Promise<'cancelado' | 'adiado'> => {
+    if (err instanceof VariaveisIndisponiveisError && err.motivo === 'nao_encontrado') {
+      await marcar({ status: 'cancelado' }, 'dados_inexistentes')
+      return 'cancelado'
+    }
+    console.error('[cron/whatsapp-uazapi] variáveis indisponíveis', { notifId: notif.id, contaId, err })
+    await marcar({ status: 'fila' }, 'variaveis_indisponiveis')
+    return 'adiado'
+  }
+
   if (notif.tipo === 'agendada') {
     const template = (notif.mensagem_final ?? '').trim()
     if (!template) {
-      await supabase.from('notificacoes_enviadas').update({ status: 'falhou' }).eq('id', notif.id)
+      await marcar({ status: 'falhou' }, 'agendada_sem_texto')
       return 'falhou'
     }
-    mensagem = await resolverVariaveisLeves(supabase, { contaId, clienteId: notif.cliente_id, template })
+    try {
+      mensagem = await resolverVariaveisLeves(supabase, { contaId, clienteId: notif.cliente_id, template })
+    } catch (err) {
+      return semVariaveis(err)
+    }
   } else {
     const { data: cfgNotif } = await supabase
       .from('notificacoes_config')
@@ -170,7 +193,7 @@ async function enviarNotificacao(
 
     const template = cfgNotif?.template_whatsapp?.trim()
     if (!template) {
-      await supabase.from('notificacoes_enviadas').update({ status: 'falhou' }).eq('id', notif.id)
+      await marcar({ status: 'falhou' }, 'sem_template')
       return 'falhou'
     }
 
@@ -179,46 +202,76 @@ async function enviarNotificacao(
       const { data: p } = await supabase
         .from('parcelas').select('id')
         .eq('cobranca_id', notif.cobranca_id)
+        .eq('conta_id', contaId)
         .order('numero', { ascending: true }).limit(1).maybeSingle()
       parcelaId = p?.id ?? null
     }
     if (!parcelaId) {
-      await supabase.from('notificacoes_enviadas').update({ status: 'falhou' }).eq('id', notif.id)
+      await marcar({ status: 'falhou' }, 'sem_parcela')
       return 'falhou'
     }
 
-    mensagem = await resolverVariaveis(supabase, {
-      contaId, parcelaId, clienteId: notif.cliente_id, template, cobrancaId: notif.cobranca_id,
-    })
+    try {
+      mensagem = await resolverVariaveis(supabase, {
+        contaId, parcelaId, clienteId: notif.cliente_id, template, cobrancaId: notif.cobranca_id,
+      })
+    } catch (err) {
+      return semVariaveis(err)
+    }
   }
 
   try {
     await simularDigitacao(token, celular)
+
+    // A baixa só cancela notificações em 'fila'; esta já está 'processando' e
+    // acabou de esperar 15-20s de digitação — pode ter sido paga nesse intervalo.
+    const veredito = await vereditoLembrete(supabase, contaId, notif)
+    if (veredito === 'cancelar') {
+      await marcar({ status: 'cancelado' }, 'parcela_paga_antes_do_envio')
+      return 'cancelado'
+    }
+    if (veredito === 'tentar_depois') {
+      await marcar({ status: 'fila' }, 'parcela_indeterminada')
+      return 'adiado'
+    }
+
     await sendText(token, celular, mensagem)
   } catch (err) {
     if (err instanceof UazapiRateLimitError) {
       // Devolve para a fila — não foi recusa de verdade, só limitação transitória.
-      await supabase.from('notificacoes_enviadas').update({ status: 'fila' }).eq('id', notif.id)
+      await marcar({ status: 'fila' }, 'rate_limited')
       return 'rate_limited'
     }
     console.error('[cron/whatsapp-uazapi] envio falhou', notif.id, err)
-    await supabase.from('notificacoes_enviadas').update({ status: 'falhou' }).eq('id', notif.id)
+    await marcar({ status: 'falhou' }, 'envio_falhou')
     return 'falhou'
   }
 
-  const agora = new Date().toISOString()
-  await supabase.from('notificacoes_enviadas').update({
-    status: 'enviado', mensagem_final: mensagem, enviado_em: agora,
-  }).eq('id', notif.id)
+  // ── A partir daqui a mensagem JÁ FOI enviada: nada abaixo pode devolver a
+  // notificação para 'fila' (o próximo tick reenviaria e o cliente receberia 2x).
+  const gravado = await marcar(
+    { status: 'enviado', mensagem_final: mensagem, enviado_em: new Date().toISOString() },
+    'pos_envio',
+    3,
+  )
+  if (!gravado) {
+    console.error('[cron/whatsapp-uazapi] MENSAGEM ENVIADA MAS STATUS NÃO GRAVADO — conferir manualmente', {
+      notifId: notif.id, contaId,
+    })
+  }
 
   // Mesmo tratamento do cron Meta (/api/cron/whatsapp): garante que a mensagem
   // enviada aparece no histórico de Atendimento, não só no Log.
-  const atendimentoId = await encontrarOuCriarAtendimento(supabase, contaId, celular, notif.cliente_id, mensagem)
-  const { error: mwaErr } = await supabase.from('mensagens_wa').insert({
-    conta_id: contaId, cliente_id: notif.cliente_id, atendimento_id: atendimentoId,
-    celular, direcao: 'out', texto: mensagem, lida: true,
-  })
-  if (mwaErr) console.error('[cron/whatsapp-uazapi] mensagens_wa.insert', mwaErr)
+  try {
+    const atendimentoId = await encontrarOuCriarAtendimento(supabase, contaId, celular, notif.cliente_id, mensagem)
+    const { error: mwaErr } = await supabase.from('mensagens_wa').insert({
+      conta_id: contaId, cliente_id: notif.cliente_id, atendimento_id: atendimentoId,
+      celular, direcao: 'out', texto: mensagem, lida: true,
+    })
+    if (mwaErr) console.error('[cron/whatsapp-uazapi] mensagens_wa.insert', mwaErr)
+  } catch (err) {
+    console.error('[cron/whatsapp-uazapi] histórico de atendimento falhou (mensagem já enviada)', { notifId: notif.id, contaId, err })
+  }
 
   return 'enviado'
 }
@@ -268,18 +321,26 @@ async function processarConta(
 
     // Claim atômico — protege contra 2 execuções do cron externo se sobrepondo
     // (mesmo padrão já usado por /api/cron/whatsapp e forcarEnvioAction).
-    const { data: claimed } = await supabase
+    const { data: claimed, error: claimErr } = await supabase
       .from('notificacoes_enviadas')
       .update({ status: 'processando' })
       .eq('id', notif.id)
+      .eq('conta_id', contaId)
       .eq('status', 'fila')
       .select('id')
       .maybeSingle()
+    if (claimErr) {
+      // Sem isso o `continue` abaixo virava laço quente contra um banco com problema.
+      console.error('[cron/whatsapp-uazapi] claim falhou', { notifId: notif.id, contaId, claimErr })
+      break
+    }
     if (!claimed) continue // outra execução já levou esta notificação
 
     const resultado = await enviarNotificacao(supabase, contaId, token, notif)
     if (resultado === 'enviado') enviados++
-    if (resultado === 'rate_limited') break // não insiste nesta conta neste tick
+    // Não insiste nesta conta neste tick: rate limit da uazapi, ou falha de leitura
+    // do banco que provavelmente persiste (a notificação já voltou para 'fila').
+    if (resultado === 'rate_limited' || resultado === 'adiado') break
 
     // Ritmo anti-ban: pausa real entre envios, mesmo depois de falha/cancelamento
     // (um "não enviou" ainda conta como 1 tentativa de contato pra quem observa de fora).
@@ -356,13 +417,17 @@ async function processarCampanha(
 
     // Claim atômico: marca 'enviado' ANTES de mandar, reverte se der erro —
     // status da tabela não tem um estado "processando" intermediário.
-    const { data: claimed } = await supabase
+    const { data: claimed, error: claimErr } = await supabase
       .from('campanha_destinatarios')
       .update({ status: 'enviado', enviado_em: new Date().toISOString() })
       .eq('id', dest.id)
       .eq('status', 'pendente')
       .select('id')
       .maybeSingle()
+    if (claimErr) {
+      console.error('[cron/whatsapp-uazapi] claim de destinatário falhou', { destId: dest.id, contaId, claimErr })
+      break
+    }
     if (!claimed) continue // outra execução já levou este destinatário
 
     const celular = dest.celular as string
@@ -377,13 +442,15 @@ async function processarCampanha(
     } catch (err) {
       if (err instanceof UazapiRateLimitError) {
         // Não foi recusa — devolve pra pendente e para nesta conta neste tick.
-        await supabase.from('campanha_destinatarios')
+        const { error: revErr } = await supabase.from('campanha_destinatarios')
           .update({ status: 'pendente', enviado_em: null }).eq('id', dest.id)
+        if (revErr) console.error('[cron/whatsapp-uazapi] não conseguiu devolver destinatário para pendente — ficou "enviado" sem envio', { destId: dest.id, contaId, revErr })
         break
       }
-      await supabase.from('campanha_destinatarios')
+      const { error: falhaErr } = await supabase.from('campanha_destinatarios')
         .update({ status: 'falhou', erro: String(err).slice(0, 500) })
         .eq('id', dest.id)
+      if (falhaErr) console.error('[cron/whatsapp-uazapi] não conseguiu marcar destinatário como falhou — ficou "enviado" sem envio', { destId: dest.id, contaId, falhaErr })
     }
 
     await sleep(intervalAleatorioMs(intMin, intMax))
@@ -395,7 +462,7 @@ async function processarCampanha(
 // ── Handler ───────────────────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
-  if (!CRON_SECRET || req.headers.get('authorization') !== `Bearer ${CRON_SECRET}`) {
+  if (!cronAutorizado(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

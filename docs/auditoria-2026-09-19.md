@@ -70,10 +70,15 @@ Mas a migração de arquitetura (worker/Baileys → uazapi direto) abriu buracos
 | ID | Status | Gravidade | Achado |
 |---|---|---|---|
 | COD-A2 | ❌ ABERTO, piorou | ALTO | 152 ocorrências de `any`/`as any` em `app/`+`lib/` (top: `enviar-imediato.ts`, `atendimento/renovar.ts`, `cron/whatsapp/route.ts`) |
-| COD-M1 | 🔁 migrou pro código vivo | ALTO | Update de status pós-envio no cron ignora `error` — falha de UPDATE deixa job preso em "processando" pra sempre |
+| COD-M1 | ✅ RESOLVIDO (2026-09-19) | — | Toda mudança de status de notificação passa por `atualizarStatusNotificacao` (checa `error`, loga com contexto, repete 3x depois de o envio já ter saído); erro no claim não vira laço quente | `lib/whatsapp/status-notificacao.ts` e os 3 caminhos de envio |
+| **COD-N1** | ✅ **RESOLVIDO (2026-09-19)** — achado NOVO, não estava na auditoria | **CRÍTICO (funcional)** | **`enviarWhatsAppImediato` reivindicava a notificação (`processando`) e só depois descobria que a conta não usa Meta — em conta uazapi a confirmação de pagamento e o "Cobrar agora" ficavam presos em `processando` para sempre (o cron da uazapi só lê `fila`). Chamado por 5 fluxos (baixa manual x2, webhook EfiBank, renovar, cobrança manual)** | `lib/whatsapp/enviar-imediato.ts` |
+| **COD-N2** | ✅ **RESOLVIDO (2026-09-19)** | ALTO | Depois de a Meta aceitar a mensagem, qualquer exceção (ex.: `encontrarOuCriarAtendimento`) caía no `catch` que devolvia a notificação para `fila` — o cron reenviava e o cliente recebia 2x. Mesmo padrão no cron Meta e no "Forçar envio" | `enviar-imediato.ts`, `cron/whatsapp/route.ts`, `log/_actions/log.ts` |
+| **RN-N2** | ✅ **RESOLVIDO (2026-09-19)** | ALTO | Corrida com a baixa: a RPC `baixar_parcela` cancela só notificações em `fila`; uma já reivindicada (`processando`) esperando os 15–20s de digitação seguia e **cobrava quem acabou de pagar**. Agora há checagem final (`vereditoLembrete`) imediatamente antes do envio nos dois crons; erro de leitura não libera o envio | `lib/whatsapp/status-notificacao.ts` |
+| **SEG-N3** | ✅ **RESOLVIDO (2026-09-19)** | ALTO | Crons `whatsapp` (Meta) e `scheduler` aceitavam `Authorization: Bearer undefined` sem `CRON_SECRET` configurado; o cron `lookdefense` ficava **sem autenticação nenhuma**. Agora `cronAutorizado()` recusa quando o segredo falta | `lib/cron-auth.ts` |
+| **COD-N3** | ✅ **RESOLVIDO (2026-09-19)** | ALTO | "Forçar envio" do Log marcava a notificação como `cancelado` ao reivindicar e não restaurava em nenhuma falha: um lembrete da fila era perdido em silêncio (e um cancelado de propósito virava `fila`). Agora restaura o status original; também não devolve mais o texto cru da uazapi à tela (resolve SEG-M3 nesse caminho) | `log/_actions/log.ts` |
 | COD-M3, M4, M6 | ✅ RESOLVIDOS | — | Erros verificados e logados com contexto |
 | COD-M5 | ✅ RESOLVIDO | — | `order()` explícito na listagem principal |
-| COD-B1 | 🔁 migrou | BAIXO | `resolverVariaveis` não checa erro — falha vira placeholder vazio silencioso |
+| COD-B1 | ✅ RESOLVIDO (2026-09-19), e era pior que BAIXO | — | Falha na consulta da parcela virava **`R$ 0,00` enviado ao cliente** (valor errado), não só campo em branco. `resolverVariaveis` agora lança `VariaveisIndisponiveisError` (`erro_banco` → tenta no próximo tick; `nao_encontrado` → cancela); cron Meta e envio imediato também não enviam com valor/vencimento em branco | `lib/whatsapp/resolver-variaveis.ts` |
 | COD-B2 | 🔁 parcial | BAIXO | Duplicação app-side eliminada; resta só cópia no worker morto |
 | SIN-C1, C2, A1, A2, A3, M1 | ✅ RESOLVIDOS | — | Tipos de notificação atualizados, `.env.example` sincronizado, token gravado pela arquitetura direta, headers consistentes, policy de UPDATE criada |
 | **SIN-M2** | ❌ **ABERTO, pior do que descrito** | ALTO | `types/database.ts` é mantido à mão, desatualizado — faltam `cobrancas_pix` e `mensagens_rapidas` (usadas em produção via `supabase as any` **dentro do webhook que confirma pagamento PIX**) | `types/database.ts`; `webhooks/efibank/route.ts:20-21` |
@@ -91,7 +96,7 @@ Mas a migração de arquitetura (worker/Baileys → uazapi direto) abriu buracos
 | TST-C2 | ✅ RESOLVIDO | — | `calcularVencimento` com 7 casos, incluindo dia 31→fev bissexto/não-bissexto |
 | **TST-C3** | ❌ **ABERTO** | **ALTO** | RPC `baixar_parcela` existe mas **nenhum teste** força falha no meio ou confirma atomicidade |
 | TST-C4 | ✅ RESOLVIDO | — | Relógio controlado com `vi.useFakeTimers()` |
-| **TST-C5** | ❌ **CRÍTICO, migrado** | **CRÍTICO** | Zero teste nas rotas de cron ativas (`whatsapp`, `whatsapp-uazapi`, `scheduler`); um bug real de duplicidade de envio já foi corrigido em produção (commit `3a13093`) **sem nunca ganhar teste de regressão** |
+| **TST-C5** | ✅ **RESOLVIDO (2026-09-19)** | — | 124 testes novos cobrem os crons `whatsapp-uazapi` e `whatsapp` (claim atômico com 2 execuções sobrepostas, janela 09–20h nas fronteiras 08:59/09:00/19:59/20:00/20:01, rate limit, corrida com pagamento, falhas de status, autenticação), o envio imediato, o "Forçar envio" e o resolvedor de variáveis. Contra a versão anterior do código **43 desses testes falham**. Ainda sem teste: `scheduler` (geração de parcelas/lembretes) — só a autenticação está coberta | `tests/*.test.ts`, `tests/helpers/fake-supabase.ts` |
 | TST-A1 | ❌ ABERTO | ALTO | Só `clientes` e `contas` têm teste de isolamento — **faltam 20 tabelas** (parcelas, notificacoes_enviadas, lancamentos, conexoes, cobrancas_pix...) |
 | TST-A2 | ❌ ABERTO | ALTO | Playwright não instalado, zero E2E |
 
@@ -144,10 +149,24 @@ Isso é mais estrutural do que qualquer bug encontrado:
 - Contas já conectadas na uazapi têm o webhook registrado SEM `&secret=` na URL — precisam reiniciar a conexão uma vez (ou ter o webhook re-registrado) para voltar a receber mensagens no atendimento. Lembretes e cobranças enviados não são afetados (saem pelo cron, não por este webhook)
 
 ### ONDA 1 — Risco de dinheiro e mensagem duplicada
-1. **TST-C5 + TST-C3** — teste de idempotência do cron de WhatsApp e de atomicidade da RPC de baixa (o bug de duplicidade já aconteceu uma vez em produção, commit `3a13093`, sem prova de regressão)
-2. **SIN-M2** — gerar `database.types.ts` de verdade (`supabase gen types typescript`), eliminar `supabase as any` no webhook EfiBank
-3. **COD-M1** — tratar erro do UPDATE de status pós-envio no cron (job não pode ficar preso em "processando")
-4. **SEG-A5** — criptografar em repouso: token uazapi, secret/certificado EfiBank, senha LookDefense
+1. ~~**TST-C5**~~ ✅ feito em 2026-09-19 (cron, envio imediato, "Forçar envio", resolvedor). **TST-C3** (atomicidade da RPC `baixar_parcela`) segue aberto: só dá para provar em Postgres real e hoje o único banco disponível é o projeto compartilhado — decidir entre projeto Supabase de teste, Postgres local (Docker) ou PGlite antes de escrever
+2. **SIN-M2** — regenerar `types/database.ts` de verdade (`supabase gen types typescript`, precisa de token/login do Supabase) e eliminar `supabase as any` no webhook EfiBank
+3. ~~**COD-M1**~~ ✅ feito em 2026-09-19 (+ COD-N1/N2/N3, RN-N2, SEG-N3, COD-B1 descobertos no caminho)
+4. **SEG-A5** — criptografar em repouso: token uazapi, `meta_app_secret`, secret/certificado EfiBank, senha LookDefense (precisa de decisão de chave — ver skill `seguranca-cobranx`)
+
+**Limpeza de dados em produção (fazer você, com revisão — eu não tenho acesso ao banco):** o bug COD-N1 deixou linhas presas em `processando` desde a última limpeza (migration 0030). Só os tipos `pagamento_confirmado` e `manual` passam pelo envio imediato, então dá para identificá-las com segurança pela `created_at` (criadas e reivindicadas no mesmo instante):
+```sql
+-- 1. revisar
+select id, conta_id, tipo, created_at from notificacoes_enviadas
+ where status = 'processando' and tipo in ('pagamento_confirmado','manual')
+   and created_at < now() - interval '10 minutes' order by created_at;
+-- 2. marcar como falhou (fica visível no Log; o usuário reenvia se ainda fizer sentido — não recolocar em 'fila',
+--    senão clientes recebem "pagamento confirmado" com dias de atraso)
+update notificacoes_enviadas set status = 'falhou'
+ where status = 'processando' and tipo in ('pagamento_confirmado','manual')
+   and created_at < now() - interval '10 minutes';
+```
+Lembretes (`5d`…`vencido1d`) em `processando` **não** dá para julgar pela `created_at` (são criados dias antes de serem reivindicados) — não há coluna de "reivindicado em". Um "reaper" automático de `processando` antigo exige essa coluna (migration em tabela core) e a decisão do risco de reenvio; ficou como pendência de decisão.
 
 ### ONDA 2 — A porta de entrada (maior alavanca comercial)
 1. Landing page (`app/page.tsx`) seguindo `design-system` §6 + `copywriting-conversao`

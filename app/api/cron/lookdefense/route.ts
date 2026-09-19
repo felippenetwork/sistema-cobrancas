@@ -3,6 +3,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { cronAutorizado } from '@/lib/cron-auth'
 
 export const maxDuration = 300
 
@@ -69,10 +70,7 @@ async function ldRenovar(token: string, cryptPass: string, userId: number): Prom
 }
 
 export async function GET(req: NextRequest) {
-  // Autenticação do cron
-  const authHeader = req.headers.get('authorization')
-  const cronSecret = process.env.CRON_SECRET
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+  if (!cronAutorizado(req)) {
     return NextResponse.json({ error: 'Não autorizado.' }, { status: 401 })
   }
 

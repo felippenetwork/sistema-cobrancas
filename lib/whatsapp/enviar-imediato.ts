@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { encontrarOuCriarAtendimento } from '@/lib/atendimento/encontrar-ou-criar'
+import { atualizarStatusNotificacao } from '@/lib/whatsapp/status-notificacao'
 
 const META_TEMPLATES: Record<string, { nome: string; idioma: string; params: 2 | 3; corpo: string }> = {
   '5d':                 { nome: 'cobranca_5d',           idioma: 'pt_BR', params: 3, corpo: 'Olá, *{{1}}*! Sua fatura de *{{2}}* vence em *5 dias* ({{3}}). Para dúvidas, responda esta mensagem.' },
@@ -29,7 +30,8 @@ function formatarData(iso: string): string {
 /**
  * Tenta enviar uma notificação WhatsApp imediatamente via Meta Cloud API.
  * Se bem-sucedido: atualiza notificacoes_enviadas para 'enviado' e registra em mensagens_wa.
- * Se falhar: mantém 'fila' para o cron processar como retry.
+ * Se não puder enviar por aqui: a notificação volta/permanece em 'fila' para o cron
+ * (Meta ou uazapi, conforme a conta) processar.
  * Retorna true se enviou com sucesso.
  */
 export async function enviarWhatsAppImediato(
@@ -42,22 +44,11 @@ export async function enviarWhatsAppImediato(
 ): Promise<boolean> {
   const supabase = createAdminClient()
 
-  // Claim atômico: só processa se a notificação ainda estiver em 'fila'.
-  // Evita envio duplo quando o cron e o envio imediato disputam a mesma notificação.
-  const { data: claimed } = await supabase
-    .from('notificacoes_enviadas')
-    .update({ status: 'processando' } as any)
-    .eq('id', notifId)
-    .eq('status', 'fila')
-    .select('id')
-    .maybeSingle()
-
-  if (!(claimed as any)?.id) {
-    console.log('[enviarWhatsAppImediato] notificação já reivindicada por outro processo', notifId)
-    return false
-  }
-
-  // Credenciais Meta
+  // Credenciais Meta — lidas ANTES de reivindicar a notificação. Este envio
+  // imediato só existe para a Meta Cloud API: conta sem Meta ativa (ex.: uazapi)
+  // precisa deixar a notificação em 'fila' para o cron da uazapi. Reivindicar
+  // primeiro e desistir depois deixava a confirmação de pagamento / cobrança
+  // manual presa em 'processando' para sempre (o cron só lê 'fila').
   const { data: cfg } = await supabase
     .from('configuracoes')
     .select('meta_api_ativo, meta_access_token, meta_phone_number_id')
@@ -67,6 +58,31 @@ export async function enviarWhatsAppImediato(
   if (!cfg?.meta_api_ativo || !cfg.meta_access_token || !cfg.meta_phone_number_id) {
     return false
   }
+
+  // Claim atômico: só processa se a notificação ainda estiver em 'fila'.
+  // Evita envio duplo quando o cron e o envio imediato disputam a mesma notificação.
+  const { data: claimed, error: claimErr } = await supabase
+    .from('notificacoes_enviadas')
+    .update({ status: 'processando' })
+    .eq('id', notifId)
+    .eq('conta_id', contaId)
+    .eq('status', 'fila')
+    .select('id')
+    .maybeSingle()
+
+  if (claimErr) {
+    console.error('[enviarWhatsAppImediato] claim falhou', { notifId, contaId, claimErr })
+    return false
+  }
+  if (!claimed?.id) {
+    console.log('[enviarWhatsAppImediato] notificação já reivindicada por outro processo', notifId)
+    return false
+  }
+
+  // Daqui até a chamada da Meta, qualquer saída sem enviar devolve a notificação
+  // para 'fila' — o cron Meta decide o destino final (cancelar, falhar, reenviar).
+  const liberar = (etapa: string) =>
+    atualizarStatusNotificacao(supabase, contaId, notifId, { status: 'fila' }, etapa)
 
   // Template customizado da conta tem prioridade sobre o hardcoded
   const { data: cfgTmpl } = await supabase
@@ -85,16 +101,23 @@ export async function enviarWhatsAppImediato(
         corpo:  corpoCustom,
       }
     : META_TEMPLATES[tipo]
-  if (!tmpl) return false
+  if (!tmpl) {
+    await liberar('sem_template')
+    return false
+  }
 
   // Dados do cliente
   const { data: cliente } = await supabase
     .from('clientes')
     .select('celular, nome, deleted_at')
     .eq('id', clienteId)
+    .eq('conta_id', contaId)
     .maybeSingle()
 
-  if (!cliente || (cliente as any).deleted_at || !(cliente as any).celular) return false
+  if (!cliente || (cliente as any).deleted_at || !(cliente as any).celular) {
+    await liberar('cliente_invalido')
+    return false
+  }
   const celular = (cliente as any).celular as string
   const nome    = ((cliente as any).nome as string) || 'Cliente'
 
@@ -104,6 +127,7 @@ export async function enviarWhatsAppImediato(
     const { data: p } = await supabase
       .from('parcelas').select('id')
       .eq('cobranca_id', cobrancaId)
+      .eq('conta_id', contaId)
       .order('numero', { ascending: true }).limit(1).maybeSingle()
     pid = (p as any)?.id ?? null
   }
@@ -111,12 +135,17 @@ export async function enviarWhatsAppImediato(
   let valor = ''
   let data  = ''
   if (pid) {
-    const { data: parcela } = await supabase
-      .from('parcelas').select('valor, data_vencimento').eq('id', pid).maybeSingle()
-    if (parcela) {
-      valor = formatarMoeda(Number((parcela as any).valor ?? 0))
-      data  = formatarData((parcela as any).data_vencimento ?? '')
+    const { data: parcela, error: parcelaErr } = await supabase
+      .from('parcelas').select('valor, data_vencimento').eq('id', pid).eq('conta_id', contaId).maybeSingle()
+    // Nunca enviar com valor/vencimento em branco — devolve para o cron decidir
+    // (tenta de novo se foi falha do banco; cancela se a parcela não existe mais).
+    if (parcelaErr || !parcela) {
+      console.error('[enviarWhatsAppImediato] parcela indisponível', { notifId, contaId, parcelaErr })
+      await liberar('parcela_indisponivel')
+      return false
     }
+    valor = formatarMoeda(Number((parcela as any).valor ?? 0))
+    data  = formatarData((parcela as any).data_vencimento ?? '')
   }
 
   const parametros    = tmpl.params === 2 ? [nome, valor] : [nome, valor, data]
@@ -145,15 +174,25 @@ export async function enviarWhatsAppImediato(
       const err = await res.json().catch(() => ({}))
       throw new Error((err as any)?.error?.message ?? `Meta erro ${res.status}`)
     }
+  } catch (err: any) {
+    console.error('[enviarWhatsAppImediato] falha ao enviar', tipo, err?.message)
+    // Devolve para fila para que o cron possa tentar novamente
+    await liberar('falha_envio')
+    return false
+  }
 
-    const agora = new Date().toISOString()
+  // ── A partir daqui a mensagem JÁ FOI enviada. Nada abaixo pode devolver a
+  // notificação para 'fila' — o cron reenviaria e o cliente receberia 2x.
+  const gravado = await atualizarStatusNotificacao(
+    supabase, contaId, notifId,
+    { status: 'enviado', mensagem_final: textoMensagem, enviado_em: new Date().toISOString() },
+    'pos_envio', 3,
+  )
+  if (!gravado) {
+    console.error('[enviarWhatsAppImediato] MENSAGEM ENVIADA MAS STATUS NÃO GRAVADO — conferir manualmente', { notifId, contaId })
+  }
 
-    await supabase.from('notificacoes_enviadas').update({
-      status:         'enviado',
-      mensagem_final: textoMensagem,
-      enviado_em:     agora,
-    }).eq('id', notifId)
-
+  try {
     const atendimentoId = await encontrarOuCriarAtendimento(
       supabase, contaId, celular, clienteId, textoMensagem,
     )
@@ -168,14 +207,9 @@ export async function enviarWhatsAppImediato(
       lida:           true,
     })
     if (mwaErr) console.error('[enviarWhatsAppImediato] mensagens_wa', mwaErr)
-
-    return true
-  } catch (err: any) {
-    console.error('[enviarWhatsAppImediato] falha ao enviar', tipo, err?.message)
-    // Devolve para fila para que o cron possa tentar novamente
-    await supabase.from('notificacoes_enviadas')
-      .update({ status: 'fila' } as any)
-      .eq('id', notifId)
-    return false
+  } catch (err) {
+    console.error('[enviarWhatsAppImediato] histórico de atendimento falhou (mensagem já enviada)', { notifId, contaId, err })
   }
+
+  return true
 }

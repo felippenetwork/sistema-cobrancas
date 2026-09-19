@@ -4,7 +4,8 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { revalidatePath } from 'next/cache'
 import { encontrarOuCriarAtendimento } from '@/lib/atendimento/encontrar-ou-criar'
-import { resolverVariaveis, resolverVariaveisLeves } from '@/lib/whatsapp/resolver-variaveis'
+import { resolverVariaveis, resolverVariaveisLeves, VariaveisIndisponiveisError } from '@/lib/whatsapp/resolver-variaveis'
+import { atualizarStatusNotificacao } from '@/lib/whatsapp/status-notificacao'
 
 async function getContaId() {
   const supabase = await createClient()
@@ -77,6 +78,20 @@ export async function forcarEnvioAction(id: string): Promise<{ error?: string }>
   const { contaId } = await getContaId()
   const admin = createAdminClient()
 
+  // Status de antes do clique: o claim abaixo marca a notificação como 'cancelado' enquanto
+  // trabalha. Sem lembrar o original, qualquer falha deixava um lembrete que estava na
+  // 'fila' CANCELADO em silêncio (e um cancelado de propósito virava 'fila' e saía sozinho).
+  const { data: atual } = await admin
+    .from('notificacoes_enviadas')
+    .select('status')
+    .eq('id', id)
+    .eq('conta_id', contaId)
+    .eq('canal', 'whatsapp')
+    .in('status', ['fila', 'cancelado'])
+    .maybeSingle()
+  if (!atual) return { error: 'Notificação não encontrada.' }
+  const statusAnterior = atual.status as 'fila' | 'cancelado'
+
   // ── 1. Claim atômico ─────────────────────────────────────────────────────
   const { data: notif } = await admin
     .from('notificacoes_enviadas')
@@ -84,22 +99,29 @@ export async function forcarEnvioAction(id: string): Promise<{ error?: string }>
     .eq('id', id)
     .eq('conta_id', contaId)
     .eq('canal', 'whatsapp')
-    .in('status', ['fila', 'cancelado'])
+    .eq('status', statusAnterior)
     .select('id, parcela_id, cobranca_id, cliente_id, tipo, mensagem_final')
     .maybeSingle()
 
   if (!notif) return { error: 'Notificação não encontrada.' }
+
+  // Toda saída com erro depois do claim devolve a notificação ao status original.
+  const falhar = async (mensagem: string): Promise<{ error: string }> => {
+    await atualizarStatusNotificacao(admin, contaId, id, { status: statusAnterior }, 'forcar_envio_falhou')
+    return { error: mensagem }
+  }
 
   // ── 2. Buscar cliente ────────────────────────────────────────────────────
   const { data: cliente } = await admin
     .from('clientes')
     .select('celular, nome, sobrenome, deleted_at')
     .eq('id', notif.cliente_id as string)
+    .eq('conta_id', contaId)
     .maybeSingle()
 
-  if (!cliente || cliente.deleted_at) return { error: 'Cliente não encontrado ou excluído.' }
+  if (!cliente || cliente.deleted_at) return falhar('Cliente não encontrado ou excluído.')
   const celular = cliente.celular
-  if (!celular) return { error: 'Cliente sem celular cadastrado.' }
+  if (!celular) return falhar('Cliente sem celular cadastrado.')
 
   // ── 3. Verificar provedor ativo ──────────────────────────────────────────
   const { data: cfgConta } = await admin
@@ -131,8 +153,7 @@ export async function forcarEnvioAction(id: string): Promise<{ error?: string }>
       : META_TMPL[notif.tipo as string]
 
     if (!tmpl) {
-      await admin.from('notificacoes_enviadas').update({ status: 'fila' }).eq('id', id)
-      return { error: `Tipo "${notif.tipo}" não possui template Meta configurado.` }
+      return falhar(`Tipo "${notif.tipo}" não possui template Meta configurado.`)
     }
 
     let parcelaId = notif.parcela_id as string | null
@@ -140,6 +161,7 @@ export async function forcarEnvioAction(id: string): Promise<{ error?: string }>
       const { data: p } = await admin
         .from('parcelas').select('id')
         .eq('cobranca_id', notif.cobranca_id as string)
+        .eq('conta_id', contaId)
         .order('numero', { ascending: true }).limit(1).maybeSingle()
       parcelaId = (p as any)?.id ?? null
     }
@@ -147,13 +169,13 @@ export async function forcarEnvioAction(id: string): Promise<{ error?: string }>
     let valor = ''
     let data  = ''
     if (parcelaId) {
-      const { data: parcela } = await admin
+      const { data: parcela, error: parcelaErr } = await admin
         .from('parcelas').select('valor, data_vencimento')
-        .eq('id', parcelaId).maybeSingle()
-      if (parcela) {
-        valor = _fmtBRL(Number((parcela as any).valor ?? 0))
-        data  = _fmtData((parcela as any).data_vencimento ?? '')
-      }
+        .eq('id', parcelaId).eq('conta_id', contaId).maybeSingle()
+      // Nunca enviar com valor/vencimento em branco.
+      if (parcelaErr || !parcela) return falhar('Não foi possível ler a parcela para montar a mensagem. Tente novamente.')
+      valor = _fmtBRL(Number((parcela as any).valor ?? 0))
+      data  = _fmtData((parcela as any).data_vencimento ?? '')
     }
 
     const nome       = (cliente.nome as string) || 'Cliente'
@@ -184,36 +206,40 @@ export async function forcarEnvioAction(id: string): Promise<{ error?: string }>
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
         const msg = (err as any)?.error?.message ?? `Meta erro ${res.status}`
-        await admin.from('notificacoes_enviadas').update({ status: 'fila' }).eq('id', id)
-        return { error: `Falha ao enviar via Meta: ${msg}` }
+        return falhar(`Falha ao enviar via Meta: ${msg}`)
       }
     } catch {
-      await admin.from('notificacoes_enviadas').update({ status: 'fila' }).eq('id', id)
-      return { error: 'Erro de rede ao chamar a Meta API.' }
+      return falhar('Erro de rede ao chamar a Meta API.')
     }
 
-    const agora = new Date().toISOString()
-    await admin.from('notificacoes_enviadas')
-      .update({ status: 'enviado', mensagem_final: texto, enviado_em: agora })
-      .eq('id', id)
-
-    // Garantir que existe um atendimento e salvar a mensagem
-    const atendimentoId = await encontrarOuCriarAtendimento(
-      admin, contaId, celular,
-      notif.cliente_id as string | null,
-      texto,
+    // A mensagem JÁ FOI enviada: nada daqui para baixo devolve o status original.
+    await atualizarStatusNotificacao(
+      admin, contaId, id,
+      { status: 'enviado', mensagem_final: texto, enviado_em: new Date().toISOString() },
+      'forcar_envio_pos_envio', 3,
     )
 
-    const { error: mwaErr } = await admin.from('mensagens_wa').insert({
-      conta_id:       contaId,
-      cliente_id:     notif.cliente_id,
-      atendimento_id: atendimentoId,
-      celular,
-      direcao:        'out',
-      texto,
-      lida:           true,
-    })
-    if (mwaErr) console.error('[forcarEnvio] mensagens_wa.insert', mwaErr)
+    // Garantir que existe um atendimento e salvar a mensagem
+    try {
+      const atendimentoId = await encontrarOuCriarAtendimento(
+        admin, contaId, celular,
+        notif.cliente_id as string | null,
+        texto,
+      )
+
+      const { error: mwaErr } = await admin.from('mensagens_wa').insert({
+        conta_id:       contaId,
+        cliente_id:     notif.cliente_id,
+        atendimento_id: atendimentoId,
+        celular,
+        direcao:        'out',
+        texto,
+        lida:           true,
+      })
+      if (mwaErr) console.error('[forcarEnvio] mensagens_wa.insert', mwaErr)
+    } catch (err) {
+      console.error('[forcarEnvio] histórico de atendimento falhou (mensagem já enviada)', { id, contaId, err })
+    }
 
     revalidatePath('/log')
     return {}
@@ -222,14 +248,24 @@ export async function forcarEnvioAction(id: string): Promise<{ error?: string }>
   // ── 4b. Fallback: UazAPI ─────────────────────────────────────────────────
   let mensagem: string
 
+  const erroVariaveis = (err: unknown) => falhar(
+    err instanceof VariaveisIndisponiveisError && err.motivo === 'nao_encontrado'
+      ? 'Parcela ou cliente não encontrado para montar a mensagem.'
+      : 'Não foi possível montar a mensagem agora. Tente novamente.',
+  )
+
   if (notif.tipo === 'agendada') {
     const corpo = ((notif.mensagem_final as string) ?? '').trim()
-    if (!corpo) return { error: 'Mensagem não configurada.' }
-    mensagem = await resolverVariaveisLeves(admin, {
-      contaId,
-      clienteId: notif.cliente_id as string,
-      template:  corpo,
-    })
+    if (!corpo) return falhar('Mensagem não configurada.')
+    try {
+      mensagem = await resolverVariaveisLeves(admin, {
+        contaId,
+        clienteId: notif.cliente_id as string,
+        template:  corpo,
+      })
+    } catch (err) {
+      return erroVariaveis(err)
+    }
   } else {
     const { data: cfgNotif } = await admin
       .from('notificacoes_config')
@@ -239,7 +275,7 @@ export async function forcarEnvioAction(id: string): Promise<{ error?: string }>
       .maybeSingle()
 
     const template = cfgNotif?.template_whatsapp?.trim()
-    if (!template) return { error: 'Template WhatsApp não configurado para este tipo.' }
+    if (!template) return falhar('Template WhatsApp não configurado para este tipo.')
 
     let parcelaId = notif.parcela_id as string | null
     if (!parcelaId && notif.cobranca_id) {
@@ -247,27 +283,32 @@ export async function forcarEnvioAction(id: string): Promise<{ error?: string }>
         .from('parcelas')
         .select('id')
         .eq('cobranca_id', notif.cobranca_id as string)
+        .eq('conta_id', contaId)
         .order('numero', { ascending: true })
         .limit(1)
         .maybeSingle()
       parcelaId = p?.id ?? null
     }
-    if (!parcelaId) return { error: 'Parcela não encontrada para montar a mensagem.' }
+    if (!parcelaId) return falhar('Parcela não encontrada para montar a mensagem.')
 
-    mensagem = await resolverVariaveis(admin, {
-      contaId,
-      parcelaId,
-      clienteId:  notif.cliente_id as string,
-      template,
-      cobrancaId: notif.cobranca_id as string | null,
-    })
+    try {
+      mensagem = await resolverVariaveis(admin, {
+        contaId,
+        parcelaId,
+        clienteId:  notif.cliente_id as string,
+        template,
+        cobrancaId: notif.cobranca_id as string | null,
+      })
+    } catch (err) {
+      return erroVariaveis(err)
+    }
   }
 
   const uazapiUrl   = (process.env.UAZAPI_URL ?? '').replace(/\/$/, '')
   const globalToken = process.env.UAZAPI_ADMIN_TOKEN ?? process.env.UAZAPI_GLOBAL_TOKEN ?? ''
 
   if (!uazapiUrl || !globalToken) {
-    return { error: 'Nenhum provedor WhatsApp configurado (Meta API ou UazAPI).' }
+    return falhar('Nenhum provedor WhatsApp configurado (Meta API ou UazAPI).')
   }
 
   const instName = `quita${(contaId).replace(/-/g, '').slice(0, 10)}`
@@ -282,11 +323,11 @@ export async function forcarEnvioAction(id: string): Promise<{ error?: string }>
       }
     }
   } catch {
-    return { error: 'Erro ao conectar ao servidor WhatsApp.' }
+    return falhar('Erro ao conectar ao servidor WhatsApp.')
   }
 
   if (!instanceToken) {
-    return { error: 'WhatsApp desconectado. Reconecte em Conexão WA e tente novamente.' }
+    return falhar('WhatsApp desconectado. Reconecte em Conexão WA e tente novamente.')
   }
 
   try {
@@ -296,18 +337,20 @@ export async function forcarEnvioAction(id: string): Promise<{ error?: string }>
       body:    JSON.stringify({ number: celular, text: mensagem }),
     })
     if (!resp.ok) {
-      const txt = await resp.text()
-      return { error: `Falha ao enviar: ${txt}` }
+      // Detalhe da uazapi vai para o log do servidor, não para a tela (SEG-M3).
+      console.error('[forcarEnvio] uazapi recusou o envio', { id, contaId, status: resp.status, corpo: (await resp.text()).slice(0, 300) })
+      return falhar('A uazapi recusou o envio. Confira a conexão do WhatsApp e tente novamente.')
     }
   } catch {
-    return { error: 'Erro de rede ao enviar a mensagem.' }
+    return falhar('Erro de rede ao enviar a mensagem.')
   }
 
-  await admin
-    .from('notificacoes_enviadas')
-    .update({ status: 'enviado', mensagem_final: mensagem, enviado_em: new Date().toISOString() })
-    .eq('id', id)
-    .eq('status', 'cancelado')
+  // A mensagem JÁ FOI enviada: gravar o status com repetição, sem nunca devolver o original.
+  await atualizarStatusNotificacao(
+    admin, contaId, id,
+    { status: 'enviado', mensagem_final: mensagem, enviado_em: new Date().toISOString() },
+    'forcar_envio_pos_envio', 3,
+  )
 
   revalidatePath('/log')
   return {}
