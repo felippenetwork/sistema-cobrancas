@@ -6,7 +6,7 @@ import { revalidatePath } from 'next/cache'
 import { encontrarOuCriarAtendimento } from '@/lib/atendimento/encontrar-ou-criar'
 import { resolverVariaveis, resolverVariaveisLeves, VariaveisIndisponiveisError } from '@/lib/whatsapp/resolver-variaveis'
 import { atualizarStatusNotificacao } from '@/lib/whatsapp/status-notificacao'
-import { getAllInstances, instName, sendText, UazapiRateLimitError } from '@/lib/uazapi'
+import { sendText, UazapiRateLimitError } from '@/lib/uazapi'
 
 async function getContaId() {
   const supabase = await createClient()
@@ -305,35 +305,31 @@ export async function forcarEnvioAction(id: string): Promise<{ error?: string }>
     }
   }
 
-  if (!process.env.UAZAPI_ADMIN_TOKEN && !process.env.UAZAPI_GLOBAL_TOKEN) {
-    return falhar('Nenhum provedor WhatsApp configurado (Meta API ou UazAPI).')
-  }
+  // Fonte de verdade: conexoes.status/uazapi_instance_token — a MESMA que o
+  // cron usa pra decidir quem está elegível para enviar (não uma checagem ao
+  // vivo via /instance/all). Achado real (2026-09-19, dois bugs seguidos
+  // nesse caminho): a versão anterior fazia sua própria checagem contra a API
+  // de administração da uazapi (getAllInstances/instName), que depende do
+  // UAZAPI_ADMIN_TOKEN — uma credencial SEPARADA do token da instância, só
+  // usada para listar/gerenciar instâncias. Esse token estava vazio em
+  // produção, então "Forçar" sempre reportava "desconectado" mesmo com o
+  // WhatsApp genuinamente conectado (quem autentica o ENVIO em si é o token
+  // da própria instância, já salvo em conexoes — nunca precisou do admin
+  // token). Ler direto da mesma coluna que o cron e a tela /conexao usam
+  // elimina essa dependência e mantém "Forçar" sempre consistente com o que
+  // o dono vê na tela de conexão.
+  const { data: conexao } = await admin
+    .from('conexoes')
+    .select('uazapi_instance_token, status')
+    .eq('conta_id', contaId)
+    .maybeSingle()
 
-  // Usa os mesmos helpers do cron (lib/uazapi.ts) em vez de reimplementar a
-  // checagem aqui: achado real (2026-09-19) — a versão antiga fazia o próprio
-  // fetch em '/instance/all' e tratava QUALQUER falha (rede, 429 de rate limit
-  // da uazapi) como "instância não encontrada", reportando "WhatsApp
-  // desconectado" mesmo quando a conexão estava ok e foi só um rate limit
-  // transitório — exatamente o que a skill whatsapp-uazapi proíbe.
-  let instanceToken: string | null = null
-  try {
-    const instances = await getAllInstances()
-    const inst = instances.find(i => i.name === instName(contaId))
-    if (inst?.status === 'connected') instanceToken = inst.token
-  } catch (err) {
-    if (err instanceof UazapiRateLimitError) {
-      return falhar('Servidor WhatsApp ocupado agora (rate limit). Tente novamente em alguns segundos.')
-    }
-    console.error('[forcarEnvio] falha ao consultar instâncias uazapi', { id, contaId, err })
-    return falhar('Erro ao conectar ao servidor WhatsApp.')
-  }
-
-  if (!instanceToken) {
+  if (!conexao?.uazapi_instance_token || conexao.status !== 'conectado') {
     return falhar('WhatsApp desconectado. Reconecte em Conexão WA e tente novamente.')
   }
 
   try {
-    await sendText(instanceToken, celular, mensagem)
+    await sendText(conexao.uazapi_instance_token, celular, mensagem)
   } catch (err) {
     if (err instanceof UazapiRateLimitError) {
       return falhar('Servidor WhatsApp ocupado agora (rate limit). Tente novamente em alguns segundos.')

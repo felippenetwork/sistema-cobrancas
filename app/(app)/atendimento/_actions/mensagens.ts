@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { getConta } from '@/lib/conta'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { sendText, UazapiRateLimitError } from '@/lib/uazapi'
 
 export type ActionState = { error: string | null }
 
@@ -72,23 +73,20 @@ export async function enviarRespostaAction(
       waId = (metaJson?.messages?.[0]?.id as string | undefined) ?? null
 
     } else {
-      // ── Fallback: uazapiGO ─────────────────────────────────────────────────
+      // ── Fallback: uazapi — mesmo helper do cron e do "Forçar" (lib/uazapi.ts) ──
       if (!conexao?.uazapi_instance_token || conexao.status !== 'conectado') {
         return { error: 'WhatsApp não está conectado. Configure a Meta API ou verifique a conexão.' }
       }
 
-      const uazapiUrl = process.env.UAZAPI_URL?.replace(/\/$/, '')
-      if (!uazapiUrl) return { error: 'UAZAPI_URL não configurado.' }
-
-      const res = await fetch(`${uazapiUrl}/send/text`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json', token: conexao.uazapi_instance_token },
-        body:    JSON.stringify({ number: celular, text: texto }),
-      })
-
-      if (!res.ok) {
-        const body = await res.text().catch(() => '')
-        return { error: `Falha ao enviar: ${res.status} ${body}` }
+      try {
+        await sendText(conexao.uazapi_instance_token, celular, texto)
+      } catch (err) {
+        if (err instanceof UazapiRateLimitError) {
+          return { error: 'Servidor WhatsApp ocupado agora (rate limit). Tente novamente em alguns segundos.' }
+        }
+        // Detalhe da uazapi vai para o log do servidor, não para a tela (SEG-M3).
+        console.error('[enviarResposta] uazapi recusou o envio', { contaId, err })
+        return { error: 'Falha ao enviar pela uazapi (rede ou recusa do provedor). Tente novamente.' }
       }
     }
 

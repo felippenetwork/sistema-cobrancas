@@ -24,9 +24,11 @@ vi.mock('@/lib/atendimento/encontrar-ou-criar', () => ({ encontrarOuCriarAtendim
 import { forcarEnvioAction } from '@/app/(app)/log/_actions/log'
 
 const CONTA = 'conta-1'
-const NOME_INSTANCIA = 'quitaconta1' // quita + conta_id sem hífens, 10 primeiros caracteres
 
-function cenario(opts: { status?: string; meta?: boolean; tipo?: string; contaDaNotif?: string } = {}) {
+function cenario(opts: {
+  status?: string; meta?: boolean; tipo?: string; contaDaNotif?: string
+  conexaoStatus?: string; semToken?: boolean
+} = {}) {
   const db = new FakeDb({
     notificacoes_enviadas: [{
       id: 'n1', conta_id: opts.contaDaNotif ?? CONTA, canal: 'whatsapp', status: opts.status ?? 'fila',
@@ -40,6 +42,14 @@ function cenario(opts: { status?: string; meta?: boolean; tipo?: string; contaDa
     configuracoes: [opts.meta
       ? { conta_id: CONTA, meta_api_ativo: true, meta_access_token: 'meta-tok', meta_phone_number_id: '123' }
       : { conta_id: CONTA, meta_api_ativo: false, meta_access_token: null, meta_phone_number_id: null }],
+    // Fonte de verdade do canal uazapi: a MESMA coluna que o cron e a tela
+    // /conexao usam — não uma checagem ao vivo via API de administração da
+    // uazapi (ver nota no código de forcarEnvioAction, achado 2026-09-19).
+    conexoes: [{
+      conta_id: CONTA,
+      status:   opts.conexaoStatus ?? 'conectado',
+      uazapi_instance_token: opts.semToken ? null : 'tok',
+    }],
     mensagens_wa: [],
   })
   mocks.db.atual = db.cliente()
@@ -47,12 +57,9 @@ function cenario(opts: { status?: string; meta?: boolean; tipo?: string; contaDa
 }
 const status = (db: FakeDb) => db.linhas('notificacoes_enviadas')[0].status
 
-/** Respostas da uazapi: lista de instâncias e envio. */
-function uazapi(opts: { conectada?: boolean; envioOk?: boolean } = {}) {
+/** Resposta da uazapi ao enviar (/send/text) — único fetch feito no caminho uazapi hoje. */
+function uazapi(opts: { envioOk?: boolean } = {}) {
   mocks.fetch.mockImplementation(async (url: string) => {
-    if (url.endsWith('/instance/all')) {
-      return { ok: true, json: async () => [{ name: NOME_INSTANCIA, status: opts.conectada === false ? 'disconnected' : 'connected', token: 'tok' }] }
-    }
     if (url.endsWith('/send/text')) {
       return opts.envioOk === false
         ? { ok: false, status: 500, json: async () => ({ error: 'stack trace interno da uazapi' }) }
@@ -86,37 +93,34 @@ describe('forcarEnvioAction — uazapi', () => {
     expect(db.linhas('notificacoes_enviadas')[0].mensagem_final).toMatch(/^Olá Maria, R\$\s150,00$/)
   })
 
-  it('WhatsApp desconectado: devolve erro e a notificação VOLTA para "fila" (não fica cancelada)', async () => {
-    const db = cenario({ status: 'fila' })
-    uazapi({ conectada: false })
+  it('WhatsApp desconectado (conexoes.status ≠ conectado): devolve erro e a notificação VOLTA para "fila" (não fica cancelada)', async () => {
+    const db = cenario({ status: 'fila', conexaoStatus: 'desconectado' })
+    const res = await forcarEnvioAction('n1')
+    expect(res.error).toMatch(/desconectado/i)
+    expect(status(db)).toBe('fila')
+    expect(mocks.fetch).not.toHaveBeenCalled()
+  })
+
+  it('sem token de instância salvo: trata como desconectado', async () => {
+    const db = cenario({ status: 'fila', semToken: true })
     const res = await forcarEnvioAction('n1')
     expect(res.error).toMatch(/desconectado/i)
     expect(status(db)).toBe('fila')
   })
 
-  // Achado real (2026-09-19): a versão antiga fazia o próprio fetch em
-  // '/instance/all' e tratava QUALQUER falha (rede, 429 de rate limit da
-  // uazapi) como "instância não encontrada" — reportando "WhatsApp
-  // desconectado" mesmo com a conexão ok, só porque a checagem em si esbarrou
-  // num rate limit transitório. Corrigido reutilizando getAllInstances()/
-  // UazapiRateLimitError de lib/uazapi.ts (mesmo helper do cron).
-  it('rate limit (429) ao consultar instâncias: NÃO reporta "desconectado", pede para tentar de novo', async () => {
-    const db = cenario({ status: 'fila' })
-    mocks.fetch.mockImplementation(async (url: string) => {
-      if (url.endsWith('/instance/all')) return { status: 429, ok: false }
-      throw new Error(`fetch inesperado: ${url}`)
-    })
-    const res = await forcarEnvioAction('n1')
-    expect(res.error).toMatch(/rate limit/i)
-    expect(res.error).not.toMatch(/desconectado/i)
-    expect(status(db)).toBe('fila')
-  })
-
+  // Achado real (2026-09-19): a versão antiga fazia sua própria checagem ao
+  // vivo contra a API de administração da uazapi (getAllInstances/instName),
+  // que depende do UAZAPI_ADMIN_TOKEN — uma credencial separada do token da
+  // instância. Esse admin token estava vazio em produção, então "Forçar"
+  // sempre reportava "desconectado" mesmo com o WhatsApp genuinamente
+  // conectado. Corrigido lendo conexoes.status/uazapi_instance_token direto
+  // (mesma fonte que o cron e a tela /conexao usam) — sem chamar a API de
+  // administração, sem depender do admin token, sempre consistente com o que
+  // o dono vê na tela de conexão.
   it('rate limit (429) ao enviar: NÃO reporta como recusa definitiva, pede para tentar de novo', async () => {
     const db = cenario({ status: 'fila' })
     mocks.fetch.mockImplementation(async (url: string) => {
-      if (url.endsWith('/instance/all')) return { ok: true, json: async () => [{ name: NOME_INSTANCIA, status: 'connected', token: 'tok' }] }
-      if (url.endsWith('/send/text'))    return { status: 429, ok: false }
+      if (url.endsWith('/send/text')) return { status: 429, ok: false }
       throw new Error(`fetch inesperado: ${url}`)
     })
     const res = await forcarEnvioAction('n1')
@@ -125,8 +129,7 @@ describe('forcarEnvioAction — uazapi', () => {
   })
 
   it('forçar uma notificação CANCELADA que falha continua cancelada (não vira "fila" e sai sozinha depois)', async () => {
-    const db = cenario({ status: 'cancelado' })
-    uazapi({ conectada: false })
+    const db = cenario({ status: 'cancelado', conexaoStatus: 'desconectado' })
     await forcarEnvioAction('n1')
     expect(status(db)).toBe('cancelado')
   })
@@ -142,10 +145,7 @@ describe('forcarEnvioAction — uazapi', () => {
 
   it('erro de rede ao enviar: restaura o status', async () => {
     const db = cenario({ status: 'fila' })
-    mocks.fetch.mockImplementation(async (url: string) => {
-      if (url.endsWith('/instance/all')) return { ok: true, json: async () => [{ name: NOME_INSTANCIA, status: 'connected', token: 'tok' }] }
-      throw new Error('ECONNRESET')
-    })
+    mocks.fetch.mockRejectedValue(new Error('ECONNRESET'))
     expect((await forcarEnvioAction('n1')).error).toMatch(/rede/i)
     expect(status(db)).toBe('fila')
   })
