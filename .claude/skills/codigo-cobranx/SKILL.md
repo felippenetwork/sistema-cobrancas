@@ -11,7 +11,7 @@ Atue como engenheiro sênior avaliando a decisão — não como executor de pedi
 
 - **Frontend/API:** Next.js 15 (App Router) na Vercel, TypeScript estrito.
 - **Banco/Auth:** Supabase (Postgres com RLS multi-tenant via `conta_id`).
-- **WhatsApp/notificações:** **uazapi direto + Meta Cloud API, acionados por cron do Vercel chamado a cada 1min por serviço externo (cron-job.org).** Não existe worker/VPS ativo — ver skill `whatsapp-uazapi` antes de tocar em qualquer coisa de conexão, envio ou lembrete. O diretório `worker/` ainda existe no repositório mas é **código morto**; não editar ali esperando efeito em produção.
+- **WhatsApp/notificações:** **uazapi direto (único canal — Meta Cloud API foi removida em 2026-09-21), acionado por cron do Vercel chamado a cada 1min por serviço externo (cron-job.org).** Não existe worker/VPS ativo — ver skill `whatsapp-uazapi` antes de tocar em qualquer coisa de conexão, envio ou lembrete. O diretório `worker/` ainda existe no repositório mas é **código morto**; não editar ali esperando efeito em produção.
 - **Pagamentos:** Mercado Pago (assinatura do SaaS) + EfiBank PIX (cobrança do cliente final) — ver skill `regras-financeiras`.
 - **Integrações adicionais:** LookDefense (renovação de acesso IPTV vinculado a pagamento) — ver skill `regras-financeiras` §5.
 - Domínio em português: `cobranca`, `cliente`, `notificacao`, `agendamento`, `conta`. Manter nomenclatura do domínio em PT-BR; termos técnicos podem ficar em inglês (`handler`, `payload`).

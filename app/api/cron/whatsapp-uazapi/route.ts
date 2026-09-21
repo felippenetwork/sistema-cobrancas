@@ -1,6 +1,6 @@
 // Cron: dispara lembretes WhatsApp (5d, 3d, 2d, 1d, dia, vencido, boasvindas,
 // pagamento_confirmado, manual, agendada) para contas conectadas via uazapi
-// (não Meta Cloud API — essas continuam em /api/cron/whatsapp).
+// (único canal WhatsApp do produto — Meta Cloud API foi removida).
 //
 // Substitui o antigo worker na Vortexus (worker/src/workers/whatsapp-worker.ts
 // + uazapi-manager.ts), que parou de rodar e deixava a fila uazapi travada
@@ -260,8 +260,7 @@ async function enviarNotificacao(
     })
   }
 
-  // Mesmo tratamento do cron Meta (/api/cron/whatsapp): garante que a mensagem
-  // enviada aparece no histórico de Atendimento, não só no Log.
+  // Garante que a mensagem enviada aparece no histórico de Atendimento, não só no Log.
   try {
     const atendimentoId = await encontrarOuCriarAtendimento(supabase, contaId, celular, notif.cliente_id, mensagem)
     const { error: mwaErr } = await supabase.from('mensagens_wa').insert({
@@ -503,7 +502,7 @@ export async function GET(req: NextRequest) {
     // com o que já está gravado no banco desta última vez que funcionou.
   }
 
-  // 2. Contas conectadas via uazapi, sem Meta Cloud API ativa (essas vão por /api/cron/whatsapp).
+  // 2. Contas conectadas via uazapi.
   const { data: conectadas } = await supabase
     .from('conexoes')
     .select('conta_id, uazapi_instance_token')
@@ -515,17 +514,12 @@ export async function GET(req: NextRequest) {
   const contaIds = conectadas.map(c => c.conta_id as string)
   const { data: configs } = await supabase
     .from('configuracoes')
-    .select('conta_id, horario_inicio, horario_fim, intervalo_min_seg, intervalo_max_seg, meta_api_ativo, meta_access_token, meta_phone_number_id')
+    .select('conta_id, horario_inicio, horario_fim, intervalo_min_seg, intervalo_max_seg')
     .in('conta_id', contaIds)
 
   const cfgMap = new Map((configs ?? []).map(c => [c.conta_id as string, c]))
 
   const elegiveis = conectadas
-    .filter(c => {
-      const cfg     = cfgMap.get(c.conta_id as string)
-      const hasMeta = !!(cfg?.meta_api_ativo && cfg.meta_access_token && cfg.meta_phone_number_id)
-      return !hasMeta
-    })
     .map(c => ({
       contaId: c.conta_id as string,
       token:   c.uazapi_instance_token as string,

@@ -60,8 +60,7 @@ function cenario(notif: Record<string, unknown> = {}, config: Record<string, unk
     conexoes: [{ conta_id: CONTA, status: 'conectado', uazapi_instance_token: 'tok' }],
     configuracoes: [{
       conta_id: CONTA, horario_inicio: '09:00', horario_fim: '20:00',
-      intervalo_min_seg: 45, intervalo_max_seg: 45, meta_api_ativo: false,
-      meta_access_token: null, meta_phone_number_id: null, ...config,
+      intervalo_min_seg: 45, intervalo_max_seg: 45, ...config,
     }],
     clientes: [{ id: CLIENTE, conta_id: CONTA, celular: '5521900000001', deleted_at: null }],
     parcelas: [{ id: PARCELA, conta_id: CONTA, status: 'aberta' }],
@@ -390,13 +389,7 @@ describe('depois que a mensagem foi enviada', () => {
   })
 })
 
-describe('isolamento e escolha do canal', () => {
-  it('conta com Meta Cloud API ativa não é processada aqui (vai para /api/cron/whatsapp)', async () => {
-    cenario({}, { meta_api_ativo: true, meta_access_token: 't', meta_phone_number_id: '1' })
-    await rodarCron()
-    expect(mocks.sendText).not.toHaveBeenCalled()
-  })
-
+describe('isolamento entre contas', () => {
   it('conta desconectada não envia', async () => {
     const db = cenario()
     db.linhas('conexoes')[0].status = 'desconectado'
@@ -408,7 +401,7 @@ describe('isolamento e escolha do canal', () => {
   it('não usa o token/instância de outra conta', async () => {
     const db = cenario()
     db.linhas('conexoes').push({ conta_id: 'conta-2', status: 'conectado', uazapi_instance_token: 'tok-2' })
-    db.linhas('configuracoes').push({ conta_id: 'conta-2', horario_inicio: '09:00', horario_fim: '20:00', intervalo_min_seg: 45, intervalo_max_seg: 45, meta_api_ativo: false })
+    db.linhas('configuracoes').push({ conta_id: 'conta-2', horario_inicio: '09:00', horario_fim: '20:00', intervalo_min_seg: 45, intervalo_max_seg: 45 })
     mocks.getAllInstances.mockResolvedValue([
       { name: `inst-${CONTA}`, status: 'connected', token: 'tok', owner: '5521900000000@s.whatsapp.net' },
       { name: 'inst-conta-2', status: 'connected', token: 'tok-2', owner: '5521900000009@s.whatsapp.net' },

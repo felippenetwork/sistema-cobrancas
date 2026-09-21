@@ -261,11 +261,6 @@ export type Database = {
           intervalo_min_seg: number
           ld_password: string | null
           ld_username: string | null
-          meta_access_token: string | null
-          meta_api_ativo: boolean
-          meta_app_secret: string | null
-          meta_phone_number_id: string | null
-          meta_waba_id: string | null
           nome_comercial: string | null
           twilio_account_sid: string | null
           twilio_ativo: boolean
@@ -289,11 +284,6 @@ export type Database = {
           intervalo_min_seg?: number
           ld_password?: string | null
           ld_username?: string | null
-          meta_access_token?: string | null
-          meta_api_ativo?: boolean
-          meta_app_secret?: string | null
-          meta_phone_number_id?: string | null
-          meta_waba_id?: string | null
           nome_comercial?: string | null
           twilio_account_sid?: string | null
           twilio_ativo?: boolean
@@ -317,11 +307,6 @@ export type Database = {
           intervalo_min_seg?: number
           ld_password?: string | null
           ld_username?: string | null
-          meta_access_token?: string | null
-          meta_api_ativo?: boolean
-          meta_app_secret?: string | null
-          meta_phone_number_id?: string | null
-          meta_waba_id?: string | null
           nome_comercial?: string | null
           twilio_account_sid?: string | null
           twilio_ativo?: boolean
@@ -590,9 +575,6 @@ export type Database = {
           created_at: string
           horario: string
           id: string
-          meta_template_corpo: string | null
-          meta_template_idioma: string | null
-          meta_template_nome: string | null
           template_email: string | null
           template_whatsapp: string | null
           tipo: NotifTipo
@@ -606,9 +588,6 @@ export type Database = {
           created_at?: string
           horario?: string
           id?: string
-          meta_template_corpo?: string | null
-          meta_template_idioma?: string | null
-          meta_template_nome?: string | null
           template_email?: string | null
           template_whatsapp?: string | null
           tipo: NotifTipo
@@ -622,9 +601,6 @@ export type Database = {
           created_at?: string
           horario?: string
           id?: string
-          meta_template_corpo?: string | null
-          meta_template_idioma?: string | null
-          meta_template_nome?: string | null
           template_email?: string | null
           template_whatsapp?: string | null
           tipo?: NotifTipo
@@ -877,7 +853,6 @@ export type Database = {
           botoes: Json | null
           variaveis: Json | null
           status: ModeloStatus
-          meta_template_id: string | null
           criado_em: string
           atualizado_em: string
         }
@@ -893,7 +868,6 @@ export type Database = {
           botoes?: Json | null
           variaveis?: Json | null
           status?: ModeloStatus
-          meta_template_id?: string | null
           criado_em?: string
           atualizado_em?: string
         }
@@ -909,7 +883,6 @@ export type Database = {
           botoes?: Json | null
           variaveis?: Json | null
           status?: ModeloStatus
-          meta_template_id?: string | null
           criado_em?: string
           atualizado_em?: string
         }

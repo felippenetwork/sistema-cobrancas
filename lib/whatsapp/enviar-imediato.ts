@@ -5,38 +5,12 @@ import { resolverVariaveis, resolverVariaveisLeves, VariaveisIndisponiveisError 
 import { sendText, UazapiRateLimitError } from '@/lib/uazapi'
 import type { NotifTipo } from '@/lib/notificacao/tipos'
 
-const META_TEMPLATES: Record<string, { nome: string; idioma: string; params: 2 | 3; corpo: string }> = {
-  '5d':                 { nome: 'cobranca_5d',           idioma: 'pt_BR', params: 3, corpo: 'Olá, *{{1}}*! Sua fatura de *{{2}}* vence em *5 dias* ({{3}}). Para dúvidas, responda esta mensagem.' },
-  '3d':                 { nome: 'cobranca_3d',           idioma: 'en',    params: 3, corpo: 'Olá, *{{1}}*! Sua fatura de *{{2}}* vence em *3 dias* ({{3}}). Para dúvidas, responda esta mensagem.' },
-  '2d':                 { nome: 'cobranca_2d',           idioma: 'pt_BR', params: 3, corpo: 'Olá, *{{1}}*! Sua fatura de *{{2}}* vence em *2 dias* ({{3}}). Não se esqueça de pagar!' },
-  '1d':                 { nome: 'cobranca_1d',           idioma: 'pt_BR', params: 3, corpo: 'Olá, *{{1}}*! Sua fatura de *{{2}}* vence *amanhã* ({{3}}). Pague hoje para evitar juros.' },
-  'dia':                { nome: 'cobranca_dia',          idioma: 'pt_BR', params: 3, corpo: 'Olá, *{{1}}*! Sua fatura de *{{2}}* vence *hoje* ({{3}}). Pague agora para evitar juros.' },
-  'vencido1d':          { nome: 'cobranca_vencido',      idioma: 'pt_BR', params: 3, corpo: 'Olá, *{{1}}*! Sua fatura de *{{2}}* venceu ontem ({{3}}). Regularize o quanto antes para evitar cobrança adicional.' },
-  'pagamento_confirmado': { nome: 'pagamento_confirmado', idioma: 'pt_BR', params: 2, corpo: '🥳 Renovado com sucesso 🥳\n\nMuito obrigado Sr.(Sra.) *{{1}}*! Recebemos seu pagamento de *{{2}}*.\n\n🥳 Qualquer dúvida ou problema só me enviar mensagem. 🥳' },
-  'boasvindas':         { nome: 'boasvindas',            idioma: 'pt_BR', params: 3, corpo: '🎉 Ativado com sucesso 🎉\n\nMuito obrigado Sr.(Sra.) *{{1}}*! Sua primeira fatura de *{{2}}* vence em *{{3}}*.\n\n🤩 Estaremos sempre à disposição para melhor lhe atender. 🤩' },
-  'manual':             { nome: 'cobranca_manual',       idioma: 'pt_BR', params: 3, corpo: 'Olá, *{{1}}*! Passando para lembrar da fatura de *{{2}}* com vencimento em *{{3}}*. Para dúvidas, responda esta mensagem.' },
-}
-
-function reconstruir(corpo: string, p: string[]): string {
-  return corpo.replace('{{1}}', p[0] ?? '').replace('{{2}}', p[1] ?? '').replace('{{3}}', p[2] ?? '')
-}
-
-function formatarMoeda(v: number): string {
-  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v)
-}
-
-function formatarData(iso: string): string {
-  const [a, m, d] = iso.split('-')
-  return `${d}/${m}/${a}`
-}
-
 /**
- * Tenta enviar uma notificação WhatsApp imediatamente — via Meta Cloud API se a
- * conta tiver Meta ativa, senão via uazapi (QR Code) se estiver conectada.
- * Se bem-sucedido: atualiza notificacoes_enviadas para 'enviado' e registra em mensagens_wa.
- * Se não puder enviar por aqui (nenhum canal disponível, template ausente, cliente
- * inválido, falha no envio): a notificação volta/permanece em 'fila' para o cron
- * (Meta ou uazapi, conforme a conta) processar depois.
+ * Tenta enviar uma notificação WhatsApp imediatamente via uazapi (QR Code),
+ * se a conta estiver conectada. Se bem-sucedido: atualiza notificacoes_enviadas
+ * para 'enviado' e registra em mensagens_wa. Se não puder enviar por aqui
+ * (desconectada, template ausente, cliente inválido, falha no envio): a
+ * notificação volta/permanece em 'fila' para o cron processar depois.
  * Retorna true se enviou com sucesso.
  */
 export async function enviarWhatsAppImediato(
@@ -49,30 +23,16 @@ export async function enviarWhatsAppImediato(
 ): Promise<boolean> {
   const supabase = createAdminClient()
 
-  // Credenciais dos dois canais possíveis — lidas ANTES de reivindicar a
-  // notificação (reivindicar primeiro e desistir depois deixava a confirmação
-  // de pagamento / cobrança manual presa em 'processando' para sempre, já que
-  // o cron só lê 'fila'). Pedido do dono do projeto (2026-09-21): confirmação
-  // de pagamento e boas-vindas saem NA HORA, sem esperar o cron nem respeitar
-  // horário de funcionamento — antes só funcionava com Meta ativa; conta
-  // uazapi sempre ficava em 'fila' esperando o próximo tick do cron.
-  const [{ data: cfg }, { data: conexao }] = await Promise.all([
-    supabase
-      .from('configuracoes')
-      .select('meta_api_ativo, meta_access_token, meta_phone_number_id')
-      .eq('conta_id', contaId)
-      .maybeSingle(),
-    supabase
-      .from('conexoes')
-      .select('status, uazapi_instance_token')
-      .eq('conta_id', contaId)
-      .maybeSingle(),
-  ])
+  // Conexão lida ANTES de reivindicar a notificação (reivindicar primeiro e
+  // desistir depois deixava a confirmação de pagamento / cobrança manual
+  // presa em 'processando' para sempre, já que o cron só lê 'fila').
+  const { data: conexao } = await supabase
+    .from('conexoes')
+    .select('uazapi_instance_token, status')
+    .eq('conta_id', contaId)
+    .maybeSingle()
 
-  const usarMeta   = !!(cfg?.meta_api_ativo && cfg.meta_access_token && cfg.meta_phone_number_id)
-  const usarUazapi = !usarMeta && conexao?.status === 'conectado' && !!conexao.uazapi_instance_token
-
-  if (!usarMeta && !usarUazapi) return false
+  if (conexao?.status !== 'conectado' || !conexao.uazapi_instance_token) return false
 
   // Claim atômico: só processa se a notificação ainda estiver em 'fila'.
   // Evita envio duplo quando o cron e o envio imediato disputam a mesma notificação.
@@ -95,12 +55,10 @@ export async function enviarWhatsAppImediato(
   }
 
   // Daqui até o envio de fato, qualquer saída sem enviar devolve a notificação
-  // para 'fila' — o cron (Meta ou uazapi, conforme o canal) decide o destino
-  // final (cancelar, falhar, reenviar).
+  // para 'fila' — o cron decide o destino final (cancelar, falhar, reenviar).
   const liberar = (etapa: string) =>
     atualizarStatusNotificacao(supabase, contaId, notifId, { status: 'fila' }, etapa)
 
-  // Dados do cliente — compartilhado pelos dois canais.
   const { data: cliente } = await supabase
     .from('clientes')
     .select('celular, nome, deleted_at')
@@ -113,143 +71,56 @@ export async function enviarWhatsAppImediato(
     return false
   }
   const celular = cliente.celular
-  const nome    = cliente.nome || 'Cliente'
+
+  // Mesmo template e resolução de variáveis do cron uazapi
+  // (notificacoes_config.template_whatsapp + #VARS#).
+  const { data: cfgNotif } = await supabase
+    .from('notificacoes_config')
+    .select('template_whatsapp')
+    .eq('conta_id', contaId)
+    .eq('tipo', tipo as NotifTipo)
+    .maybeSingle()
+
+  const template = cfgNotif?.template_whatsapp?.trim()
+  if (!template) {
+    await liberar('sem_template')
+    return false
+  }
+
+  let pid = parcelaId
+  if (!pid && cobrancaId) {
+    const { data: p } = await supabase
+      .from('parcelas').select('id')
+      .eq('cobranca_id', cobrancaId).eq('conta_id', contaId)
+      .order('numero', { ascending: true }).limit(1).maybeSingle()
+    pid = p?.id ?? null
+  }
 
   let textoMensagem: string
-
-  if (usarMeta) {
-    // Template customizado da conta tem prioridade sobre o hardcoded
-    const { data: cfgTmpl } = await supabase
-      .from('notificacoes_config')
-      .select('meta_template_nome, meta_template_idioma, meta_template_corpo')
-      .eq('conta_id', contaId)
-      .eq('tipo', tipo as NotifTipo)
-      .maybeSingle()
-
-    const corpoCustom = cfgTmpl?.meta_template_corpo ?? ''
-    const tmpl = cfgTmpl?.meta_template_nome
-      ? {
-          nome:   cfgTmpl.meta_template_nome,
-          idioma: cfgTmpl.meta_template_idioma ?? 'pt_BR',
-          params: (corpoCustom.includes('{{3}}') ? 3 : corpoCustom.includes('{{2}}') ? 2 : 1) as 2 | 3,
-          corpo:  corpoCustom,
-        }
-      : META_TEMPLATES[tipo]
-    if (!tmpl) {
-      await liberar('sem_template')
-      return false
+  try {
+    textoMensagem = tipo === 'agendada'
+      ? await resolverVariaveisLeves(supabase, { contaId, clienteId, template })
+      : await resolverVariaveis(supabase, { contaId, parcelaId: pid as string, clienteId, template, cobrancaId })
+  } catch (err) {
+    if (err instanceof VariaveisIndisponiveisError && err.motivo === 'nao_encontrado') {
+      await liberar('dados_inexistentes')
+    } else {
+      console.error('[enviarWhatsAppImediato] variáveis indisponíveis', { notifId, contaId, err })
+      await liberar('variaveis_indisponiveis')
     }
+    return false
+  }
 
-    // Resolver parcela
-    let pid = parcelaId
-    if (!pid && cobrancaId) {
-      const { data: p } = await supabase
-        .from('parcelas').select('id')
-        .eq('cobranca_id', cobrancaId)
-        .eq('conta_id', contaId)
-        .order('numero', { ascending: true }).limit(1).maybeSingle()
-      pid = p?.id ?? null
+  try {
+    await sendText(conexao.uazapi_instance_token, celular, textoMensagem)
+  } catch (err) {
+    if (err instanceof UazapiRateLimitError) {
+      await liberar('rate_limited')
+    } else {
+      console.error('[enviarWhatsAppImediato] uazapi recusou o envio', { notifId, contaId, err })
+      await liberar('envio_falhou')
     }
-
-    let valor = ''
-    let data  = ''
-    if (pid) {
-      const { data: parcela, error: parcelaErr } = await supabase
-        .from('parcelas').select('valor, data_vencimento').eq('id', pid).eq('conta_id', contaId).maybeSingle()
-      // Nunca enviar com valor/vencimento em branco — devolve para o cron decidir
-      // (tenta de novo se foi falha do banco; cancela se a parcela não existe mais).
-      if (parcelaErr || !parcela) {
-        console.error('[enviarWhatsAppImediato] parcela indisponível', { notifId, contaId, parcelaErr })
-        await liberar('parcela_indisponivel')
-        return false
-      }
-      valor = formatarMoeda(Number(parcela.valor ?? 0))
-      data  = formatarData(parcela.data_vencimento ?? '')
-    }
-
-    const parametros = tmpl.params === 2 ? [nome, valor] : [nome, valor, data]
-    textoMensagem = reconstruir(tmpl.corpo, parametros)
-
-    try {
-      const res = await fetch(
-        `https://graph.facebook.com/v20.0/${cfg!.meta_phone_number_id}/messages`,
-        {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg!.meta_access_token}` },
-          body: JSON.stringify({
-            messaging_product: 'whatsapp',
-            to:   celular,
-            type: 'template',
-            template: {
-              name:     tmpl.nome,
-              language: { code: tmpl.idioma },
-              components: [{ type: 'body', parameters: parametros.map(text => ({ type: 'text', text })) }],
-            },
-          }),
-        },
-      )
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error((err as any)?.error?.message ?? `Meta erro ${res.status}`)
-      }
-    } catch (err: any) {
-      console.error('[enviarWhatsAppImediato] falha ao enviar', tipo, err?.message)
-      // Devolve para fila para que o cron possa tentar novamente
-      await liberar('falha_envio')
-      return false
-    }
-  } else {
-    // uazapi — mesmo template e resolução de variáveis do cron uazapi
-    // (notificacoes_config.template_whatsapp + #VARS#), não o mecanismo de
-    // template pré-aprovado da Meta.
-    const { data: cfgNotif } = await supabase
-      .from('notificacoes_config')
-      .select('template_whatsapp')
-      .eq('conta_id', contaId)
-      .eq('tipo', tipo as NotifTipo)
-      .maybeSingle()
-
-    const template = cfgNotif?.template_whatsapp?.trim()
-    if (!template) {
-      await liberar('sem_template')
-      return false
-    }
-
-    let pid = parcelaId
-    if (!pid && cobrancaId) {
-      const { data: p } = await supabase
-        .from('parcelas').select('id')
-        .eq('cobranca_id', cobrancaId).eq('conta_id', contaId)
-        .order('numero', { ascending: true }).limit(1).maybeSingle()
-      pid = p?.id ?? null
-    }
-
-    try {
-      textoMensagem = tipo === 'agendada'
-        ? await resolverVariaveisLeves(supabase, { contaId, clienteId, template })
-        : await resolverVariaveis(supabase, { contaId, parcelaId: pid as string, clienteId, template, cobrancaId })
-    } catch (err) {
-      if (err instanceof VariaveisIndisponiveisError && err.motivo === 'nao_encontrado') {
-        await liberar('dados_inexistentes')
-      } else {
-        console.error('[enviarWhatsAppImediato] variáveis indisponíveis', { notifId, contaId, err })
-        await liberar('variaveis_indisponiveis')
-      }
-      return false
-    }
-
-    try {
-      await sendText(conexao!.uazapi_instance_token as string, celular, textoMensagem)
-    } catch (err) {
-      if (err instanceof UazapiRateLimitError) {
-        await liberar('rate_limited')
-      } else {
-        console.error('[enviarWhatsAppImediato] uazapi recusou o envio', { notifId, contaId, err })
-        await liberar('envio_falhou')
-      }
-      return false
-    }
+    return false
   }
 
   // ── A partir daqui a mensagem JÁ FOI enviada. Nada abaixo pode devolver a

@@ -20,7 +20,7 @@ description: Regras do motor de notificação e fila de disparo (WhatsApp + e-ma
 - Os **dias são fixos**. Editável: conteúdo por canal, horário e ativar/desativar **cada canal** independentemente.
 
 ## 2. Dois canais
-- **WhatsApp** (uazapi, ou Meta Cloud API para quem tem número oficial): texto. Ritmo anti-ban (ver skill `whatsapp-uazapi`): intervalo 45–80s, janela 09–20h, fila um-a-um, simulação de digitação antes de cada envio.
+- **WhatsApp** (uazapi — único canal do produto, Meta Cloud API foi removida em 2026-09-21): texto. Ritmo anti-ban (ver skill `whatsapp-uazapi`): intervalo 45–80s, janela 09–20h, fila um-a-um, simulação de digitação antes de cada envio.
 - **E-mail** (Resend, domínio compartilhado do operador): assunto + corpo, com **link de unsubscribe** no rodapé. Janela 09–20h, sem o intervalo longo do WhatsApp (respeita rate limit do Resend). Remetente = `local_part` da conta + domínio do operador.
 - Um mesmo tipo pode disparar **nos dois canais**; cada canal tem registro de envio próprio.
 
@@ -40,7 +40,7 @@ description: Regras do motor de notificação e fila de disparo (WhatsApp + e-ma
 ## 5. Ciclo de vida do disparo
 1. **Scheduler** (`app/api/cron/scheduler/route.ts`) varre parcelas, calcula janelas (D-5, D-3, D-2, D-1, D0, D+1) por conta.
 2. Para cada janela atingida e **canal ativo** do tipo, cria registro `status = fila` (respeitando idempotência).
-3. **Drenagem WhatsApp:** `app/api/cron/whatsapp-uazapi/route.ts` (uazapi) e `app/api/cron/whatsapp/route.ts` (Meta Cloud API) consomem a fila por conta a cada execução — janela 09–20h, intervalo 45–80s, um-a-um; substitui variáveis; envia; atualiza status pelo ack (enviado/entregue/lido/falhou). Não existe worker separado — ver skill `whatsapp-uazapi` para a arquitetura real (cron externo chamando esses endpoints a cada 1min).
+3. **Drenagem WhatsApp:** `app/api/cron/whatsapp-uazapi/route.ts` consome a fila por conta a cada execução — janela 09–20h, intervalo 45–80s, um-a-um; substitui variáveis; envia; atualiza status pelo ack (enviado/entregue/lido/falhou). Não existe worker separado nem canal Meta (removido em 2026-09-21) — ver skill `whatsapp-uazapi` para a arquitetura real (cron externo chamando esse endpoint a cada 1min).
 4. **Drenagem e-mail:** rota de cron equivalente consome a fila: janela 09–20h + rate limit Resend; substitui variáveis; envia com unsubscribe; atualiza status pelos eventos do Resend (enviado/entregue/aberto/falhou).
 5. **Overflow:** o que não couber até 20h continua no dia seguinte às 09h.
 

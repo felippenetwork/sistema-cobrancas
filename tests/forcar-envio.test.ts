@@ -26,7 +26,7 @@ import { forcarEnvioAction } from '@/app/(app)/log/_actions/log'
 const CONTA = 'conta-1'
 
 function cenario(opts: {
-  status?: string; meta?: boolean; tipo?: string; contaDaNotif?: string
+  status?: string; tipo?: string; contaDaNotif?: string
   conexaoStatus?: string; semToken?: boolean
 } = {}) {
   const db = new FakeDb({
@@ -39,9 +39,6 @@ function cenario(opts: {
     saudacoes: [],
     meios_pagamento: [],
     notificacoes_config: [{ conta_id: CONTA, tipo: '3d', template_whatsapp: 'Olá #NOME#, #VALOR#' }],
-    configuracoes: [opts.meta
-      ? { conta_id: CONTA, meta_api_ativo: true, meta_access_token: 'meta-tok', meta_phone_number_id: '123' }
-      : { conta_id: CONTA, meta_api_ativo: false, meta_access_token: null, meta_phone_number_id: null }],
     // Fonte de verdade do canal uazapi: a MESMA coluna que o cron e a tela
     // /conexao usam — não uma checagem ao vivo via API de administração da
     // uazapi (ver nota no código de forcarEnvioAction, achado 2026-09-19).
@@ -199,37 +196,5 @@ describe('forcarEnvioAction — uazapi', () => {
     expect(status(db)).toBe('enviado')
     expect(mocks.fetch.mock.calls.filter(([u]) => String(u).endsWith('/send/text'))).toHaveLength(1)
     vi.useRealTimers()
-  })
-})
-
-describe('forcarEnvioAction — Meta Cloud API', () => {
-  it('Meta recusa o envio: restaura o status original em vez de forçar "fila"', async () => {
-    const db = cenario({ meta: true, status: 'cancelado' })
-    mocks.fetch.mockResolvedValue({ ok: false, status: 400, json: async () => ({ error: { message: 'inválido' } }) })
-    expect((await forcarEnvioAction('n1')).error).toMatch(/Meta/)
-    expect(status(db)).toBe('cancelado')
-  })
-
-  it('erro de rede na Meta: restaura o status', async () => {
-    const db = cenario({ meta: true, status: 'fila' })
-    mocks.fetch.mockRejectedValue(new Error('ECONNRESET'))
-    await forcarEnvioAction('n1')
-    expect(status(db)).toBe('fila')
-  })
-
-  it('erro ao ler a parcela: não envia com valor em branco e restaura o status', async () => {
-    const db = cenario({ meta: true, status: 'fila' })
-    db.falhas.push({ tabela: 'parcelas', operacao: 'select', vezes: 1 })
-    expect((await forcarEnvioAction('n1')).error).toMatch(/parcela/i)
-    expect(status(db)).toBe('fila')
-    expect(mocks.fetch).not.toHaveBeenCalled()
-  })
-
-  it('erro no histórico de atendimento depois do envio não reverte o status', async () => {
-    const db = cenario({ meta: true })
-    mocks.fetch.mockResolvedValue({ ok: true, json: async () => ({}) })
-    mocks.encontrarOuCriarAtendimento.mockRejectedValue(new Error('banco caiu'))
-    expect(await forcarEnvioAction('n1')).toEqual({})
-    expect(status(db)).toBe('enviado')
   })
 })

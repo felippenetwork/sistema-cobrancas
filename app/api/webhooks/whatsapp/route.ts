@@ -1,32 +1,13 @@
-// Webhook WhatsApp — recebe mensagens de clientes via uazapi ou Meta Cloud API.
+// Webhook WhatsApp — recebe mensagens de clientes via uazapi.
 // URL a configurar no uazapi: https://seu-dominio.com/api/webhooks/whatsapp?conta=UUID&secret=UAZAPI_WEBHOOK_SECRET
-// URL Meta: https://seu-dominio.com/api/webhooks/whatsapp (GET para verificação + POST para eventos)
 //
-// Segurança (SEG-N1, auditoria 2026-09-19): as duas origens são autenticadas
-// antes de processar qualquer coisa. Meta assina cada requisição com
-// X-Hub-Signature-256 usando o App Secret DAQUELA conta (cada conta tem seu
-// próprio app Meta — coluna configuracoes.meta_app_secret); uazapi usa o
-// segredo compartilhado da plataforma (UAZAPI_WEBHOOK_SECRET), igual ao
-// webhook de conexão. Sem o segredo certo, 401 — nunca processar sem validar.
+// Segurança (SEG-N1, auditoria 2026-09-19): exige o segredo compartilhado da
+// plataforma (UAZAPI_WEBHOOK_SECRET), igual ao webhook de conexão. Sem o
+// segredo certo, 401 — nunca processar sem validar.
 
-import { createHmac, timingSafeEqual } from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { processarMidiaMeta } from '@/lib/media/processar-midia-meta'
 import { celularVariantes } from '@/lib/utils/celular'
-
-// ── Meta Cloud API: verificação do webhook (GET) ─────────────────────────────
-export async function GET(req: NextRequest) {
-  const params    = req.nextUrl.searchParams
-  const mode      = params.get('hub.mode')
-  const token     = params.get('hub.verify_token')
-  const challenge = params.get('hub.challenge')
-
-  if (mode === 'subscribe' && token === process.env.WHATSAPP_VERIFY_TOKEN) {
-    return new NextResponse(challenge, { status: 200 })
-  }
-  return NextResponse.json({ ok: true })
-}
 
 // ── Receber mensagens (POST) ──────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
@@ -34,85 +15,15 @@ export async function POST(req: NextRequest) {
     const contaId  = req.nextUrl.searchParams.get('conta') ?? null
     const supabase = createAdminClient()
 
-    // Ler como texto primeiro: a assinatura da Meta é calculada sobre os bytes
-    // crus do corpo, não sobre o objeto já parseado.
     const rawBody = await req.text()
     const body    = JSON.parse(rawBody)
 
-    // ── Meta Cloud API ────────────────────────────────────────────────────────
-    if (body?.object === 'whatsapp_business_account') {
-      const phoneIdValidacao = body.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id as string | undefined
-      const contaValidacao   = phoneIdValidacao
-        ? await resolverContaPorMetaPhoneId(supabase, phoneIdValidacao)
-        : contaId
-
-      const assinaturaValida = contaValidacao
-        ? await validarAssinaturaMeta(supabase, contaValidacao, rawBody, req.headers.get('x-hub-signature-256'))
-        : false
-
-      if (!assinaturaValida) {
-        console.warn('[webhook/whatsapp] assinatura Meta ausente/inválida ou meta_app_secret não configurado', { contaValidacao })
-        return NextResponse.json({ ok: false }, { status: 401 })
-      }
-
-      for (const entry of body.entry ?? []) {
-        for (const change of entry.changes ?? []) {
-          const value = change.value ?? {}
-
-          // Resolve conta pelo phone_number_id do metadata
-          const phoneId = value.metadata?.phone_number_id as string | undefined
-          const msgs    = value.messages ?? []
-          const firstCelular = msgs[0]?.from ?? ''
-          const cid = phoneId
-            ? await resolverContaPorMetaPhoneId(supabase, phoneId)
-            : (contaId ?? (firstCelular ? await resolverContaPorCelular(supabase, firstCelular) : null))
-
-          if (!cid) continue
-
-          // ── Status de entrega (enviado → entregue → lido / erro) ──────────
-          for (const st of (value.statuses ?? []) as any[]) {
-            const interno = metaStatusParaInterno(st.status as string)
-            if (interno && st.id) {
-              await supabase.from('mensagens_wa')
-                .update({ status: interno } as any)
-                .eq('wa_id', st.id)
-                .eq('conta_id', cid)
-            }
-          }
-
-          // ── Mensagens recebidas ───────────────────────────────────────────
-          for (const msg of msgs) {
-            const celular = msg.from as string
-            const waId    = msg.id   as string
-            if (!celular) continue
-
-            const info = extrairInfoMeta(msg)
-            if (!info.texto && !info.mediaId) continue
-
-            let midiaUrl: string | null = null
-            if (info.mediaId && info.mimeType) {
-              midiaUrl = await processarMidiaMeta(cid, info.mediaId, info.mimeType)
-            }
-
-            await salvarMensagem(supabase, {
-              contaId: cid, celular, texto: info.texto, waId, direcao: 'in',
-              tipo: info.tipo, midiaUrl,
-            })
-          }
-        }
-      }
-      return NextResponse.json({ ok: true })
-    }
-
-    // ── uazapi (EventType ou event) — exige segredo compartilhado da plataforma ──
-    const pareceUazapi = !!(body?.EventType || body?.event)
-    if (pareceUazapi) {
-      const uazapiSecret  = process.env.UAZAPI_WEBHOOK_SECRET
-      const secretRecebido = req.nextUrl.searchParams.get('secret') ?? req.headers.get('x-webhook-secret')
-      if (!uazapiSecret || secretRecebido !== uazapiSecret) {
-        console.warn('[webhook/whatsapp] segredo uazapi ausente ou inválido')
-        return NextResponse.json({ ok: false }, { status: 401 })
-      }
+    // ── Exige o segredo compartilhado da plataforma ──────────────────────────
+    const uazapiSecret  = process.env.UAZAPI_WEBHOOK_SECRET
+    const secretRecebido = req.nextUrl.searchParams.get('secret') ?? req.headers.get('x-webhook-secret')
+    if (!uazapiSecret || secretRecebido !== uazapiSecret) {
+      console.warn('[webhook/whatsapp] segredo uazapi ausente ou inválido')
+      return NextResponse.json({ ok: false }, { status: 401 })
     }
 
     // ── uazapiGO: body.EventType + phone em body.chat.phone ──────────────────
@@ -183,64 +94,6 @@ export async function POST(req: NextRequest) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-type MetaMsgInfo = { texto: string; tipo: string; mediaId: string | null; mimeType: string | null }
-
-function extrairInfoMeta(msg: any): MetaMsgInfo {
-  const tipo = (msg?.type ?? 'text') as string
-  switch (tipo) {
-    case 'text':
-      return { texto: msg.text?.body ?? '', tipo: 'text', mediaId: null, mimeType: null }
-    case 'image':
-      return {
-        texto:    msg.image?.caption ? `[Imagem] ${msg.image.caption}` : '[Imagem]',
-        tipo:     'image',
-        mediaId:  msg.image?.id     ?? null,
-        mimeType: msg.image?.mime_type ?? 'image/jpeg',
-      }
-    case 'audio':
-      return {
-        texto:    '[Áudio]',
-        tipo:     'audio',
-        mediaId:  msg.audio?.id     ?? null,
-        mimeType: msg.audio?.mime_type ?? 'audio/ogg',
-      }
-    case 'video':
-      return {
-        texto:    msg.video?.caption ? `[Vídeo] ${msg.video.caption}` : '[Vídeo]',
-        tipo:     'video',
-        mediaId:  msg.video?.id     ?? null,
-        mimeType: msg.video?.mime_type ?? 'video/mp4',
-      }
-    case 'document':
-      return {
-        texto:    msg.document?.filename ?? msg.document?.caption ?? '[Arquivo]',
-        tipo:     'document',
-        mediaId:  msg.document?.id       ?? null,
-        mimeType: msg.document?.mime_type ?? 'application/octet-stream',
-      }
-    case 'sticker':
-      return {
-        texto:    '[Figurinha]',
-        tipo:     'sticker',
-        mediaId:  msg.sticker?.id     ?? null,
-        mimeType: msg.sticker?.mime_type ?? 'image/webp',
-      }
-    case 'interactive': {
-      const reply = msg.interactive?.button_reply ?? msg.interactive?.list_reply
-      return { texto: reply?.title ?? '[Resposta interativa]', tipo: 'interactive', mediaId: null, mimeType: null }
-    }
-    case 'location':
-      return {
-        texto:    `[Localização: ${msg.location?.latitude},${msg.location?.longitude}]`,
-        tipo:     'location', mediaId: null, mimeType: null,
-      }
-    case 'contacts':
-      return { texto: '[Contato]', tipo: 'contacts', mediaId: null, mimeType: null }
-    default:
-      return { texto: `[${tipo}]`, tipo, mediaId: null, mimeType: null }
-  }
-}
-
 function detectarTipoUazapi(msg: any): string {
   const m = msg?.message ?? {}
   if (m.imageMessage)                      return 'image'
@@ -255,14 +108,6 @@ function detectarTipoUazapi(msg: any): string {
   if (mt === 'video')    return 'video'
   if (mt === 'document') return 'document'
   return 'text'
-}
-
-function metaStatusParaInterno(s: string): string | null {
-  if (s === 'sent')      return 'enviado'
-  if (s === 'delivered') return 'entregue'
-  if (s === 'read')      return 'lido'
-  if (s === 'failed')    return 'erro'
-  return null
 }
 
 async function encontrarOuCriarAtendimento(
@@ -404,42 +249,6 @@ async function salvarMensagem(
   if (error && error.code !== '23505') {
     console.error('[webhook/whatsapp] salvarMensagem', error, params)
   }
-}
-
-async function validarAssinaturaMeta(
-  supabase: ReturnType<typeof createAdminClient>,
-  contaId: string,
-  rawBody: string,
-  signatureHeader: string | null,
-): Promise<boolean> {
-  if (!signatureHeader) return false
-
-  const { data } = await supabase
-    .from('configuracoes')
-    .select('meta_app_secret')
-    .eq('conta_id', contaId)
-    .maybeSingle()
-
-  const secret = (data as { meta_app_secret?: string | null } | null)?.meta_app_secret
-  if (!secret) return false
-
-  const esperado = 'sha256=' + createHmac('sha256', secret).update(rawBody).digest('hex')
-  const a = Buffer.from(esperado)
-  const b = Buffer.from(signatureHeader)
-  if (a.length !== b.length) return false
-  return timingSafeEqual(a, b)
-}
-
-async function resolverContaPorMetaPhoneId(
-  supabase: ReturnType<typeof createAdminClient>,
-  phoneNumberId: string,
-): Promise<string | null> {
-  const { data } = await supabase
-    .from('configuracoes')
-    .select('conta_id')
-    .eq('meta_phone_number_id', phoneNumberId)
-    .maybeSingle()
-  return (data?.conta_id as string) ?? null
 }
 
 async function resolverContaPorInstancia(

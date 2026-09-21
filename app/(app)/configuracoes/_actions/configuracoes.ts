@@ -16,49 +16,6 @@ async function getConta() {
   return { supabase, contaId: conta.id as string }
 }
 
-// ── Toggles de provedor ──────────────────────────────────────────────────────
-export async function toggleMetaApiAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
-  try {
-    const { supabase, contaId } = await getConta()
-    const ativo = formData.get('ativo') === 'true'
-    const { error } = await supabase
-      .from('configuracoes')
-      .upsert({ conta_id: contaId, meta_api_ativo: ativo }, { onConflict: 'conta_id' })
-    if (error) return { error: error.message }
-    revalidatePath('/configuracoes')
-    return { error: null, success: true }
-  } catch (e) {
-    return { error: e instanceof Error ? e.message : 'Erro desconhecido.' }
-  }
-}
-
-// ── Salvar credenciais Meta Cloud API ────────────────────────────────────────
-export async function salvarMetaApiAction(
-  _prev: ActionState,
-  formData: FormData,
-): Promise<ActionState> {
-  try {
-    const { supabase, contaId } = await getConta()
-
-    const accessToken   = (formData.get('meta_access_token')    as string)?.trim() || null
-    const phoneNumberId = (formData.get('meta_phone_number_id') as string)?.trim() || null
-    const wabaId        = (formData.get('meta_waba_id')         as string)?.trim() || null
-    const appSecret     = (formData.get('meta_app_secret')      as string)?.trim() || null
-
-    const { error } = await supabase.from('configuracoes').upsert(
-      { conta_id: contaId, meta_access_token: accessToken, meta_phone_number_id: phoneNumberId, meta_waba_id: wabaId, meta_app_secret: appSecret },
-      { onConflict: 'conta_id' },
-    )
-
-    if (error) return { error: error.message }
-
-    revalidatePath('/configuracoes')
-    return { error: null, success: true }
-  } catch (e) {
-    return { error: e instanceof Error ? e.message : 'Erro desconhecido.' }
-  }
-}
-
 // ── Salvar credenciais LookDefense IPTV ─────────────────────────────────────
 export async function salvarLookDefenseAction(
   _prev: ActionState,

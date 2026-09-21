@@ -62,7 +62,7 @@ Suíte verde não prova que a suíte protege — prova só que, hoje, nada quebr
 
 ## Rota de cron (sem WhatsApp real)
 
-- uazapi e Meta Cloud API 100% mockados: `vi.mock('@/lib/uazapi')` / `vi.stubGlobal('fetch')`. NENHUM teste dispara mensagem real.
+- uazapi 100% mockado: `vi.mock('@/lib/uazapi')` / `vi.stubGlobal('fetch')`. NENHUM teste dispara mensagem real.
 - **Banco falso reutilizável: `tests/helpers/fake-supabase.ts` (`FakeDb`).** Reproduz filtros, o UPDATE condicional do claim atômico e permite **injetar falhas** (`db.falhas.push({ tabela, operacao, quando, vezes })`) — é assim que se prova "erro ao gravar `enviado` é repetido e a mensagem não é reenviada". Use-o antes de inventar outro fake. Comportamento do Supabase que ele imita de propósito: `maybeSingle()` com mais de uma linha devolve erro (igual ao real) — dado duplicado no cenário aparece como falha do teste, não some.
 - Relógio falso (`vi.useFakeTimers()` + `vi.setSystemTime`) e `vi.advanceTimersByTimeAsync` para as pausas do ritmo anti-ban (digitação 15–20s + intervalo 45–80s) — o teste do cron roda em milissegundos.
 - **Cobertos hoje (TST-C5 resolvido em 2026-09-19):** claim atômico com 2 execuções sobrepostas; janela 09–20h nas fronteiras 08:59/09:00/19:59/20:00/20:01; rate limit; corrida com pagamento; falha ao gravar status; texto indisponível; isolamento por conta; autenticação dos 4 crons. **Ainda sem teste:** `app/api/cron/scheduler` (geração de parcelas recorrentes e enfileiramento de lembretes) — só a autenticação está coberta.

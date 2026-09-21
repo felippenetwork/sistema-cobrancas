@@ -4,7 +4,7 @@ import {
   useEffect, useRef, useState, useActionState, useCallback, useMemo,
 } from 'react'
 import {
-  ArrowLeft, Send, MessageSquare, Clock, CheckCircle, XCircle,
+  ArrowLeft, Send, MessageSquare, CheckCircle, XCircle,
   ArrowRightLeft, Inbox, History, Plus, Search, User, Pencil,
   ChevronRight, Phone, Mail, X, Loader2, RefreshCw, ExternalLink,
   CreditCard, Check, CheckCheck, FileText, Volume2, Video, ImageIcon,
@@ -13,7 +13,7 @@ import {
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import {
-  enviarRespostaAction, marcarLidaAction, enviarTemplateAction,
+  enviarRespostaAction, marcarLidaAction,
   iniciarConversaAction, atualizarClienteAction,
 } from './_actions/mensagens'
 import {
@@ -69,7 +69,6 @@ type Mensagem = {
 
 type Membro      = { id: string; user_id: string; nome: string }
 type Departamento = { id: string; nome: string; cor: string }
-type MetaTemplate = { id: string; name: string; language: string; body: string; category: string }
 
 type ClienteBusca = {
   id: string
@@ -125,37 +124,6 @@ function formatarHora(iso: string): string {
     return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' })
   }
   return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', timeZone: 'America/Sao_Paulo' })
-}
-
-function calcularJanela(ultimaMsgIn: Date | null): { label: string; aberta: boolean } {
-  if (!ultimaMsgIn) return { label: 'Sem msg do cliente', aberta: false }
-  const restante = ultimaMsgIn.getTime() + 86_400_000 - Date.now()
-  if (restante <= 0) return { label: 'Janela expirada', aberta: false }
-  const h = Math.floor(restante / 3_600_000)
-  const m = Math.floor((restante % 3_600_000) / 60_000)
-  return { label: `Janela: ${h}h ${m}m`, aberta: true }
-}
-
-// ── JanelaTimer ───────────────────────────────────────────────────────────────
-
-function JanelaTimer({ ultimaMsgIn }: { ultimaMsgIn: Date | null }) {
-  const [janela, setJanela] = useState(() => calcularJanela(ultimaMsgIn))
-  useEffect(() => {
-    setJanela(calcularJanela(ultimaMsgIn))
-    const id = setInterval(() => setJanela(calcularJanela(ultimaMsgIn)), 60_000)
-    return () => clearInterval(id)
-  }, [ultimaMsgIn])
-  return (
-    <span className={[
-      'flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium',
-      janela.aberta
-        ? 'bg-green-500/15 text-green-400'
-        : 'bg-amber-500/15 text-amber-500',
-    ].join(' ')}>
-      <Clock className="h-2.5 w-2.5" />
-      {janela.label}
-    </span>
-  )
 }
 
 // ── ModalTransferir ───────────────────────────────────────────────────────────
@@ -228,152 +196,31 @@ function ModalTransferir({
   )
 }
 
-// ── ModalTemplatePicker (janela expirada) ─────────────────────────────────────
-
-function ModalTemplatePicker({
-  templates, carregandoTemplates, erroTemplates,
-  onEnviar, onFechar, onAtualizar, carregandoEnvio, erroEnvio,
-}: {
-  templates: MetaTemplate[]
-  carregandoTemplates: boolean
-  erroTemplates: string | null
-  onEnviar: (tmpl: MetaTemplate) => void
-  onFechar: () => void
-  onAtualizar: () => void
-  carregandoEnvio: boolean
-  erroEnvio: string | null
-}) {
-  const [sel, setSel] = useState<MetaTemplate | null>(null)
-
-  return (
-    <div
-      className="fixed inset-0 z-[70] flex flex-col justify-end bg-black/60 md:items-center md:justify-center md:p-4"
-      onClick={e => e.target === e.currentTarget && onFechar()}
-    >
-      <div className="w-full rounded-t-2xl border border-border bg-card shadow-2xl md:max-w-sm md:rounded-xl">
-        <div className="flex justify-center pt-3 md:hidden">
-          <div className="h-1 w-10 rounded-full bg-border" />
-        </div>
-        <div className="flex items-center justify-between border-b border-border px-5 py-4">
-          <div>
-            <h2 className="text-sm font-semibold text-foreground">Iniciar conversa</h2>
-            <p className="text-xs text-muted-foreground">Cobrado pela Meta por conversa iniciada</p>
-          </div>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={onAtualizar}
-              disabled={carregandoTemplates}
-              title="Atualizar templates da Meta"
-              className="rounded p-1.5 text-muted-foreground hover:text-foreground disabled:opacity-40"
-            >
-              <RefreshCw className={`h-3.5 w-3.5 ${carregandoTemplates ? 'animate-spin' : ''}`} />
-            </button>
-            <button onClick={onFechar} className="rounded p-1.5 text-muted-foreground hover:text-foreground">
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-
-        <div className="max-h-64 overflow-y-auto space-y-1 p-3">
-          {carregandoTemplates ? (
-            <div className="flex items-center justify-center gap-2 py-8 text-xs text-muted-foreground">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              Carregando templates…
-            </div>
-          ) : erroTemplates ? (
-            <div className="py-4 text-center">
-              <p className="text-xs text-destructive">{erroTemplates}</p>
-              <button
-                onClick={onAtualizar}
-                className="mt-3 flex items-center gap-1.5 mx-auto rounded-xl border border-border px-3 py-2 text-xs text-muted-foreground hover:bg-accent"
-              >
-                <RefreshCw className="h-3 w-3" /> Tentar novamente
-              </button>
-            </div>
-          ) : templates.length === 0 ? (
-            <p className="py-6 text-center text-xs text-muted-foreground">
-              Nenhum template aprovado encontrado.
-            </p>
-          ) : (
-            templates.map(t => (
-              <button
-                key={t.id}
-                onClick={() => setSel(t)}
-                className={[
-                  'flex w-full items-start gap-3 rounded-xl p-3 text-left transition',
-                  sel?.id === t.id ? 'bg-primary/10 ring-1 ring-primary' : 'hover:bg-accent',
-                ].join(' ')}
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <p className="truncate text-sm font-medium text-foreground">{t.name}</p>
-                    <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[9px] font-semibold uppercase text-muted-foreground">
-                      {t.language}
-                    </span>
-                    <span className={[
-                      'shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase',
-                      t.category === 'UTILITY' ? 'bg-blue-500/15 text-blue-400' : 'bg-orange-500/15 text-orange-400',
-                    ].join(' ')}>
-                      {t.category === 'UTILITY' ? 'utility' : 'marketing'}
-                    </span>
-                  </div>
-                  {t.body && (
-                    <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{t.body}</p>
-                  )}
-                </div>
-              </button>
-            ))
-          )}
-        </div>
-
-        {erroEnvio && <p className="px-5 pb-1 text-xs text-destructive">{erroEnvio}</p>}
-
-        <div
-          className="flex gap-2 border-t border-border px-5 py-4"
-          style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom, 0px))' }}
-        >
-          <button
-            onClick={onFechar}
-            className="flex-1 rounded-xl border border-border px-3 py-3 text-sm text-muted-foreground transition hover:bg-accent"
-          >Cancelar</button>
-          <button
-            onClick={() => sel && onEnviar(sel)}
-            disabled={!sel || carregandoEnvio || carregandoTemplates}
-            className="flex-1 rounded-xl bg-primary px-3 py-3 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
-          >{carregandoEnvio ? 'Enviando…' : 'Enviar template'}</button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ── ModalNovaConversa — pesquisa cliente + template picker ────────────────────
+// ── ModalNovaConversa — pesquisa cliente + mensagem ───────────────────────────
 
 function ModalNovaConversa({
   contaId,
-  templates,
-  carregandoTemplates,
   onEnviar,
   onFechar,
-  onAtualizar,
+  enviando,
+  erroEnvio,
 }: {
   contaId: string
-  templates: MetaTemplate[]
-  carregandoTemplates: boolean
-  onEnviar: (celular: string, clienteId: string | null, tmpl: MetaTemplate) => void
+  onEnviar: (celular: string, clienteId: string | null, texto: string) => void
   onFechar: () => void
-  onAtualizar: () => void
+  enviando: boolean
+  erroEnvio: string | null
 }) {
   const sb = createClient()
 
-  // Etapa 1: busca de cliente; Etapa 2: seleção de template
+  // Etapa 1: busca de cliente; Etapa 2: escrever a mensagem
   const [step, setStep]             = useState<1 | 2>(1)
   const [query, setQuery]           = useState('')
   const [resultados, setResultados] = useState<ClienteBusca[]>([])
   const [buscando, setBuscando]     = useState(false)
   const [clienteSel, setClienteSel] = useState<ClienteBusca | null>(null)
   const [celularManual, setCelularManual] = useState('')
-  const [tmplSel, setTmplSel]       = useState<MetaTemplate | null>(null)
+  const [mensagem, setMensagem]     = useState('')
 
   // Busca debounced
   useEffect(() => {
@@ -427,7 +274,7 @@ function ModalNovaConversa({
           <div className="flex items-center gap-2">
             {step === 2 && (
               <button
-                onClick={() => { setStep(1); setTmplSel(null) }}
+                onClick={() => setStep(1)}
                 className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
               >
                 <ArrowLeft className="h-4 w-4" />
@@ -435,7 +282,7 @@ function ModalNovaConversa({
             )}
             <div>
               <h2 className="text-sm font-semibold text-foreground">
-                {step === 1 ? 'Nova conversa' : 'Escolher template'}
+                {step === 1 ? 'Nova conversa' : 'Escrever mensagem'}
               </h2>
               {step === 2 && (
                 <p className="text-xs text-muted-foreground">
@@ -444,21 +291,9 @@ function ModalNovaConversa({
               )}
             </div>
           </div>
-          <div className="flex items-center gap-1">
-            {step === 2 && (
-              <button
-                onClick={onAtualizar}
-                disabled={carregandoTemplates}
-                title="Atualizar templates da Meta"
-                className="rounded p-1.5 text-muted-foreground hover:text-foreground disabled:opacity-40"
-              >
-                <RefreshCw className={`h-3.5 w-3.5 ${carregandoTemplates ? 'animate-spin' : ''}`} />
-              </button>
-            )}
-            <button onClick={onFechar} className="rounded p-1.5 text-muted-foreground hover:text-foreground">
-              <X className="h-4 w-4" />
-            </button>
-          </div>
+          <button onClick={onFechar} className="rounded p-1.5 text-muted-foreground hover:text-foreground">
+            <X className="h-4 w-4" />
+          </button>
         </div>
 
         {/* Etapa 1: Busca */}
@@ -509,7 +344,7 @@ function ModalNovaConversa({
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium text-foreground">Usar número: {query.replace(/\D/g, '')}</p>
-                    <p className="text-xs text-muted-foreground">Enviar template direto para este número</p>
+                    <p className="text-xs text-muted-foreground">Enviar mensagem direto para este número</p>
                   </div>
                   <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
                 </button>
@@ -530,49 +365,19 @@ function ModalNovaConversa({
           </>
         )}
 
-        {/* Etapa 2: Seleção de template */}
+        {/* Etapa 2: Escrever a primeira mensagem */}
         {step === 2 && (
           <>
-            <div className="max-h-64 overflow-y-auto space-y-1 p-3">
-              {carregandoTemplates ? (
-                <div className="flex items-center justify-center gap-2 py-8 text-xs text-muted-foreground">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  Carregando templates…
-                </div>
-              ) : templates.length === 0 ? (
-                <p className="py-6 text-center text-xs text-muted-foreground">
-                  Nenhum template aprovado. Configure os templates no Meta Business.
-                </p>
-              ) : (
-                templates.map(t => (
-                  <button
-                    key={t.id}
-                    onClick={() => setTmplSel(t)}
-                    className={[
-                      'flex w-full items-start gap-3 rounded-xl p-3 text-left transition',
-                      tmplSel?.id === t.id ? 'bg-primary/10 ring-1 ring-primary' : 'hover:bg-accent',
-                    ].join(' ')}
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <p className="text-sm font-medium text-foreground">{t.name}</p>
-                        <span className="rounded bg-muted px-1.5 py-0.5 text-[9px] font-semibold uppercase text-muted-foreground">
-                          {t.language}
-                        </span>
-                        <span className={[
-                          'rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase',
-                          t.category === 'UTILITY' ? 'bg-blue-500/15 text-blue-400' : 'bg-orange-500/15 text-orange-400',
-                        ].join(' ')}>
-                          {t.category === 'UTILITY' ? 'utility' : 'marketing'}
-                        </span>
-                      </div>
-                      {t.body && (
-                        <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{t.body}</p>
-                      )}
-                    </div>
-                  </button>
-                ))
-              )}
+            <div className="space-y-2 p-5">
+              <textarea
+                autoFocus
+                value={mensagem}
+                onChange={e => setMensagem(e.target.value)}
+                placeholder="Escreva a mensagem…"
+                rows={4}
+                className="w-full resize-none rounded-xl border border-border bg-input px-3 py-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
+              />
+              {erroEnvio && <p className="text-xs text-destructive">{erroEnvio}</p>}
             </div>
 
             <div
@@ -584,10 +389,10 @@ function ModalNovaConversa({
                 className="flex-1 rounded-xl border border-border px-3 py-3 text-sm text-muted-foreground transition hover:bg-accent"
               >Cancelar</button>
               <button
-                onClick={() => tmplSel && onEnviar(celularFinal, clienteIdFinal, tmplSel)}
-                disabled={!tmplSel || !celularFinal}
+                onClick={() => mensagem.trim() && onEnviar(celularFinal, clienteIdFinal, mensagem.trim())}
+                disabled={!mensagem.trim() || !celularFinal || enviando}
                 className="flex-1 rounded-xl bg-primary px-3 py-3 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
-              >Iniciar conversa</button>
+              >{enviando ? 'Enviando…' : 'Iniciar conversa'}</button>
             </div>
           </>
         )}
@@ -1211,7 +1016,6 @@ export default function AtendimentoPage() {
   const [atendimentos, setAtendimentos] = useState<Atendimento[]>([])
   const [selecionado, setSelecionado] = useState<Atendimento | null>(null)
   const [mensagens, setMensagens]     = useState<Mensagem[]>([])
-  const [ultimaMsgIn, setUltimaMsgIn] = useState<Date | null>(null)
   const [busca, setBusca]             = useState('')
   const [contadorPendentes, setContadorPendentes] = useState(0)
 
@@ -1225,19 +1029,10 @@ export default function AtendimentoPage() {
   const [membros, setMembros]           = useState<Membro[]>([])
   const [acao, setAcao]                 = useState<string | null>(null)
 
-  // Template picker (janela expirada)
-  const [mostrarTemplatePicker, setMostrarTemplatePicker] = useState(false)
-  const [enviandoTemplate, setEnviandoTemplate]           = useState(false)
-  const [templateErro, setTemplateErro]                   = useState<string | null>(null)
-
   // Modal nova conversa
   const [mostrarNovaConversa, setMostrarNovaConversa] = useState(false)
   const [iniciandoConversa, setIniciandoConversa]     = useState(false)
-
-  // Templates Meta (carregados uma vez)
-  const [metaTemplates, setMetaTemplates]       = useState<MetaTemplate[]>([])
-  const [carregandoTemplates, setCarregandoTemplates] = useState(false)
-  const [erroTemplates, setErroTemplates]       = useState<string | null>(null)
+  const [erroNovaConversa, setErroNovaConversa]       = useState<string | null>(null)
 
   // Lightbox de imagem
   const [imagemAmpliada, setImagemAmpliada] = useState<string | null>(null)
@@ -1260,11 +1055,6 @@ export default function AtendimentoPage() {
 
   // ── Helpers ──────────────────────────────────────────────────────────────────
 
-  const janelaAberta = useMemo(
-    () => ultimaMsgIn ? ultimaMsgIn.getTime() + 86_400_000 > Date.now() : false,
-    [ultimaMsgIn],
-  )
-
   // Filtra lista pela busca
   const listaFiltrada = useMemo(() => {
     if (!busca.trim()) return atendimentos
@@ -1274,24 +1064,6 @@ export default function AtendimentoPage() {
       at.celular.includes(q),
     )
   }, [atendimentos, busca])
-
-  // ── Carregar templates da Meta ────────────────────────────────────────────────
-
-  async function carregarTemplates(force = false) {
-    if (!force && metaTemplates.length > 0) return  // já carregados
-    setCarregandoTemplates(true)
-    setErroTemplates(null)
-    try {
-      const res  = await fetch('/api/meta/templates?status=APPROVED', { cache: 'no-store' })
-      const json = await res.json()
-      if (json.templates) setMetaTemplates(json.templates)
-      else setErroTemplates(json.error ?? 'Erro ao carregar templates.')
-    } catch {
-      setErroTemplates('Erro de conexão ao carregar templates.')
-    } finally {
-      setCarregandoTemplates(false)
-    }
-  }
 
   // ── Carregar contaId ──────────────────────────────────────────────────────────
 
@@ -1391,8 +1163,6 @@ export default function AtendimentoPage() {
 
     const lista = (data as unknown as Mensagem[]) ?? []
     setMensagens(lista)
-    const inbound = lista.filter(m => m.direcao === 'in')
-    setUltimaMsgIn(inbound.length ? new Date(inbound[inbound.length - 1].recebido_em) : null)
   }, [sb])
 
   useEffect(() => {
@@ -1447,7 +1217,6 @@ export default function AtendimentoPage() {
             return [...prev, nova]
           })
           if (nova.direcao === 'in') {
-            setUltimaMsgIn(new Date(nova.recebido_em))
             marcarLidaAction(nova.celular)
           }
         }
@@ -1534,47 +1303,24 @@ export default function AtendimentoPage() {
     setMostrarPerfil(false)
   }
 
-  // Template picker (janela expirada)
-  async function abrirTemplatePicker() {
-    setMostrarTemplatePicker(true)
-    setTemplateErro(null)
-    await carregarTemplates()
-  }
-
-  async function handleEnviarTemplate(tmpl: MetaTemplate) {
-    if (!selecionado || !contaId) return
-    setEnviandoTemplate(true)
-    setTemplateErro(null)
-    const r = await enviarTemplateAction(
-      selecionado.id, selecionado.celular, selecionado.cliente_id,
-      tmpl.name, tmpl.language, tmpl.body,
-    )
-    setEnviandoTemplate(false)
-    if (r.error) {
-      setTemplateErro(r.error)
-    } else {
-      setMostrarTemplatePicker(false)
-      carregarMensagens(selecionado.celular, contaId)
-    }
-  }
-
   // Nova conversa
-  async function abrirNovaConversa() {
+  function abrirNovaConversa() {
+    setErroNovaConversa(null)
     setMostrarNovaConversa(true)
-    await carregarTemplates()
   }
 
   async function handleIniciarConversa(
     celular: string,
     clienteId: string | null,
-    tmpl: MetaTemplate,
+    texto: string,
   ) {
     if (!contaId) return
     setIniciandoConversa(true)
-    const r = await iniciarConversaAction(celular, clienteId, tmpl.name, tmpl.language, tmpl.body)
+    setErroNovaConversa(null)
+    const r = await iniciarConversaAction(celular, clienteId, texto)
     setIniciandoConversa(false)
     if (r.error) {
-      alert(r.error)
+      setErroNovaConversa(r.error)
       return
     }
     setMostrarNovaConversa(false)
@@ -1587,19 +1333,6 @@ export default function AtendimentoPage() {
   return (
     <>
       {/* Modais globais */}
-      {mostrarTemplatePicker && selecionado && (
-        <ModalTemplatePicker
-          templates={metaTemplates}
-          carregandoTemplates={carregandoTemplates}
-          erroTemplates={erroTemplates}
-          onEnviar={handleEnviarTemplate}
-          onFechar={() => { setMostrarTemplatePicker(false); setTemplateErro(null) }}
-          onAtualizar={() => { setMetaTemplates([]); carregarTemplates(true) }}
-          carregandoEnvio={enviandoTemplate}
-          erroEnvio={templateErro}
-        />
-      )}
-
       {mostrarTransferir && selecionado && (
         <ModalTransferir
           departamentos={departamentos}
@@ -1613,11 +1346,10 @@ export default function AtendimentoPage() {
       {mostrarNovaConversa && contaId && (
         <ModalNovaConversa
           contaId={contaId}
-          templates={metaTemplates}
-          carregandoTemplates={carregandoTemplates || iniciandoConversa}
           onEnviar={handleIniciarConversa}
           onFechar={() => setMostrarNovaConversa(false)}
-          onAtualizar={() => { setMetaTemplates([]); carregarTemplates(true) }}
+          enviando={iniciandoConversa}
+          erroEnvio={erroNovaConversa}
         />
       )}
 
@@ -1829,10 +1561,7 @@ export default function AtendimentoPage() {
                 <p className="truncate text-sm font-medium text-foreground hover:underline">
                   {nomeAtendimento(selecionado)}
                 </p>
-                <div className="flex items-center gap-2">
-                  <p className="text-xs text-muted-foreground">{selecionado.celular}</p>
-                  <JanelaTimer ultimaMsgIn={ultimaMsgIn} />
-                </div>
+                <p className="text-xs text-muted-foreground">{selecionado.celular}</p>
               </button>
 
               {/* Ações */}
@@ -1941,24 +1670,6 @@ export default function AtendimentoPage() {
                 <p className="py-2 text-center text-xs text-muted-foreground">
                   Aceite o atendimento para responder.
                 </p>
-              ) : !janelaAberta ? (
-                <div className="flex flex-col items-center gap-2 py-2">
-                  <div className="flex items-center gap-1.5 rounded-full bg-amber-500/10 px-3 py-1.5 text-xs text-amber-600 dark:text-amber-400">
-                    <Clock className="h-3 w-3" />
-                    Janela de 24h expirada
-                  </div>
-                  <p className="px-4 text-center text-xs text-muted-foreground">
-                    Para enviar mensagens use um template aprovado.{' '}
-                    <span className="text-amber-600/80 dark:text-amber-400/80">Cobrado pela Meta.</span>
-                  </p>
-                  <button
-                    onClick={abrirTemplatePicker}
-                    className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition hover:opacity-90"
-                  >
-                    <MessageSquare className="h-4 w-4" />
-                    Iniciar conversa com template
-                  </button>
-                </div>
               ) : (
                 <>
                   {sendState.error && (

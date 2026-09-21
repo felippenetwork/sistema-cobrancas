@@ -17,6 +17,8 @@ Mas a migração de arquitetura (worker/Baileys → uazapi direto) abriu buracos
 
 Outros pontos que pedem decisão sua: **SEG-N5** (webhook EfiBank confia no corpo da notificação; confirmar via API exige o escopo `cob.read`).
 
+**Nota (2026-09-21):** a Meta Cloud API foi removida do produto inteiro (migration `0034_remove_meta_cloud_api.sql`) — uazapi é hoje o único canal de WhatsApp. Achados abaixo que descrevem código/config da Meta (SEG-N1, COD-N1/N2, o passo manual da linha ~159) referem-se a código que não existe mais; mantidos como registro histórico, não como pendência.
+
 ---
 
 ## FRENTE 1 — Segurança
@@ -156,7 +158,7 @@ Isso é mais estrutural do que qualquer bug encontrado:
 **Passos manuais pendentes para a Onda 0 funcionar em produção** — a correção de código sozinha faz o webhook de mensagens recusar tudo até isso ser feito:
 - Aplicar a migration `supabase/migrations/0032_meta_app_secret.sql` no Supabase (adiciona `configuracoes.meta_app_secret`)
 - Garantir `UAZAPI_WEBHOOK_SECRET` configurado na Vercel (já documentado no `.env.example`)
-- Cada conta que usa Meta Cloud API precisa colar o **App Secret** (Meta Developers → Configurações básicas) em Configurações → WhatsApp Business API — sem isso, o webhook dela passa a devolver 401
+- ~~Cada conta que usa Meta Cloud API precisa colar o **App Secret**...~~ **moot desde 2026-09-21** — Meta Cloud API removida do produto, essa tela e essa credencial não existem mais
 - Contas já conectadas na uazapi têm o webhook registrado SEM `&secret=` na URL — precisam reiniciar a conexão uma vez (ou ter o webhook re-registrado) para voltar a receber mensagens no atendimento. Lembretes e cobranças enviados não são afetados (saem pelo cron, não por este webhook)
 
 ### ONDA 1 — Risco de dinheiro e mensagem duplicada

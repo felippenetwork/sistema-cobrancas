@@ -24,7 +24,7 @@ export default function PoliticaPrivacidade() {
           <li>Dados de cadastro: nome, e-mail e informações da empresa</li>
           <li>Dados de clientes inseridos na plataforma: nome, telefone, CPF/CNPJ e valores de cobranças</li>
           <li>Dados de uso: logs de acesso, ações realizadas na plataforma</li>
-          <li>Mensagens enviadas via WhatsApp Business API (Meta) para fins de cobrança</li>
+          <li>Mensagens enviadas via WhatsApp para fins de cobrança</li>
         </ul>
       </section>
 
@@ -50,14 +50,11 @@ export default function PoliticaPrivacidade() {
       </section>
 
       <section style={{ marginBottom: 32 }}>
-        <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>5. WhatsApp Business API</h2>
+        <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>5. Envio de mensagens via WhatsApp</h2>
         <p>
-          Utilizamos a API oficial do WhatsApp Business (Meta) para envio de mensagens de cobrança.
+          Utilizamos um provedor de conexão com o WhatsApp para envio de mensagens de cobrança.
           As mensagens são enviadas apenas para números que forneceram consentimento ou com quem há
-          relação comercial prévia. Os dados são processados em conformidade com os{' '}
-          <a href="https://www.whatsapp.com/legal/business-policy" target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb' }}>
-            Termos de Serviço do WhatsApp Business
-          </a>.
+          relação comercial prévia.
         </p>
       </section>
 

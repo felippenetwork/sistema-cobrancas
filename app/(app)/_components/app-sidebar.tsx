@@ -27,7 +27,7 @@ const NAV_ATENDIMENTO: NavItem[] = [
   { href: '/atendimento',        label: 'Atendimento',     icon: <MessageSquare className="h-4 w-4" /> },
   { href: '/equipe',             label: 'Equipe',          icon: <UserCheck     className="h-4 w-4" /> },
   { href: '/mensagens-rapidas',  label: 'Msgs. Rápidas',   icon: <Zap           className="h-4 w-4" /> },
-  { href: '/wa-templates',       label: 'Templates WA',    icon: <FilePlus      className="h-4 w-4" /> },
+  { href: '/wa-templates',       label: 'Modelos',         icon: <FilePlus      className="h-4 w-4" /> },
   { href: '/disparos',           label: 'Disparos',        icon: <Send          className="h-4 w-4" /> },
   { href: '/conexao',            label: 'Conexão WA',      icon: <Smartphone    className="h-4 w-4" /> },
 ]

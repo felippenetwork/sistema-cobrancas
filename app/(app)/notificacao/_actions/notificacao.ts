@@ -71,17 +71,11 @@ export async function salvarTemplateAction(
     const templateWhatsapp   = (formData.get('template_whatsapp')   as string).trim()
     const assuntoEmail       = (formData.get('assunto_email')       as string).trim()
     const templateEmail      = (formData.get('template_email')      as string).trim()
-    const metaTemplateNome   = ((formData.get('meta_template_nome')   as string | null) ?? '').trim() || null
-    const metaTemplateIdioma = ((formData.get('meta_template_idioma') as string | null) ?? '').trim() || null
-    const metaTemplateCorpo  = ((formData.get('meta_template_corpo')  as string | null) ?? '').trim() || null
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const updatePayload: any = {
       horario, template_whatsapp: templateWhatsapp,
       assunto_email: assuntoEmail, template_email: templateEmail,
-      meta_template_nome: metaTemplateNome,
-      meta_template_idioma: metaTemplateIdioma,
-      meta_template_corpo: metaTemplateCorpo,
     }
     const { error } = await supabase.from('notificacoes_config').update(updatePayload)
       .eq('conta_id', contaId).eq('tipo', tipo as NotifTipo)

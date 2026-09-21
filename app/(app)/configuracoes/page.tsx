@@ -1,8 +1,8 @@
 'use client'
 
-import { useActionState, useState, useEffect, useTransition, useRef } from 'react'
-import { Loader2, CheckCircle, Eye, EyeOff, ExternalLink } from 'lucide-react'
-import { salvarConfiguracoesAction, salvarMetaApiAction, salvarLookDefenseAction, toggleMetaApiAction, salvarEfiBankAction } from './_actions/configuracoes'
+import { useActionState, useState, useEffect, useRef } from 'react'
+import { Loader2, CheckCircle, Eye, EyeOff } from 'lucide-react'
+import { salvarConfiguracoesAction, salvarLookDefenseAction, salvarEfiBankAction } from './_actions/configuracoes'
 import { sanitizarLocalPart } from '@/lib/email/template'
 import { createClient } from '@/lib/supabase/client'
 
@@ -15,11 +15,6 @@ type Data = {
     cpf_cnpj?: string | null
     endereco?: string | null
     nome_comercial?: string | null
-    meta_access_token?: string | null
-    meta_api_ativo?: boolean | null
-    meta_phone_number_id?: string | null
-    meta_waba_id?: string | null
-    meta_app_secret?: string | null
     ld_username?: string | null
     ld_password?: string | null
     efi_client_id?:     string | null
@@ -36,21 +31,16 @@ export const dynamic = 'force-dynamic'
 
 export default function ConfiguracoesPage() {
   const [stateGeral,  formActionGeral,  isPendingGeral]  = useActionState(salvarConfiguracoesAction, { error: null })
-  const [stateMeta,   formActionMeta,   isPendingMeta]   = useActionState(salvarMetaApiAction,       { error: null })
   const [stateLookDefense, formActionLookDefense, isPendingLookDefense] = useActionState(salvarLookDefenseAction, { error: null })
   const [stateEfi,         formActionEfi,         isPendingEfi]         = useActionState(salvarEfiBankAction,    { error: null })
-  const [, startToggleMeta]   = useTransition()
 
   const [data, setData]                   = useState<Data | null>(null)
   const [localPart, setLocalPart]         = useState('')
   const [loading, setLoading]             = useState(true)
-  const [showToken, setShowToken]         = useState(false)
-  const [showMetaAppSecret, setShowMetaAppSecret] = useState(false)
   const [showLdPassword, setShowLdPassword]   = useState(false)
   const [showEfiSecret, setShowEfiSecret]     = useState(false)
   const [efiSandbox, setEfiSandbox]           = useState(false)
   const [efiCert, setEfiCert]                 = useState('')
-  const [overrideMetaAtivo, setOverrideMetaAtivo]     = useState<boolean | null>(null)
   const scrollSaveRef = useRef(0)
 
   const SCROLL_KEY = 'cfg-scroll-y'
@@ -72,7 +62,7 @@ export default function ConfiguracoesPage() {
 
     const [{ data: cfgRaw }, { data: rem }] = await Promise.all([
       sb.from('configuracoes')
-        .select('contato, cpf_cnpj, endereco, nome_comercial, meta_access_token, meta_api_ativo, meta_phone_number_id, meta_waba_id, meta_app_secret, ld_username, ld_password, efi_client_id, efi_client_secret, efi_pix_key, efi_cert_base64, efi_sandbox')
+        .select('contato, cpf_cnpj, endereco, nome_comercial, ld_username, ld_password, efi_client_id, efi_client_secret, efi_pix_key, efi_cert_base64, efi_sandbox')
         .eq('conta_id', conta.id)
         .maybeSingle(),
       sb.from('email_remetente').select('local_part, from_name').eq('conta_id', conta.id).maybeSingle(),
@@ -113,16 +103,12 @@ export default function ConfiguracoesPage() {
 
   // Recargas após salvar — preservando posição de scroll
   useEffect(() => { if (stateGeral.success)  loadData(true) }, [stateGeral.success])
-  useEffect(() => { if (stateMeta.success)   loadData(true) }, [stateMeta.success])
   useEffect(() => { if (stateLookDefense.success) loadData(true) }, [stateLookDefense.success])
   useEffect(() => { if (stateEfi.success)         loadData(true) }, [stateEfi.success])
 
   const previewEmail = data?.domain && localPart
     ? `${sanitizarLocalPart(localPart)}@${data.domain}`
     : null
-
-  const metaConfigurado   = !!(data?.cfg?.meta_access_token && data?.cfg?.meta_phone_number_id && data?.cfg?.meta_waba_id)
-  const metaAtivo         = overrideMetaAtivo   !== null ? overrideMetaAtivo   : (data?.cfg?.meta_api_ativo !== false)
 
   if (loading) return (
     <div className="flex min-h-[40vh] items-center justify-center p-8">
@@ -220,161 +206,6 @@ export default function ConfiguracoesPage() {
         </button>
       </form>
 
-
-      {/* ── WhatsApp Business API (Meta) ────────────────────────────────────── */}
-      <form action={formActionMeta} className="space-y-6">
-        <section className="rounded-2xl border border-border bg-card p-6 space-y-5">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h2 className="text-sm font-semibold text-foreground">WhatsApp Business API</h2>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                API oficial Meta Cloud — envio, recebimento e templates aprovados.
-              </p>
-            </div>
-            <div className="flex items-center gap-2 flex-shrink-0">
-              {metaConfigurado && (
-                <button
-                  type="button"
-                  title={metaAtivo ? 'Desativar' : 'Ativar'}
-                  onClick={() => {
-                    const novo = !metaAtivo
-                    setOverrideMetaAtivo(novo)
-                    startToggleMeta(async () => {
-                      const fd = new FormData()
-                      fd.append('ativo', String(novo))
-                      await toggleMetaApiAction({ error: null }, fd)
-                      await loadData(true)
-                      setOverrideMetaAtivo(null)
-                    })
-                  }}
-                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${metaAtivo ? 'bg-green-500' : 'bg-muted'}`}
-                >
-                  <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${metaAtivo ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
-                </button>
-              )}
-              {metaConfigurado ? (
-                <span className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium ${metaAtivo ? 'bg-green-500/15 text-green-500' : 'bg-muted text-muted-foreground'}`}>
-                  <CheckCircle className="h-3 w-3" />
-                  {metaAtivo ? 'Ativo' : 'Desativado'}
-                </span>
-              ) : (
-                <span className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
-                  Não configurado
-                </span>
-              )}
-            </div>
-          </div>
-
-          {/* Guia de onde encontrar as credenciais */}
-          <div className="rounded-xl border border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground space-y-1">
-            <p className="font-medium text-foreground">Como obter as credenciais:</p>
-            <ol className="list-decimal list-inside space-y-0.5">
-              <li>Acesse <strong>developers.facebook.com</strong> → seu app → WhatsApp → Configuração</li>
-              <li><strong>Phone Number ID</strong>: aparece na seção "Números de telefone"</li>
-              <li><strong>WABA ID</strong>: aparece logo abaixo do Phone Number ID</li>
-              <li><strong>Access Token</strong>: gere um token permanente via "System Users" no Meta Business</li>
-            </ol>
-            <p className="pt-1">
-              URL do webhook para configurar na Meta:{' '}
-              <span className="font-mono text-foreground">
-                {typeof window !== 'undefined' ? window.location.origin : 'https://seu-dominio.com'}/api/webhooks/whatsapp
-              </span>
-            </p>
-            <p>
-              Token de verificação do webhook:{' '}
-              <span className="font-mono text-foreground">WHATSAPP_VERIFY_TOKEN</span>{' '}
-              (variável de ambiente na Vercel)
-            </p>
-          </div>
-
-          <div className="space-y-4">
-            <div className="space-y-1.5">
-              <label className={LABEL}>Phone Number ID</label>
-              <input
-                name="meta_phone_number_id"
-                defaultValue={data?.cfg?.meta_phone_number_id ?? ''}
-                placeholder="123456789012345"
-                className={INPUT}
-              />
-              <p className="text-[10px] text-muted-foreground">ID numérico do seu número no painel Meta Developers</p>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className={LABEL}>WABA ID (WhatsApp Business Account ID)</label>
-              <input
-                name="meta_waba_id"
-                defaultValue={data?.cfg?.meta_waba_id ?? ''}
-                placeholder="987654321098765"
-                className={INPUT}
-              />
-              <p className="text-[10px] text-muted-foreground">ID da sua conta WhatsApp Business</p>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className={LABEL}>Access Token (Permanente)</label>
-              <div className="relative">
-                <input
-                  name="meta_access_token"
-                  type={showToken ? 'text' : 'password'}
-                  defaultValue={data?.cfg?.meta_access_token ?? ''}
-                  placeholder="EAAxxxxxxxxxx…"
-                  className={INPUT + ' pr-10'}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowToken(v => !v)}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
-              <p className="text-[10px] text-muted-foreground">Token de sistema permanente — não usa tokens de usuário que expiram</p>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className={LABEL}>App Secret</label>
-              <div className="relative">
-                <input
-                  name="meta_app_secret"
-                  type={showMetaAppSecret ? 'text' : 'password'}
-                  defaultValue={data?.cfg?.meta_app_secret ?? ''}
-                  placeholder="Chave secreta do aplicativo"
-                  className={INPUT + ' pr-10'}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowMetaAppSecret(v => !v)}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  {showMetaAppSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
-              <p className="text-[10px] text-muted-foreground">
-                Meta Developers → seu app → Configurações básicas → Chave secreta do aplicativo.
-                Usada pra confirmar que os eventos do webhook vieram mesmo da Meta — sem isso, mensagens recebidas via Meta param de ser aceitas.
-              </p>
-            </div>
-          </div>
-        </section>
-
-        {stateMeta.error && (
-          <p className="rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">{stateMeta.error}</p>
-        )}
-        {stateMeta.success && (
-          <p className="flex items-center gap-2 rounded-xl bg-success-bg px-3 py-2 text-sm text-success">
-            <CheckCircle className="h-4 w-4" />
-            Credenciais Meta salvas.
-          </p>
-        )}
-
-        <button
-          type="submit" disabled={isPendingMeta}
-          className="flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
-        >
-          {isPendingMeta && <Loader2 className="h-4 w-4 animate-spin" />}
-          {isPendingMeta ? 'Salvando…' : 'Salvar credenciais Meta'}
-        </button>
-      </form>
 
       {/* ── LookDefense IPTV ────────────────────────────────────────────────── */}
       <form action={formActionLookDefense} className="space-y-6">

@@ -24,9 +24,9 @@ beforeAll(async () => {
   atendenteA = await adicionarMembro(db, contaA, 'atendente')
 
   await db.sql(
-    `insert into public.configuracoes (conta_id, meta_access_token, meta_app_secret, efi_client_secret, efi_pix_key, ld_password)
-     values ($1, 'TOKEN-A', 'APPSECRET-A', 'EFISECRET-A', 'chave-pix-A', 'SENHA-LD-A'),
-            ($2, 'TOKEN-B', 'APPSECRET-B', 'EFISECRET-B', 'chave-pix-B', 'SENHA-LD-B')`,
+    `insert into public.configuracoes (conta_id, efi_client_id, efi_client_secret, efi_pix_key, ld_password)
+     values ($1, 'CLIENTID-A', 'EFISECRET-A', 'chave-pix-A', 'SENHA-LD-A'),
+            ($2, 'CLIENTID-B', 'EFISECRET-B', 'chave-pix-B', 'SENHA-LD-B')`,
     [contaA, contaB],
   )
   await db.sql(
@@ -41,12 +41,12 @@ beforeAll(async () => {
 afterAll(() => db.fechar())
 
 const lerSegredos = (usuario: string) =>
-  db.como(usuario).query<{ meta_access_token: string; efi_client_secret: string }>(
-    `select meta_access_token, efi_client_secret from public.configuracoes where conta_id = $1`, [contaA])
+  db.como(usuario).query<{ efi_client_id: string; efi_client_secret: string }>(
+    `select efi_client_id, efi_client_secret from public.configuracoes where conta_id = $1`, [contaA])
 
 describe('credenciais da conta (configuracoes)', () => {
   it('o dono lê as credenciais', async () => {
-    expect((await lerSegredos(donoA)).rows).toEqual([{ meta_access_token: 'TOKEN-A', efi_client_secret: 'EFISECRET-A' }])
+    expect((await lerSegredos(donoA)).rows).toEqual([{ efi_client_id: 'CLIENTID-A', efi_client_secret: 'EFISECRET-A' }])
   })
 
   it('um administrador da equipe lê as credenciais', async () => {

@@ -23,71 +23,29 @@ export async function enviarRespostaAction(
     if (!celular) return { error: 'Celular inválido.' }
     if (!texto)   return { error: 'Mensagem vazia.' }
 
-    // Credenciais são lidas com service role: getConta() já confirmou que o usuário
-    // pertence à conta, mas desde a migration 0033 um atendente não lê 'configuracoes'
-    // diretamente (SEG-N4) — só o dono/admin. Enviar mensagem continua sendo tarefa dele.
-    const [{ data: cfg }, { data: conexao }] = await Promise.all([
-      admin
-        .from('configuracoes')
-        .select('meta_access_token, meta_phone_number_id, meta_api_ativo')
-        .eq('conta_id', contaId)
-        .maybeSingle(),
-      admin
-        .from('conexoes')
-        .select('uazapi_instance_token, status')
-        .eq('conta_id', contaId)
-        .maybeSingle(),
-    ])
+    // Conexão lida com service role: getConta() já confirmou que o usuário
+    // pertence à conta, mas desde a migration 0033 um atendente não lê
+    // 'configuracoes'/'conexoes' diretamente (SEG-N4) — enviar mensagem
+    // continua sendo tarefa dele.
+    const { data: conexao } = await admin
+      .from('conexoes')
+      .select('uazapi_instance_token, status')
+      .eq('conta_id', contaId)
+      .maybeSingle()
 
-    const usarMeta = !!(cfg?.meta_api_ativo !== false && cfg?.meta_access_token && cfg?.meta_phone_number_id)
+    if (!conexao?.uazapi_instance_token || conexao.status !== 'conectado') {
+      return { error: 'WhatsApp não está conectado. Verifique a conexão em Conexão WA.' }
+    }
 
-    let waId: string | null = null
-
-    if (usarMeta) {
-      // ── Envio via Meta Cloud API ────────────────────────────────────────────
-      const res = await fetch(
-        `https://graph.facebook.com/v20.0/${cfg.meta_phone_number_id}/messages`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${cfg.meta_access_token}`,
-          },
-          body: JSON.stringify({
-            messaging_product: 'whatsapp',
-            recipient_type:    'individual',
-            to:                celular,
-            type:              'text',
-            text:              { preview_url: false, body: texto },
-          }),
-        },
-      )
-
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        const msg  = body?.error?.message ?? `Erro Meta API: ${res.status}`
-        return { error: msg }
+    try {
+      await sendText(conexao.uazapi_instance_token, celular, texto)
+    } catch (err) {
+      if (err instanceof UazapiRateLimitError) {
+        return { error: 'Servidor WhatsApp ocupado agora (rate limit). Tente novamente em alguns segundos.' }
       }
-
-      const metaJson = await res.json().catch(() => ({}))
-      waId = (metaJson?.messages?.[0]?.id as string | undefined) ?? null
-
-    } else {
-      // ── Fallback: uazapi — mesmo helper do cron e do "Forçar" (lib/uazapi.ts) ──
-      if (!conexao?.uazapi_instance_token || conexao.status !== 'conectado') {
-        return { error: 'WhatsApp não está conectado. Configure a Meta API ou verifique a conexão.' }
-      }
-
-      try {
-        await sendText(conexao.uazapi_instance_token, celular, texto)
-      } catch (err) {
-        if (err instanceof UazapiRateLimitError) {
-          return { error: 'Servidor WhatsApp ocupado agora (rate limit). Tente novamente em alguns segundos.' }
-        }
-        // Detalhe da uazapi vai para o log do servidor, não para a tela (SEG-M3).
-        console.error('[enviarResposta] uazapi recusou o envio', { contaId, err })
-        return { error: 'Falha ao enviar pela uazapi (rede ou recusa do provedor). Tente novamente.' }
-      }
+      // Detalhe da uazapi vai para o log do servidor, não para a tela (SEG-M3).
+      console.error('[enviarResposta] uazapi recusou o envio', { contaId, err })
+      return { error: 'Falha ao enviar pela uazapi (rede ou recusa do provedor). Tente novamente.' }
     }
 
     // Salva mensagem enviada no banco
@@ -106,7 +64,6 @@ export async function enviarRespostaAction(
       direcao: 'out',
       texto,
       lida:    true,
-      ...(waId ? { wa_id: waId } : {}),
     })
 
     if (atendimentoId) {
@@ -116,140 +73,6 @@ export async function enviarRespostaAction(
         .eq('id', atendimentoId)
         .eq('conta_id', contaId)
     }
-
-  } catch (e: unknown) {
-    return { error: e instanceof Error ? e.message : 'Erro desconhecido.' }
-  }
-
-  revalidatePath('/atendimento')
-  return { error: null }
-}
-
-// ── Enviar template Meta para iniciar conversa (janela expirada) ─────────────
-
-export async function enviarTemplateAction(
-  atendimentoId: string,
-  celular: string,
-  clienteId: string | null,
-  templateNome: string,
-  templateIdioma: string,
-  templateCorpo: string,
-): Promise<ActionState> {
-  try {
-    const { supabase, contaId } = await getConta()
-    const admin = createAdminClient()
-
-    // Credenciais Meta (service role — ver nota em enviarRespostaAction)
-    const { data: cfg } = await admin
-      .from('configuracoes')
-      .select('meta_access_token, meta_phone_number_id, meta_api_ativo')
-      .eq('conta_id', contaId)
-      .maybeSingle()
-
-    if (!cfg?.meta_api_ativo || !cfg.meta_access_token || !cfg.meta_phone_number_id) {
-      return { error: 'Meta API não configurada. Ative em Configurações.' }
-    }
-
-    // Nome do cliente
-    let nome = 'Cliente'
-    if (clienteId) {
-      const { data: cli } = await supabase
-        .from('clientes').select('nome').eq('id', clienteId).maybeSingle()
-      if (cli) nome = (cli as any).nome || 'Cliente'
-    }
-
-    // Parcela aberta mais próxima (para valor e data)
-    let valor    = ''
-    let dataVenc = ''
-    if (clienteId) {
-      const { data: cobs } = await supabase
-        .from('cobrancas')
-        .select('id')
-        .eq('conta_id', contaId)
-        .eq('cliente_id', clienteId)
-        .eq('status', 'ativa')
-
-      const cobIds = (cobs ?? []).map((c: any) => c.id as string)
-
-      if (cobIds.length > 0) {
-        const { data: parc } = await supabase
-          .from('parcelas')
-          .select('valor, data_vencimento')
-          .eq('conta_id', contaId)
-          .in('cobranca_id', cobIds)
-          .eq('status', 'aberta')
-          .order('data_vencimento', { ascending: true })
-          .limit(1)
-          .maybeSingle()
-
-        if (parc) {
-          valor = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })
-            .format(Number((parc as any).valor ?? 0))
-          const [a, m, d] = ((parc as any).data_vencimento as string).split('-')
-          dataVenc = `${d}/${m}/${a}`
-        }
-      }
-    }
-
-    // Determinar quantidade de parâmetros pelo corpo do template
-    const maxParam = templateCorpo.includes('{{3}}') ? 3 : templateCorpo.includes('{{2}}') ? 2 : 1
-    const parametros = maxParam === 2 ? [nome, valor] : [nome, valor, dataVenc]
-
-    // Enviar via Meta API
-    const res = await fetch(
-      `https://graph.facebook.com/v20.0/${cfg.meta_phone_number_id}/messages`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization:  `Bearer ${cfg.meta_access_token}`,
-        },
-        body: JSON.stringify({
-          messaging_product: 'whatsapp',
-          to:   celular,
-          type: 'template',
-          template: {
-            name:     templateNome,
-            language: { code: templateIdioma },
-            components: [{
-              type:       'body',
-              parameters: parametros.map(text => ({ type: 'text', text })),
-            }],
-          },
-        }),
-      },
-    )
-
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}))
-      return { error: (body as any)?.error?.message ?? `Erro Meta API: ${res.status}` }
-    }
-
-    const metaJson = await res.json().catch(() => ({}))
-    const waId = (metaJson?.messages?.[0]?.id as string | undefined) ?? null
-
-    // Reconstruir texto legível para salvar no histórico
-    const texto = templateCorpo
-      .replace('{{1}}', parametros[0] ?? '')
-      .replace('{{2}}', parametros[1] ?? '')
-      .replace('{{3}}', parametros[2] ?? '')
-
-    await supabase.from('mensagens_wa').insert({
-      conta_id:       contaId,
-      cliente_id:     clienteId,
-      atendimento_id: atendimentoId,
-      celular,
-      direcao:        'out',
-      texto,
-      lida:           true,
-      ...(waId ? { wa_id: waId } : {}),
-    })
-
-    await supabase
-      .from('atendimentos')
-      .update({ ultima_mensagem: texto, ultima_msg_em: new Date().toISOString() })
-      .eq('id', atendimentoId)
-      .eq('conta_id', contaId)
 
   } catch (e: unknown) {
     return { error: e instanceof Error ? e.message : 'Erro desconhecido.' }
@@ -274,27 +97,26 @@ export async function marcarLidaAction(celular: string): Promise<void> {
   }
 }
 
-// ── Iniciar nova conversa via template (cria atendimento se não existir) ──────
+// ── Iniciar nova conversa (cria o atendimento se não existir) ─────────────────
+// Sem Meta não existe "janela de 24h"/template pra reabrir conversa — a uazapi
+// manda texto livre a qualquer momento, igual enviarRespostaAction.
 export async function iniciarConversaAction(
   celular: string,
   clienteId: string | null,
-  templateNome: string,
-  templateIdioma: string,
-  templateCorpo: string,
+  texto: string,
 ): Promise<{ error: string | null; atendimentoId?: string }> {
   try {
     const { supabase, contaId } = await getConta()
     const admin = createAdminClient()
 
-    // Credenciais Meta (service role — ver nota em enviarRespostaAction)
-    const { data: cfg } = await admin
-      .from('configuracoes')
-      .select('meta_access_token, meta_phone_number_id, meta_api_ativo')
+    const { data: conexao } = await admin
+      .from('conexoes')
+      .select('uazapi_instance_token, status')
       .eq('conta_id', contaId)
       .maybeSingle()
 
-    if (!cfg?.meta_api_ativo || !cfg.meta_access_token || !cfg.meta_phone_number_id) {
-      return { error: 'Meta API não configurada. Ative em Configurações.' }
+    if (!conexao?.uazapi_instance_token || conexao.status !== 'conectado') {
+      return { error: 'WhatsApp não está conectado. Verifique a conexão em Conexão WA.' }
     }
 
     // Verificar atendimento aberto existente
@@ -321,71 +143,16 @@ export async function iniciarConversaAction(
       criouNovo = true
     }
 
-    // Buscar nome do cliente para parâmetros
-    let nome = 'Cliente'
-    let valor = ''
-    let dataVenc = ''
-
-    if (clienteId) {
-      const { data: cli } = await supabase
-        .from('clientes').select('nome').eq('id', clienteId).maybeSingle()
-      if (cli) nome = (cli as any).nome || 'Cliente'
-
-      const { data: cobs } = await supabase
-        .from('cobrancas').select('id')
-        .eq('conta_id', contaId).eq('cliente_id', clienteId).eq('status', 'ativa')
-
-      const cobIds = (cobs ?? []).map((c: any) => c.id as string)
-      if (cobIds.length > 0) {
-        const { data: parc } = await supabase
-          .from('parcelas').select('valor, data_vencimento')
-          .eq('conta_id', contaId).in('cobranca_id', cobIds)
-          .eq('status', 'aberta').order('data_vencimento', { ascending: true })
-          .limit(1).maybeSingle()
-
-        if (parc) {
-          valor = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })
-            .format(Number((parc as any).valor ?? 0))
-          const [a, m, d] = ((parc as any).data_vencimento as string).split('-')
-          dataVenc = `${d}/${m}/${a}`
-        }
+    try {
+      await sendText(conexao.uazapi_instance_token, celular, texto)
+    } catch (err) {
+      if (criouNovo) await supabase.from('atendimentos').delete().eq('id', atendimentoId)
+      if (err instanceof UazapiRateLimitError) {
+        return { error: 'Servidor WhatsApp ocupado agora (rate limit). Tente novamente em alguns segundos.' }
       }
+      console.error('[iniciarConversa] uazapi recusou o envio', { contaId, err })
+      return { error: 'Falha ao enviar pela uazapi (rede ou recusa do provedor). Tente novamente.' }
     }
-
-    const maxParam   = templateCorpo.includes('{{3}}') ? 3 : templateCorpo.includes('{{2}}') ? 2 : 1
-    const parametros = maxParam === 2 ? [nome, valor] : [nome, valor, dataVenc]
-
-    // Enviar template via Meta
-    const res = await fetch(
-      `https://graph.facebook.com/v20.0/${cfg.meta_phone_number_id}/messages`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.meta_access_token}` },
-        body: JSON.stringify({
-          messaging_product: 'whatsapp',
-          to:   celular,
-          type: 'template',
-          template: {
-            name:     templateNome,
-            language: { code: templateIdioma },
-            components: [{ type: 'body', parameters: parametros.map(text => ({ type: 'text', text })) }],
-          },
-        }),
-      },
-    )
-
-    if (!res.ok) {
-      if (criouNovo) {
-        await supabase.from('atendimentos').delete().eq('id', atendimentoId)
-      }
-      const body = await res.json().catch(() => ({}))
-      return { error: (body as any)?.error?.message ?? `Erro Meta API: ${res.status}` }
-    }
-
-    const texto = templateCorpo
-      .replace('{{1}}', parametros[0] ?? '')
-      .replace('{{2}}', parametros[1] ?? '')
-      .replace('{{3}}', parametros[2] ?? '')
 
     await supabase.from('mensagens_wa').insert({
       conta_id: contaId, cliente_id: clienteId,

@@ -3,7 +3,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { revalidatePath } from 'next/cache'
-import { encontrarOuCriarAtendimento } from '@/lib/atendimento/encontrar-ou-criar'
 import { resolverVariaveis, resolverVariaveisLeves, VariaveisIndisponiveisError } from '@/lib/whatsapp/resolver-variaveis'
 import { atualizarStatusNotificacao } from '@/lib/whatsapp/status-notificacao'
 import { sendText, UazapiRateLimitError } from '@/lib/uazapi'
@@ -54,27 +53,7 @@ export async function reenviarNotificacaoAction(id: string) {
   revalidatePath('/log')
 }
 
-// Templates Meta aprovados — espelho do cron/whatsapp para envio imediato via Forçar.
-const META_TMPL: Record<string, { nome: string; idioma: string; params: 2 | 3; corpo: string }> = {
-  '5d':                  { nome: 'cobranca_5d',         idioma: 'pt_BR', params: 3, corpo: 'Olá, *{{1}}*! Sua fatura de *{{2}}* vence em *5 dias* ({{3}}). Para dúvidas, responda esta mensagem.' },
-  '3d':                  { nome: 'cobranca_3d',         idioma: 'en',    params: 3, corpo: 'Olá, *{{1}}*! Sua fatura de *{{2}}* vence em *3 dias* ({{3}}). Para dúvidas, responda esta mensagem.' },
-  '2d':                  { nome: 'cobranca_2d',         idioma: 'pt_BR', params: 3, corpo: 'Olá, *{{1}}*! Sua fatura de *{{2}}* vence em *2 dias* ({{3}}). Não se esqueça de pagar!' },
-  '1d':                  { nome: 'cobranca_1d',         idioma: 'pt_BR', params: 3, corpo: 'Olá, *{{1}}*! Sua fatura de *{{2}}* vence *amanhã* ({{3}}). Pague hoje para evitar juros.' },
-  'dia':                 { nome: 'cobranca_dia',        idioma: 'pt_BR', params: 3, corpo: 'Olá, *{{1}}*! Sua fatura de *{{2}}* vence *hoje* ({{3}}). Pague agora para evitar juros.' },
-  'vencido1d':           { nome: 'cobranca_vencido',    idioma: 'pt_BR', params: 3, corpo: 'Olá, *{{1}}*! Sua fatura de *{{2}}* venceu ontem ({{3}}). Regularize o quanto antes para evitar cobrança adicional.' },
-  'pagamento_confirmado':{ nome: 'pagamento_confirmado',idioma: 'pt_BR', params: 2, corpo: 'Muito obrigado, *{{1}}*! Recebemos seu pagamento de *{{2}}*. Qualquer dúvida ou problema só me enviar mensagem.' },
-  'boasvindas':          { nome: 'boasvindas',          idioma: 'pt_BR', params: 3, corpo: 'Muito obrigado, *{{1}}*! Sua primeira fatura de *{{2}}* vence em *{{3}}*. Estaremos sempre à disposição para melhor lhe atender.' },
-  'manual':              { nome: 'cobranca_manual',     idioma: 'pt_BR', params: 3, corpo: 'Olá, *{{1}}*! Passando para lembrar da fatura de *{{2}}* com vencimento em *{{3}}*. Para dúvidas, responda esta mensagem.' },
-}
-
-function _fmtBRL(v: number) {
-  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v)
-}
-function _fmtData(iso: string) {
-  const [a, m, d] = iso.split('-'); return `${d}/${m}/${a}`
-}
-
-// Força o envio imediato usando Meta Cloud API (se configurada) ou UazAPI como fallback.
+// Força o envio imediato via uazapi.
 export async function forcarEnvioAction(id: string): Promise<{ error?: string }> {
   const { contaId } = await getContaId()
   const admin = createAdminClient()
@@ -124,129 +103,7 @@ export async function forcarEnvioAction(id: string): Promise<{ error?: string }>
   const celular = cliente.celular
   if (!celular) return falhar('Cliente sem celular cadastrado.')
 
-  // ── 3. Verificar provedor ativo ──────────────────────────────────────────
-  const { data: cfgConta } = await admin
-    .from('configuracoes')
-    .select('meta_api_ativo, meta_access_token, meta_phone_number_id')
-    .eq('conta_id', contaId)
-    .maybeSingle()
-
-  const usarMeta = !!(cfgConta?.meta_api_ativo && cfgConta?.meta_access_token && cfgConta?.meta_phone_number_id)
-
-  // ── 4a. Envio via Meta Cloud API ─────────────────────────────────────────
-  if (usarMeta) {
-    // Template customizado da conta tem prioridade sobre o hardcoded
-    const { data: cfgTmpl } = await admin
-      .from('notificacoes_config')
-      .select('meta_template_nome, meta_template_idioma, meta_template_corpo')
-      .eq('conta_id', contaId)
-      .eq('tipo', notif.tipo as any)
-      .maybeSingle()
-
-    const corpoCustom = cfgTmpl?.meta_template_corpo ?? ''
-    const tmpl = cfgTmpl?.meta_template_nome
-      ? {
-          nome:   cfgTmpl.meta_template_nome,
-          idioma: cfgTmpl.meta_template_idioma ?? 'pt_BR',
-          params: (corpoCustom.includes('{{3}}') ? 3 : corpoCustom.includes('{{2}}') ? 2 : 1) as 2 | 3,
-          corpo:  corpoCustom,
-        }
-      : META_TMPL[notif.tipo as string]
-
-    if (!tmpl) {
-      return falhar(`Tipo "${notif.tipo}" não possui template Meta configurado.`)
-    }
-
-    let parcelaId = notif.parcela_id as string | null
-    if (!parcelaId && notif.cobranca_id) {
-      const { data: p } = await admin
-        .from('parcelas').select('id')
-        .eq('cobranca_id', notif.cobranca_id as string)
-        .eq('conta_id', contaId)
-        .order('numero', { ascending: true }).limit(1).maybeSingle()
-      parcelaId = (p as any)?.id ?? null
-    }
-
-    let valor = ''
-    let data  = ''
-    if (parcelaId) {
-      const { data: parcela, error: parcelaErr } = await admin
-        .from('parcelas').select('valor, data_vencimento')
-        .eq('id', parcelaId).eq('conta_id', contaId).maybeSingle()
-      // Nunca enviar com valor/vencimento em branco.
-      if (parcelaErr || !parcela) return falhar('Não foi possível ler a parcela para montar a mensagem. Tente novamente.')
-      valor = _fmtBRL(Number((parcela as any).valor ?? 0))
-      data  = _fmtData((parcela as any).data_vencimento ?? '')
-    }
-
-    const nome       = (cliente.nome as string) || 'Cliente'
-    const parametros = tmpl.params === 2 ? [nome, valor] : [nome, valor, data]
-    const texto      = tmpl.corpo
-      .replace('{{1}}', parametros[0] ?? '')
-      .replace('{{2}}', parametros[1] ?? '')
-      .replace('{{3}}', parametros[2] ?? '')
-
-    try {
-      const res = await fetch(
-        `https://graph.facebook.com/v20.0/${cfgConta!.meta_phone_number_id}/messages`,
-        {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfgConta!.meta_access_token}` },
-          body: JSON.stringify({
-            messaging_product: 'whatsapp',
-            to:       celular,
-            type:     'template',
-            template: {
-              name:     tmpl.nome,
-              language: { code: tmpl.idioma },
-              components: [{ type: 'body', parameters: parametros.map(text => ({ type: 'text', text })) }],
-            },
-          }),
-        },
-      )
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        const msg = (err as any)?.error?.message ?? `Meta erro ${res.status}`
-        return falhar(`Falha ao enviar via Meta: ${msg}`)
-      }
-    } catch {
-      return falhar('Erro de rede ao chamar a Meta API.')
-    }
-
-    // A mensagem JÁ FOI enviada: nada daqui para baixo devolve o status original.
-    await atualizarStatusNotificacao(
-      admin, contaId, id,
-      { status: 'enviado', mensagem_final: texto, enviado_em: new Date().toISOString() },
-      'forcar_envio_pos_envio', 3,
-    )
-
-    // Garantir que existe um atendimento e salvar a mensagem
-    try {
-      const atendimentoId = await encontrarOuCriarAtendimento(
-        admin, contaId, celular,
-        notif.cliente_id as string | null,
-        texto,
-      )
-
-      const { error: mwaErr } = await admin.from('mensagens_wa').insert({
-        conta_id:       contaId,
-        cliente_id:     notif.cliente_id,
-        atendimento_id: atendimentoId,
-        celular,
-        direcao:        'out',
-        texto,
-        lida:           true,
-      })
-      if (mwaErr) console.error('[forcarEnvio] mensagens_wa.insert', mwaErr)
-    } catch (err) {
-      console.error('[forcarEnvio] histórico de atendimento falhou (mensagem já enviada)', { id, contaId, err })
-    }
-
-    revalidatePath('/log')
-    return {}
-  }
-
-  // ── 4b. Fallback: UazAPI ─────────────────────────────────────────────────
+  // ── 3. Montar a mensagem ──────────────────────────────────────────────────
   let mensagem: string
 
   const erroVariaveis = (err: unknown) => falhar(
