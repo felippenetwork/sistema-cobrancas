@@ -39,8 +39,6 @@ function extrairCampos(formData: FormData) {
     celRaw:          ((formData.get('celular')          as string) ?? '').trim(),
     ddi:             ((formData.get('ddi')              as string) ?? '55').trim() || '55',
     email:           ((formData.get('email')            as string) ?? '').trim().toLowerCase(),
-    tipoIntegracao:  ((formData.get('tipo_integracao')  as string) ?? '').trim() || null,
-    loginExterno:    ((formData.get('login_externo')    as string) ?? '').trim() || null,
   }
 }
 
@@ -110,8 +108,6 @@ export async function criarClienteAction(
       celular,
       cpf:              cpf ?? null,
       email:            campos.email || null,
-      tipo_integracao:  campos.tipoIntegracao,
-      login_externo:    campos.loginExterno,
     }).select('id').single()
     if (error) return { error: error.message }
 
@@ -162,8 +158,6 @@ export async function atualizarClienteAction(
         celular,
         cpf:             cpf ?? null,
         email:           campos.email || null,
-        tipo_integracao: campos.tipoIntegracao,
-        login_externo:   campos.loginExterno,
       })
       .eq('id', clienteId)
       .eq('conta_id', contaId)   // defesa em profundidade — não confiar só no RLS (ISO-N3)

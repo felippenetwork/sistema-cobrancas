@@ -582,8 +582,6 @@ function PainelCliente({
   const [sobrenome, setSobrenome]                 = useState('')
   const [celular, setCelular]                     = useState('')
   const [email, setEmail]                         = useState('')
-  const [loginExterno, setLoginExterno]           = useState('')
-  const [tipoIntegracao, setTipoIntegracao]       = useState('')
   const [salvandoCliente, setSalvandoCliente]     = useState(false)
   const [erroCliente, setErroCliente]             = useState<string | null>(null)
 
@@ -611,8 +609,6 @@ function PainelCliente({
     setSobrenome(d.cliente?.sobrenome ?? '')
     setCelular(d.cliente?.celular ?? '')
     setEmail(d.cliente?.email ?? '')
-    setLoginExterno(d.cliente?.loginExterno ?? '')
-    setTipoIntegracao(d.cliente?.tipoIntegracao ?? '')
     setValorCob(d.cobranca ? String(d.cobranca.valorMensalidade) : '')
   }
 
@@ -641,7 +637,7 @@ function PainelCliente({
     if (!atendimento.cliente_id || !nome.trim()) return
     setSalvandoCliente(true); setErroCliente(null)
     const r = await atualizarClienteCompletoAction(atendimento.cliente_id, {
-      nome, sobrenome, celular, email, loginExterno, tipoIntegracao,
+      nome, sobrenome, celular, email,
     })
     setSalvandoCliente(false)
     if (r.error) { setErroCliente(r.error) } else { setEditandoCliente(false); recarregarDados(); onClienteAtualizado() }
@@ -924,20 +920,6 @@ function PainelCliente({
                   <label className={labelCls}>E-mail</label>
                   <input value={email} onChange={e => setEmail(e.target.value)} className={inputCls} type="email" />
                 </div>
-                <div>
-                  <label className={labelCls}>Integração IPTV</label>
-                  <select value={tipoIntegracao} onChange={e => setTipoIntegracao(e.target.value)} className={inputCls}>
-                    <option value="">Nenhuma</option>
-                    <option value="lookdefense_iptv">LookDefense IPTV</option>
-                    <option value="lookdefense_p2p">LookDefense P2P</option>
-                  </select>
-                </div>
-                {tipoIntegracao && (
-                  <div>
-                    <label className={labelCls}>Login externo (usuário no painel)</label>
-                    <input value={loginExterno} onChange={e => setLoginExterno(e.target.value)} className={inputCls} />
-                  </div>
-                )}
                 {erroCliente && <p className="text-xs text-destructive">{erroCliente}</p>}
                 <div className="flex gap-2">
                   <button onClick={() => { setEditandoCliente(false); setErroCliente(null); if (dados) popularCampos(dados) }} className="flex-1 rounded-xl border border-border py-2 text-xs text-muted-foreground transition hover:bg-accent">Cancelar</button>
@@ -958,13 +940,6 @@ function PainelCliente({
                   <div className="flex items-center gap-2 rounded-xl border border-border px-3 py-2.5">
                     <Mail className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                     <span className="truncate text-sm text-foreground">{dados.cliente.email}</span>
-                  </div>
-                )}
-                {dados?.cliente?.loginExterno && (
-                  <div className="flex items-center gap-2 rounded-xl border border-border px-3 py-2.5">
-                    <CreditCard className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                    <span className="truncate text-sm text-foreground">{dados.cliente.loginExterno}</span>
-                    <span className="ml-auto shrink-0 rounded bg-muted px-1.5 py-0.5 text-[9px] font-semibold uppercase text-muted-foreground">{dados.cliente.tipoIntegracao?.replace('lookdefense_', '') ?? ''}</span>
                   </div>
                 )}
               </div>

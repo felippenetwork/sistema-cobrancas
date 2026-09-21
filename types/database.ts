@@ -95,52 +95,6 @@ export type Database = {
         }
         Relationships: [{ foreignKeyName: 'audit_log_conta_id_alvo_fkey'; columns: ['conta_id_alvo']; isOneToOne: false; referencedRelation: 'contas'; referencedColumns: ['id'] }]
       }
-      baixas_externas: {
-        Row: {
-          id: string
-          conta_id: string
-          cliente_id: string
-          parcela_id: string
-          login_externo: string
-          tipo_integracao: string
-          status: string
-          tentativas: number
-          erro: string | null
-          criado_em: string
-          processado_em: string | null
-        }
-        Insert: {
-          id?: string
-          conta_id: string
-          cliente_id: string
-          parcela_id: string
-          login_externo: string
-          tipo_integracao: string
-          status?: string
-          tentativas?: number
-          erro?: string | null
-          criado_em?: string
-          processado_em?: string | null
-        }
-        Update: {
-          id?: string
-          conta_id?: string
-          cliente_id?: string
-          parcela_id?: string
-          login_externo?: string
-          tipo_integracao?: string
-          status?: string
-          tentativas?: number
-          erro?: string | null
-          criado_em?: string
-          processado_em?: string | null
-        }
-        Relationships: [
-          { foreignKeyName: 'baixas_externas_conta_id_fkey'; columns: ['conta_id']; isOneToOne: false; referencedRelation: 'contas'; referencedColumns: ['id'] },
-          { foreignKeyName: 'baixas_externas_cliente_id_fkey'; columns: ['cliente_id']; isOneToOne: false; referencedRelation: 'clientes'; referencedColumns: ['id'] },
-          { foreignKeyName: 'baixas_externas_parcela_id_fkey'; columns: ['parcela_id']; isOneToOne: false; referencedRelation: 'parcelas'; referencedColumns: ['id'] },
-        ]
-      }
       clientes: {
         Row: {
           celular: string
@@ -150,11 +104,9 @@ export type Database = {
           deleted_at: string | null
           email: string | null
           id: string
-          login_externo: string | null
           nome: string
           optout_email: boolean
           sobrenome: string | null
-          tipo_integracao: string | null
           updated_at: string
         }
         Insert: {
@@ -165,11 +117,9 @@ export type Database = {
           deleted_at?: string | null
           email?: string | null
           id?: string
-          login_externo?: string | null
           nome: string
           optout_email?: boolean
           sobrenome?: string | null
-          tipo_integracao?: string | null
           updated_at?: string
         }
         Update: {
@@ -180,11 +130,9 @@ export type Database = {
           deleted_at?: string | null
           email?: string | null
           id?: string
-          login_externo?: string | null
           nome?: string
           optout_email?: boolean
           sobrenome?: string | null
-          tipo_integracao?: string | null
           updated_at?: string
         }
         Relationships: [{ foreignKeyName: 'clientes_conta_id_fkey'; columns: ['conta_id']; isOneToOne: false; referencedRelation: 'contas'; referencedColumns: ['id'] }]
@@ -259,8 +207,6 @@ export type Database = {
           horario_inicio: string
           intervalo_max_seg: number
           intervalo_min_seg: number
-          ld_password: string | null
-          ld_username: string | null
           nome_comercial: string | null
           twilio_account_sid: string | null
           twilio_ativo: boolean
@@ -282,8 +228,6 @@ export type Database = {
           horario_inicio?: string
           intervalo_max_seg?: number
           intervalo_min_seg?: number
-          ld_password?: string | null
-          ld_username?: string | null
           nome_comercial?: string | null
           twilio_account_sid?: string | null
           twilio_ativo?: boolean
@@ -305,8 +249,6 @@ export type Database = {
           horario_inicio?: string
           intervalo_max_seg?: number
           intervalo_min_seg?: number
-          ld_password?: string | null
-          ld_username?: string | null
           nome_comercial?: string | null
           twilio_account_sid?: string | null
           twilio_ativo?: boolean

@@ -41,7 +41,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   if (!conta) redirect('/sem-conta')
 
-  // Configurações (credenciais Meta/EfiBank/LookDefense) só existe para o dono da conta —
+  // Configurações (credenciais EfiBank) só existe para o dono da conta —
   // membros convidados (admin ou atendente) nem conseguem carregar a página hoje. Esconder
   // o link evita mandar a equipe para uma tela em branco.
   const isOwner = !!contaOwner

@@ -11,12 +11,10 @@ import { FakeDb } from './helpers/fake-supabase'
 const mocks = vi.hoisted(() => ({
   db: { atual: null as unknown },
   enviarWhatsAppImediato: vi.fn(),
-  renovarLookDefenseImediato: vi.fn(),
 }))
 
 vi.mock('@/lib/supabase/admin', () => ({ createAdminClient: () => mocks.db.atual }))
 vi.mock('@/lib/whatsapp/enviar-imediato', () => ({ enviarWhatsAppImediato: mocks.enviarWhatsAppImediato }))
-vi.mock('@/lib/lookdefense/renovar-imediato', () => ({ renovarLookDefenseImediato: mocks.renovarLookDefenseImediato }))
 
 import { POST } from '@/app/api/webhooks/efibank/route'
 
@@ -27,16 +25,15 @@ const CLIENTE = 'cli-1'
 const TXID = 'TX123'
 const SEGREDO = 'segredo-de-teste'
 
-function cenario(opts: { recorrente?: boolean; parcelaStatus?: string; pixStatus?: string; loginExterno?: boolean; confirmacaoWhatsapp?: boolean } = {}) {
+function cenario(opts: { recorrente?: boolean; parcelaStatus?: string; pixStatus?: string; confirmacaoWhatsapp?: boolean } = {}) {
   const db = new FakeDb({
     cobrancas_pix: [{ id: 'pix-1', conta_id: CONTA, parcela_id: PARCELA, txid: TXID, status: opts.pixStatus ?? 'ativa', pago_em: null }],
     parcelas: [{ id: PARCELA, conta_id: CONTA, cobranca_id: COBRANCA, numero: 1, valor: 150, data_vencimento: '2026-10-05', status: opts.parcelaStatus ?? 'aberta' }],
     cobrancas: [{ id: COBRANCA, conta_id: CONTA, cliente_id: CLIENTE, recorrente: opts.recorrente ?? false, dia_pagamento: 5, valor_mensalidade: 150, status: 'ativa' }],
-    clientes: [{ id: CLIENTE, conta_id: CONTA, login_externo: opts.loginExterno ? 'joao.iptv' : null, tipo_integracao: opts.loginExterno ? 'lookdefense' : null }],
+    clientes: [{ id: CLIENTE, conta_id: CONTA }],
     notificacoes_config: [{ conta_id: CONTA, tipo: 'pagamento_confirmado', ativo_whatsapp: opts.confirmacaoWhatsapp ?? true }],
     notificacoes_enviadas: [],
     lancamentos: [],
-    baixas_externas: [],
   })
 
   // Mesma semântica da RPC baixar_parcela (migration 0013).
@@ -74,7 +71,6 @@ beforeEach(() => {
   process.env.CRON_SECRET = SEGREDO
   delete process.env.EFIBANK_WEBHOOK_SECRET
   mocks.enviarWhatsAppImediato.mockReset().mockResolvedValue(true)
-  mocks.renovarLookDefenseImediato.mockReset().mockResolvedValue(undefined)
   vi.spyOn(console, 'error').mockImplementation(() => {})
   vi.spyOn(console, 'warn').mockImplementation(() => {})
 })
@@ -150,20 +146,6 @@ describe('PIX pago', () => {
     expect(db.linhas('notificacoes_enviadas')).toHaveLength(0)
     expect(mocks.enviarWhatsAppImediato).not.toHaveBeenCalled()
   })
-
-  it('cliente com login externo: registra a baixa externa e renova no LookDefense', async () => {
-    const db = cenario({ loginExterno: true })
-    await chamar()
-    expect(db.linhas('baixas_externas')).toHaveLength(1)
-    expect(mocks.renovarLookDefenseImediato).toHaveBeenCalledWith(CONTA, db.linhas('baixas_externas')[0].id, 'joao.iptv', 0)
-  })
-
-  it('cliente sem login externo: não mexe no LookDefense', async () => {
-    const db = cenario({ loginExterno: false })
-    await chamar()
-    expect(db.linhas('baixas_externas')).toHaveLength(0)
-    expect(mocks.renovarLookDefenseImediato).not.toHaveBeenCalled()
-  })
 })
 
 describe('PAG-N1 — falha na baixa não pode encerrar a cobrança PIX', () => {
@@ -207,14 +189,12 @@ describe('PAG-N1 — falha na baixa não pode encerrar a cobrança PIX', () => {
   })
 
   it('erro em efeito colateral (WhatsApp) não desfaz a baixa nem pede reenvio', async () => {
-    const db = cenario({ loginExterno: true })
-    mocks.enviarWhatsAppImediato.mockRejectedValue(new Error('meta fora do ar'))
+    const db = cenario()
+    mocks.enviarWhatsAppImediato.mockRejectedValue(new Error('uazapi fora do ar'))
     const res = await chamar()
     expect(res.status).toBe(200)
     expect(parcela(db).status).toBe('paga')
     expect(pix(db).status).toBe('concluida')
-    // os demais efeitos ainda são tentados
-    expect(mocks.renovarLookDefenseImediato).toHaveBeenCalled()
   })
 
   it('erro ao marcar a cobrança PIX como concluída não desfaz a baixa (a entrega repetida é tratada como "já paga")', async () => {
@@ -234,13 +214,12 @@ describe('PAG-N1 — falha na baixa não pode encerrar a cobrança PIX', () => {
 
 describe('idempotência e casos de borda', () => {
   it('parcela já paga (baixa manual antes do PIX): encerra a cobrança PIX sem repetir efeitos', async () => {
-    const db = cenario({ parcelaStatus: 'paga', loginExterno: true })
+    const db = cenario({ parcelaStatus: 'paga' })
     const res = await chamar()
     expect(res.status).toBe(200)
     expect(pix(db).status).toBe('concluida')
     expect(db.linhas('lancamentos')).toHaveLength(0)
     expect(mocks.enviarWhatsAppImediato).not.toHaveBeenCalled()
-    expect(mocks.renovarLookDefenseImediato).not.toHaveBeenCalled()
   })
 
   it('entrega repetida depois de concluída: não chama a baixa de novo', async () => {
@@ -250,12 +229,11 @@ describe('idempotência e casos de borda', () => {
   })
 
   it('duas entregas simultâneas do mesmo txid: um lançamento só e efeitos uma vez só', async () => {
-    const db = cenario({ loginExterno: true })
+    const db = cenario()
     const [a, b] = await Promise.all([chamar(), chamar()])
     expect([a.status, b.status]).toEqual([200, 200])
     expect(db.linhas('lancamentos')).toHaveLength(1)
     expect(mocks.enviarWhatsAppImediato).toHaveBeenCalledTimes(1)
-    expect(mocks.renovarLookDefenseImediato).toHaveBeenCalledTimes(1)
     expect(pix(db).status).toBe('concluida')
   })
 

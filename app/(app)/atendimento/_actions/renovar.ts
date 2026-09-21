@@ -4,7 +4,6 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { calcularVencimento } from '@/lib/utils/parcelas'
 import { enviarWhatsAppImediato } from '@/lib/whatsapp/enviar-imediato'
-import { renovarLookDefenseImediato } from '@/lib/lookdefense/renovar-imediato'
 import { criarCobrancaPix, type PixGerado } from '@/lib/efibank/pix'
 
 export type ActionState = { error: string | null; success?: boolean }
@@ -12,7 +11,7 @@ export type ActionState = { error: string | null; success?: boolean }
 export type DadosPainel = {
   cliente: {
     nome: string; sobrenome: string; celular: string
-    email: string | null; loginExterno: string | null; tipoIntegracao: string | null
+    email: string | null
   } | null
   cobranca: { id: string; valorMensalidade: number; diaPagamento: number | null } | null
   parcela:  { id: string; valor: number; dataVencimento: string } | null
@@ -29,7 +28,7 @@ export async function buscarDadosPainelAction(clienteId: string): Promise<DadosP
 
   const [{ data: cliente }, { data: cobrancas }] = await Promise.all([
     supabase.from('clientes')
-      .select('nome, sobrenome, celular, email, login_externo, tipo_integracao')
+      .select('nome, sobrenome, celular, email')
       .eq('id', clienteId).eq('conta_id', contaId).maybeSingle(),
     supabase.from('cobrancas')
       .select('id, valor_mensalidade, dia_pagamento')
@@ -54,8 +53,6 @@ export async function buscarDadosPainelAction(clienteId: string): Promise<DadosP
       sobrenome:       (cliente as any).sobrenome     ?? '',
       celular:         (cliente as any).celular       ?? '',
       email:           (cliente as any).email         ?? null,
-      loginExterno:    (cliente as any).login_externo ?? null,
-      tipoIntegracao:  (cliente as any).tipo_integracao ?? null,
     } : null,
     cobranca: cob ? { id: cob.id, valorMensalidade: Number(cob.valor_mensalidade ?? 0), diaPagamento: cob.dia_pagamento ?? null } : null,
     parcela,
@@ -65,7 +62,7 @@ export async function buscarDadosPainelAction(clienteId: string): Promise<DadosP
 // Atualiza todos os dados editáveis do cliente
 export async function atualizarClienteCompletoAction(
   clienteId: string,
-  dados: { nome: string; sobrenome: string; celular: string; email: string; loginExterno: string; tipoIntegracao: string },
+  dados: { nome: string; sobrenome: string; celular: string; email: string },
 ): Promise<ActionState> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -79,8 +76,6 @@ export async function atualizarClienteCompletoAction(
     sobrenome:       dados.sobrenome.trim() || null,
     celular:         dados.celular.trim(),
     email:           dados.email.trim() || null,
-    login_externo:   dados.loginExterno.trim() || null,
-    tipo_integracao: dados.tipoIntegracao || null,
   }).eq('id', clienteId).eq('conta_id', contaId)
 
   if (error) return { error: error.message }
@@ -212,7 +207,7 @@ export async function renovarParcelaAction(parcelaId: string, cobrancaId: string
   const contaIdFinal = result.conta_id as string
   const clienteId    = result.cliente_id as string | null
 
-  // Notificação WhatsApp + LookDefense
+  // Notificação WhatsApp
   if (clienteId) {
     const { data: cfgPag } = await admin
       .from('notificacoes_config')
@@ -244,29 +239,6 @@ export async function renovarParcelaAction(parcelaId: string, cobrancaId: string
     }
     if (cfgPag?.ativo_email) {
       await admin.from('notificacoes_enviadas').insert({ ...baseNotif, canal: 'email' as const })
-    }
-
-    // LookDefense
-    const { data: integ } = await admin
-      .from('clientes')
-      .select('login_externo, tipo_integracao')
-      .eq('id', clienteId)
-      .maybeSingle()
-
-    if ((integ as any)?.login_externo && (integ as any)?.tipo_integracao) {
-      const { data: baixaExt, error: baixaErr } = await admin.from('baixas_externas').insert({
-        conta_id:        contaIdFinal,
-        cliente_id:      clienteId,
-        parcela_id:      parcelaId,
-        login_externo:   (integ as any).login_externo,
-        tipo_integracao: (integ as any).tipo_integracao,
-      }).select('id').single()
-      if (baixaErr) console.error('[renovarParcela] baixas_externas', baixaErr)
-      else if ((baixaExt as any)?.id) {
-        await renovarLookDefenseImediato(contaIdFinal, (baixaExt as any).id, (integ as any).login_externo, 0)
-      }
-    } else {
-      console.info('[renovarParcela] cliente sem login_externo/tipo_integracao — LookDefense ignorado', clienteId)
     }
   }
 

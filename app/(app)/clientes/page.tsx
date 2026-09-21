@@ -58,16 +58,12 @@ export default function ClientesPage() {
   const [sheetCob, setSheetCob]             = useState(false)
   const [novoClienteId, setNovoClienteId]   = useState('')
   const [novoClienteNome, setNovoClienteNome] = useState('')
-  const [novoClienteIntegracao, setNovoClienteIntegracao] = useState('')
   const [recorrente, setRecorrente]         = useState(false)
-  const [renovarExterno, setRenovarExterno] = useState(false)
   const [excluindoId, setExcluindoId]       = useState<string | null>(null)
   const [refresh, setRefresh]               = useState(0)
   const [pixPadrao, setPixPadrao]           = useState('—')
   const [celularInput, setCelularInput]     = useState('')
   const [ddi, setDdi]                       = useState('55')
-  const [tipoIntegracao, setTipoIntegracao] = useState('')
-  const [loginExterno, setLoginExterno]     = useState('')
 
   const totalPages = Math.ceil(total / perPage)
   const inicio     = total === 0 ? 0 : (page - 1) * perPage + 1
@@ -139,8 +135,6 @@ export default function ClientesPage() {
     setSheetAberto(false)
     setCelularInput('')
     setDdi('55')
-    setTipoIntegracao('')
-    setLoginExterno('')
   }
 
   // Após criar cliente → abre sheet de cobrança
@@ -152,11 +146,7 @@ export default function ClientesPage() {
       setDdi('55')
       setNovoClienteId(state.clienteId)
       setNovoClienteNome(state.clienteNome ?? '')
-      setNovoClienteIntegracao(tipoIntegracao)
-      setTipoIntegracao('')
-      setLoginExterno('')
       setRecorrente(false)
-      setRenovarExterno(!!tipoIntegracao)
       setSheetCob(true)
       setRefresh((r) => r + 1)
     }
@@ -164,8 +154,6 @@ export default function ClientesPage() {
 
   function fecharSheetCob() {
     setSheetCob(false)
-    setNovoClienteIntegracao('')
-    setRenovarExterno(false)
   }
 
   // Após criar cobrança
@@ -475,23 +463,6 @@ export default function ClientesPage() {
                     className="w-full resize-none rounded-md border border-border bg-input px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary" />
                 </div>
 
-                {novoClienteIntegracao && (
-                  <div className="flex items-center gap-3 rounded-md border border-border bg-muted/30 px-3 py-3">
-                    <input
-                      id="renovar-externo-cob"
-                      type="checkbox"
-                      name="renovar_externo"
-                      value="true"
-                      checked={renovarExterno}
-                      onChange={e => setRenovarExterno(e.target.checked)}
-                      className="h-4 w-4 rounded accent-primary"
-                    />
-                    <label htmlFor="renovar-externo-cob" className="cursor-pointer select-none text-sm text-foreground">
-                      Renovar no LookDefense {novoClienteIntegracao === 'lookdefense_p2p' ? '(P2P)' : '(IPTV)'}
-                    </label>
-                  </div>
-                )}
-
                 <div className="flex items-center gap-3 rounded-md border border-border bg-muted/30 px-3 py-3">
                   <input id="boas-vindas-cob" type="checkbox" name="enviar_boas_vindas" value="true"
                     className="h-4 w-4 rounded accent-primary" />
@@ -576,32 +547,6 @@ export default function ClientesPage() {
                   <label className={LABEL}>E-mail</label>
                   <input type="email" name="email" placeholder="joao@email.com" className={INPUT} />
                 </div>
-                <div className="space-y-1.5">
-                  <label className={LABEL}>Integração LookDefense</label>
-                  <select
-                    name="tipo_integracao"
-                    value={tipoIntegracao}
-                    onChange={e => { setTipoIntegracao(e.target.value); setLoginExterno('') }}
-                    className={INPUT}
-                  >
-                    <option value="">Nenhuma</option>
-                    <option value="lookdefense_iptv">LookDefense — IPTV</option>
-                    <option value="lookdefense_p2p">LookDefense — P2P</option>
-                  </select>
-                </div>
-                {tipoIntegracao && (
-                  <div className="space-y-1.5">
-                    <label className={LABEL}>Login no LookDefense</label>
-                    <input
-                      type="text"
-                      name="login_externo"
-                      value={loginExterno}
-                      onChange={e => setLoginExterno(e.target.value)}
-                      placeholder="Usuário do cliente no painel"
-                      className={INPUT}
-                    />
-                  </div>
-                )}
                 {state.error && (
                   <p className="rounded-md bg-destructive-bg px-3 py-2 text-sm text-destructive">{state.error}</p>
                 )}

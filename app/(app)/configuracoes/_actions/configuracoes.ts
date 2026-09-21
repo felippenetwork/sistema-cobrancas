@@ -16,33 +16,6 @@ async function getConta() {
   return { supabase, contaId: conta.id as string }
 }
 
-// ── Salvar credenciais LookDefense IPTV ─────────────────────────────────────
-export async function salvarLookDefenseAction(
-  _prev: ActionState,
-  formData: FormData,
-): Promise<ActionState> {
-  try {
-    const { supabase, contaId } = await getConta()
-
-    const username = (formData.get('ld_username') as string)?.trim() || null
-    const password = (formData.get('ld_password') as string)?.trim() || null
-
-    const { error } = await supabase
-      .from('configuracoes')
-      .upsert(
-        { conta_id: contaId, ld_username: username, ld_password: password },
-        { onConflict: 'conta_id' },
-      )
-
-    if (error) return { error: error.message }
-
-    revalidatePath('/configuracoes')
-    return { error: null, success: true }
-  } catch (e) {
-    return { error: e instanceof Error ? e.message : 'Erro desconhecido.' }
-  }
-}
-
 // ── Salvar credenciais EfiBanK PIX ──────────────────────────────────────────
 export async function salvarEfiBankAction(
   _prev: ActionState,

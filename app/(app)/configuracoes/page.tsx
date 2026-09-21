@@ -2,7 +2,7 @@
 
 import { useActionState, useState, useEffect, useRef } from 'react'
 import { Loader2, CheckCircle, Eye, EyeOff } from 'lucide-react'
-import { salvarConfiguracoesAction, salvarLookDefenseAction, salvarEfiBankAction } from './_actions/configuracoes'
+import { salvarConfiguracoesAction, salvarEfiBankAction } from './_actions/configuracoes'
 import { sanitizarLocalPart } from '@/lib/email/template'
 import { createClient } from '@/lib/supabase/client'
 
@@ -15,8 +15,6 @@ type Data = {
     cpf_cnpj?: string | null
     endereco?: string | null
     nome_comercial?: string | null
-    ld_username?: string | null
-    ld_password?: string | null
     efi_client_id?:     string | null
     efi_client_secret?: string | null
     efi_pix_key?:       string | null
@@ -31,13 +29,11 @@ export const dynamic = 'force-dynamic'
 
 export default function ConfiguracoesPage() {
   const [stateGeral,  formActionGeral,  isPendingGeral]  = useActionState(salvarConfiguracoesAction, { error: null })
-  const [stateLookDefense, formActionLookDefense, isPendingLookDefense] = useActionState(salvarLookDefenseAction, { error: null })
   const [stateEfi,         formActionEfi,         isPendingEfi]         = useActionState(salvarEfiBankAction,    { error: null })
 
   const [data, setData]                   = useState<Data | null>(null)
   const [localPart, setLocalPart]         = useState('')
   const [loading, setLoading]             = useState(true)
-  const [showLdPassword, setShowLdPassword]   = useState(false)
   const [showEfiSecret, setShowEfiSecret]     = useState(false)
   const [efiSandbox, setEfiSandbox]           = useState(false)
   const [efiCert, setEfiCert]                 = useState('')
@@ -62,7 +58,7 @@ export default function ConfiguracoesPage() {
 
     const [{ data: cfgRaw }, { data: rem }] = await Promise.all([
       sb.from('configuracoes')
-        .select('contato, cpf_cnpj, endereco, nome_comercial, ld_username, ld_password, efi_client_id, efi_client_secret, efi_pix_key, efi_cert_base64, efi_sandbox')
+        .select('contato, cpf_cnpj, endereco, nome_comercial, efi_client_id, efi_client_secret, efi_pix_key, efi_cert_base64, efi_sandbox')
         .eq('conta_id', conta.id)
         .maybeSingle(),
       sb.from('email_remetente').select('local_part, from_name').eq('conta_id', conta.id).maybeSingle(),
@@ -103,7 +99,6 @@ export default function ConfiguracoesPage() {
 
   // Recargas após salvar — preservando posição de scroll
   useEffect(() => { if (stateGeral.success)  loadData(true) }, [stateGeral.success])
-  useEffect(() => { if (stateLookDefense.success) loadData(true) }, [stateLookDefense.success])
   useEffect(() => { if (stateEfi.success)         loadData(true) }, [stateEfi.success])
 
   const previewEmail = data?.domain && localPart
@@ -206,91 +201,6 @@ export default function ConfiguracoesPage() {
         </button>
       </form>
 
-
-      {/* ── LookDefense IPTV ────────────────────────────────────────────────── */}
-      <form action={formActionLookDefense} className="space-y-6">
-        <section className="rounded-2xl border border-border bg-card p-6 space-y-5">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h2 className="text-sm font-semibold text-foreground">LookDefense IPTV</h2>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                Renovação automática de planos IPTV ao baixar parcelas de clientes vinculados.
-              </p>
-            </div>
-            {(data?.cfg?.ld_username && data?.cfg?.ld_password) ? (
-              <span className="flex items-center gap-1 rounded-full bg-green-500/15 px-2.5 py-1 text-[11px] font-medium text-green-500">
-                <CheckCircle className="h-3 w-3" />
-                Configurado
-              </span>
-            ) : (
-              <span className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
-                Não configurado
-              </span>
-            )}
-          </div>
-
-          <div className="rounded-xl border border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground space-y-1">
-            <p className="font-medium text-foreground">Como funciona:</p>
-            <ol className="list-decimal list-inside space-y-0.5">
-              <li>Informe o login e senha da sua conta revendedor no painel LookDefense</li>
-              <li>No cadastro de cada cliente IPTV, preencha o campo <strong>Login externo</strong> com o username dele no painel</li>
-              <li>Ao baixar uma parcela, o sistema agenda a renovação automaticamente</li>
-            </ol>
-          </div>
-
-          <div className="space-y-4">
-            <div className="space-y-1.5">
-              <label className={LABEL}>Usuário (login do revendedor)</label>
-              <input
-                name="ld_username"
-                defaultValue={data?.cfg?.ld_username ?? ''}
-                placeholder="seu.usuario"
-                autoComplete="off"
-                className={INPUT}
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className={LABEL}>Senha</label>
-              <div className="relative">
-                <input
-                  name="ld_password"
-                  type={showLdPassword ? 'text' : 'password'}
-                  defaultValue={data?.cfg?.ld_password ?? ''}
-                  placeholder="••••••••"
-                  autoComplete="new-password"
-                  className={INPUT + ' pr-10'}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowLdPassword(v => !v)}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  {showLdPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {stateLookDefense.error && (
-          <p className="rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">{stateLookDefense.error}</p>
-        )}
-        {stateLookDefense.success && (
-          <p className="flex items-center gap-2 rounded-xl bg-success-bg px-3 py-2 text-sm text-success">
-            <CheckCircle className="h-4 w-4" />
-            Credenciais LookDefense salvas.
-          </p>
-        )}
-
-        <button
-          type="submit" disabled={isPendingLookDefense}
-          className="flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
-        >
-          {isPendingLookDefense && <Loader2 className="h-4 w-4 animate-spin" />}
-          {isPendingLookDefense ? 'Salvando…' : 'Salvar credenciais LookDefense'}
-        </button>
-      </form>
 
       {/* ── EfiBanK PIX ─────────────────────────────────────────────────────── */}
       <form action={formActionEfi} className="space-y-6">

@@ -24,9 +24,9 @@ beforeAll(async () => {
   atendenteA = await adicionarMembro(db, contaA, 'atendente')
 
   await db.sql(
-    `insert into public.configuracoes (conta_id, efi_client_id, efi_client_secret, efi_pix_key, ld_password)
-     values ($1, 'CLIENTID-A', 'EFISECRET-A', 'chave-pix-A', 'SENHA-LD-A'),
-            ($2, 'CLIENTID-B', 'EFISECRET-B', 'chave-pix-B', 'SENHA-LD-B')`,
+    `insert into public.configuracoes (conta_id, efi_client_id, efi_client_secret, efi_pix_key)
+     values ($1, 'CLIENTID-A', 'EFISECRET-A', 'chave-pix-A'),
+            ($2, 'CLIENTID-B', 'EFISECRET-B', 'chave-pix-B')`,
     [contaA, contaB],
   )
   await db.sql(

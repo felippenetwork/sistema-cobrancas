@@ -1,6 +1,6 @@
 ---
 name: regras-financeiras
-description: Fonte única da verdade das regras de negócio do Cobranx — geração de parcelas, recorrência, baixa de pagamento (manual e via PIX/EfiBank), LookDefense, planos e assinatura do SaaS, KPIs. Use SEMPRE que mexer em cobranças, parcelas, baixa, dashboard, indicadores, planos/limites ou qualquer cálculo de valor/data. Autoridade para recusar implementar regra ambígua ou inventada — regra não documentada aqui exige perguntar ao Felippe antes de implementar, nunca assumir o "padrão de mercado".
+description: Fonte única da verdade das regras de negócio do Cobranx — geração de parcelas, recorrência, baixa de pagamento (manual e via PIX/EfiBank), planos e assinatura do SaaS, KPIs. Use SEMPRE que mexer em cobranças, parcelas, baixa, dashboard, indicadores, planos/limites ou qualquer cálculo de valor/data. Autoridade para recusar implementar regra ambígua ou inventada — regra não documentada aqui exige perguntar ao Felippe antes de implementar, nunca assumir o "padrão de mercado".
 ---
 
 # Regras Financeiras — Cobrança (núcleo do sistema)
@@ -52,9 +52,9 @@ description: Fonte única da verdade das regras de negócio do Cobranx — gera�
 
 ### 3.2 Baixa automática via PIX (EfiBank) — integração real, não documentada até esta revisão
 - `app/api/webhooks/efibank/route.ts` recebe notificação de PIX pago da EfiBank e chama a mesma RPC `baixar_parcela` automaticamente pelo `txid` em `cobrancas_pix`. A baixa vem primeiro e só depois a cobrança PIX é marcada `concluida` (ver abaixo).
-- Ao confirmar, dispara notificação `pagamento_confirmado` (se o canal estiver ativo na conta) e, se o cliente tiver `login_externo`/`tipo_integracao`, aciona a renovação LookDefense (ver §5).
+- Ao confirmar, dispara notificação `pagamento_confirmado` (se o canal estiver ativo na conta).
 - **Geração da próxima parcela recorrente aqui segue a regra decidida em §2.2** (RN-C1): só quando não sobrou nenhuma parcela aberta na cobrança, gera exatamente 1.
-- **Ordem e idempotência (PAG-N1, corrigido em 2026-09-19):** a baixa (RPC `baixar_parcela`, idempotente) roda ANTES de marcar a cobrança PIX como `concluida`. Falha transitória (RPC, leitura do banco) responde **5xx para a EfiBank reenviar** e não encerra a cobrança; parcela já paga encerra a cobrança sem repetir efeitos; PIX pago sem parcela vira erro para revisão manual (200, sem reenvio infinito). Os efeitos (confirmação por WhatsApp, renovação LookDefense) são duráveis por conta própria — ficam em `fila`/`baixas_externas` para os crons — e um erro neles não pede reenvio.
+- **Ordem e idempotência (PAG-N1, corrigido em 2026-09-19):** a baixa (RPC `baixar_parcela`, idempotente) roda ANTES de marcar a cobrança PIX como `concluida`. Falha transitória (RPC, leitura do banco) responde **5xx para a EfiBank reenviar** e não encerra a cobrança; parcela já paga encerra a cobrança sem repetir efeitos; PIX pago sem parcela vira erro para revisão manual (200, sem reenvio infinito). O efeito (confirmação por WhatsApp) é durável por conta própria — fica em `fila` para o cron — e um erro nele não pede reenvio.
 - O webhook autentica por `?token=`: `EFIBANK_WEBHOOK_SECRET` (próprio; quando existe, o `CRON_SECRET` deixa de valer aqui) ou, sem ele, `CRON_SECRET` (legado). **Ainda confia no corpo da notificação** — a regra de segurança pede confirmar a baixa consultando a EfiBank (`GET /v2/cob/{txid}`, exige o escopo `cob.read` na aplicação); não implementado porque, sem esse escopo, todo pagamento ficaria em reenvio. Validar o escopo antes.
 - EfiBank é usada para cobrança PIX do **cliente final** (quem deve). Não confundir com Mercado Pago, que cobra a **assinatura do SaaS** do dono da conta (ver §6).
 
@@ -62,14 +62,9 @@ description: Fonte única da verdade das regras de negócio do Cobranx — gera�
 - Valor é **fixo** por parcela. Só muda pelo **lápis** (edição), que altera vencimento, valor e observação **daquela** parcela.
 - Cada parcela guarda seu próprio valor (override) — editar uma não muda as outras.
 
-## 5. LookDefense — renovação automática de acesso externo (IPTV)
+## 5. (removido em 2026-09-21) LookDefense — renovação automática de acesso IPTV
 
-Integração real e ativa (`lib/lookdefense/`, `app/api/cron/lookdefense/route.ts`, configurável em Configurações), presente em Clientes/Cobranças/Atendimento. Não documentada em nenhuma skill até esta revisão.
-
-- Cliente pode ter `login_externo` + `tipo_integracao` preenchidos — username dele no painel revendedor LookDefense (produto de IPTV).
-- **Ao dar baixa numa parcela de cliente vinculado** (manual §3.1 ou via PIX §3.2), o sistema registra uma `baixas_externas` e aciona `renovarLookDefenseImediato`, que renova o plano IPTV do cliente no painel LookDefense usando as credenciais de revendedor da conta.
-- Isso significa que a baixa de uma parcela tem efeito colateral em um sistema de terceiro fora do Cobranx — tratar com o mesmo cuidado de dinheiro: falha na renovação não pode falhar silenciosamente nem travar a baixa da parcela em si (são operações desacopladas: a parcela é dada como paga independente do resultado da renovação).
-- `[CONFIRMAR]` O que acontece se a renovação LookDefense falhar (credencial inválida, painel fora do ar)? Hoje não há retry nem alerta visível — perguntar ao Felippe se isso é aceitável ou se precisa de fila com retry e aviso ao dono da conta.
+A integração LookDefense foi removida do produto inteiro por decisão do Felippe (migration `0035_remove_lookdefense.sql`: dropa `baixas_externas`, `clientes.login_externo`/`tipo_integracao` e `configuracoes.ld_username`/`ld_password`). A baixa de parcela — manual ou via PIX — não tem mais efeito colateral em sistema de terceiro. Numeração mantida para não quebrar referências a §6 em diante.
 
 ## 6. Status visual da cobrança (card)
 - Baseado na(s) parcela(s) **mais próxima(s)** em aberto.
@@ -142,7 +137,6 @@ Regra já documentada aqui que MUDA (não uma lacuna nova) exige responder, ante
 - ❌ Baixa que não cancela as notificações pendentes da parcela.
 - ❌ Prometer/implementar conciliação bancária automática fora do fluxo PIX/EfiBank já existente.
 - ❌ Mudar definição de indicador ou de plano/limite sem decisão de produto.
-- ❌ Renovação LookDefense falhar e travar ou reverter a baixa da parcela (são operações desacopladas).
 
 ## Registro de decisões (append-only)
 
@@ -154,4 +148,5 @@ Regra já documentada aqui que MUDA (não uma lacuna nova) exige responder, ante
 - 2026-09-19 — Auditoria completa (`docs/auditoria-2026-09-19.md`) achou limite de plano real já em produção (`limite_clientes`) que não estava documentado. Confirmado também que não existe cadastro self-service — toda conta é provisionada manualmente pelo admin.
 - 2026-09-19 — RN-C1 reanalisado: não é uma "violação simples". São 4 caminhos que geram a parcela na baixa (decisão de UX deliberada, com modal de "próximo vencimento") e o scheduler não gera por data. Vira `[A DEFINIR]` em §2.2 com 3 opções; nada foi removido. PAG-N1 (ordem do webhook EfiBank) corrigido.
 - 2026-09-21 — RN-C1 decidido pelo Felippe: opção 1 (manter geração na baixa + scheduler de segurança, reescrever a regra para descrever o comportamento real), MAIS uma correção adicional não coberta pelas 3 opções originais — a criação da cobrança recorrente também não pode pré-gerar um lote (estava criando 3 "de cobertura inicial"), só a próxima parcela. Uma recorrente nunca tem mais de 1 parcela aberta ao mesmo tempo. Efeito: `lib/utils/parcelas.ts` (`gerarParcelasRecorrentes` passa a criar sempre 1, parâmetro `qtdIniciais` removido); os 4 caminhos de geração-na-baixa e o scheduler não mudaram (já geravam 1 por vez). Retroativo: não — cobranças recorrentes já existentes com mais de 1 parcela aberta (geradas sob a regra antiga) não foram limpas automaticamente, é decisão separada do Felippe se quer higienizar os dados existentes.
+- 2026-09-21 — Integração LookDefense (renovação IPTV/P2P na baixa) removida do produto inteiro por decisão do Felippe, junto com a coluna/tabela de suporte (migration 0035). A baixa de parcela deixa de ter efeito colateral em sistema de terceiro; §5 virou tombstone. A Meta Cloud API já havia sido removida no mesmo dia (migration 0034) — uazapi é o único canal de WhatsApp.
 ```

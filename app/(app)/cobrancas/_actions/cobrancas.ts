@@ -38,7 +38,6 @@ export async function criarCobrancaAction(
     const observacao         = (formData.get('observacao') as string)?.trim() || null
     const enviarBoasVindas   = formData.get('enviar_boas_vindas') === 'true'
     const meioPagamentoId    = (formData.get('meio_pagamento_id') as string)?.trim() || null
-    const renovarExterno     = formData.get('renovar_externo') === 'true'
 
     // Validações
     if (!clienteId)                       return { error: 'Selecione um cliente.' }
@@ -83,39 +82,6 @@ export async function criarCobrancaAction(
 
     const { error: parcErr } = await supabase.from('parcelas').insert(parcelas)
     if (parcErr) return { error: parcErr.message }
-
-    // Integração LookDefense
-    if (renovarExterno) {
-      const { data: clienteInteg, error: clienteIntegErr } = await supabase
-        .from('clientes')
-        .select('login_externo, tipo_integracao')
-        .eq('id', clienteId)
-        .maybeSingle()
-
-      if (clienteIntegErr) return { error: `[integ] cliente: ${clienteIntegErr.message}` }
-
-      if (clienteInteg?.login_externo && clienteInteg?.tipo_integracao) {
-        const { data: primeiraParc, error: parcIntegErr } = await supabase
-          .from('parcelas')
-          .select('id')
-          .eq('cobranca_id', cob.id)
-          .order('numero', { ascending: true })
-          .limit(1)
-          .maybeSingle()
-
-        if (parcIntegErr) return { error: `[integ] parcela: ${parcIntegErr.message}` }
-        if (!primeiraParc?.id) return { error: '[integ] parcela não encontrada após insert' }
-
-        const { error: integErr } = await supabase.from('baixas_externas').insert({
-          conta_id:        contaId,
-          cliente_id:      clienteId,
-          parcela_id:      primeiraParc.id,
-          login_externo:   clienteInteg.login_externo,
-          tipo_integracao: clienteInteg.tipo_integracao,
-        })
-        if (integErr) return { error: `[integ] baixas_externas: ${integErr.message}` }
-      }
-    }
 
     // Boas-vindas: enfileira apenas os canais habilitados na config da conta
     if (enviarBoasVindas) {
@@ -165,7 +131,6 @@ export async function criarCobrancaRapidaAction(
     const primeiroVenc     = formData.get('primeiro_vencimento') as string  // "YYYY-MM-DD"
     const observacao       = (formData.get('observacao') as string | null)?.trim() || null
     const enviarBoasVindas = formData.get('enviar_boas_vindas') === 'true'
-    const renovarExterno   = formData.get('renovar_externo')   === 'true'
 
     if (!clienteId)                         return { error: 'Cliente inválido.' }
     if (!primeiroVenc || !/^\d{4}-\d{2}-\d{2}$/.test(primeiroVenc))
@@ -206,39 +171,6 @@ export async function criarCobrancaRapidaAction(
 
     const { error: parcErr } = await supabase.from('parcelas').insert(parcelas)
     if (parcErr) return { error: parcErr.message }
-
-    // Integração LookDefense: renovar apenas se o checkbox estiver marcado
-    if (renovarExterno) {
-      const { data: clienteInteg, error: clienteIntegErr } = await supabase
-        .from('clientes')
-        .select('login_externo, tipo_integracao')
-        .eq('id', clienteId)
-        .maybeSingle()
-
-      if (clienteIntegErr) return { error: `[integ] cliente: ${clienteIntegErr.message}` }
-
-      if (clienteInteg?.login_externo && clienteInteg?.tipo_integracao) {
-        const { data: primeiraParc, error: parcErr2 } = await supabase
-          .from('parcelas')
-          .select('id')
-          .eq('cobranca_id', cob.id)
-          .order('numero', { ascending: true })
-          .limit(1)
-          .maybeSingle()
-
-        if (parcErr2) return { error: `[integ] parcela: ${parcErr2.message}` }
-        if (!primeiraParc?.id) return { error: '[integ] parcela não encontrada após insert' }
-
-        const { error: integErr } = await supabase.from('baixas_externas').insert({
-          conta_id:        contaId,
-          cliente_id:      clienteId,
-          parcela_id:      primeiraParc.id,
-          login_externo:   clienteInteg.login_externo,
-          tipo_integracao: clienteInteg.tipo_integracao,
-        })
-        if (integErr) return { error: `[integ] baixas_externas: ${integErr.message}` }
-      }
-    }
 
     if (enviarBoasVindas) {
       const { data: cfgBv } = await supabase

@@ -19,6 +19,8 @@ Outros pontos que pedem decisão sua: **SEG-N5** (webhook EfiBank confia no corp
 
 **Nota (2026-09-21):** a Meta Cloud API foi removida do produto inteiro (migration `0034_remove_meta_cloud_api.sql`) — uazapi é hoje o único canal de WhatsApp. Achados abaixo que descrevem código/config da Meta (SEG-N1, COD-N1/N2, o passo manual da linha ~159) referem-se a código que não existe mais; mantidos como registro histórico, não como pendência.
 
+**Nota (2026-09-21):** a integração LookDefense (renovação IPTV/P2P na baixa) também foi removida do produto inteiro (migration `0035_remove_lookdefense.sql`, dropa `baixas_externas`, `clientes.login_externo`/`tipo_integracao` e `configuracoes.ld_username`/`ld_password`). Achados que citam `lib/lookdefense/`, `baixas_externas` ou o cron `lookdefense` (SEG-A5 no trecho da senha LookDefense, ISO-N4, SEG-N3 no trecho do cron) descrevem código que não existe mais — registro histórico, não pendência.
+
 ---
 
 ## FRENTE 1 — Segurança

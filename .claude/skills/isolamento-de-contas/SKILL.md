@@ -21,7 +21,7 @@ O isolamento vive em **4 camadas de dado + 1 de recurso**. Uma falha em qualquer
 
 ### Papéis dentro da conta (dono / admin / atendente)
 
-Isolamento entre contas não basta quando a conta tem mais de um usuário — falta isolar **papéis dentro da mesma conta**. Achado real (SEG-N4, auditoria 2026-09-19): `conta_do_usuario()` passou a valer para qualquer membro ativo, mas as policies de `configuracoes`, `membros_conta` e `meios_pagamento` só checavam isso — nenhuma olhava o `role`. Um atendente lia e alterava credenciais (Meta, EfiBank, LookDefense, a chave PIX enviada ao cliente) e conseguia se promover a admin, tudo pelo próprio login, direto na API — a separação existia só na interface.
+Isolamento entre contas não basta quando a conta tem mais de um usuário — falta isolar **papéis dentro da mesma conta**. Achado real (SEG-N4, auditoria 2026-09-19): `conta_do_usuario()` passou a valer para qualquer membro ativo, mas as policies de `configuracoes`, `membros_conta` e `meios_pagamento` só checavam isso — nenhuma olhava o `role`. Um atendente lia e alterava credenciais (Meta, EfiBank, LookDefense — Meta e LookDefense já removidos do produto —, a chave PIX enviada ao cliente) e conseguia se promover a admin, tudo pelo próprio login, direto na API — a separação existia só na interface.
 
 Regra: qualquer tabela onde uma ação (ler credencial, mudar papel de outro membro, trocar o texto que vai pro cliente) só deveria valer para dono/admin usa o helper, não `conta_do_usuario()` sozinho:
 

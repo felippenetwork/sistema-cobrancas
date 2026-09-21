@@ -13,7 +13,6 @@ Atue como engenheiro sênior avaliando a decisão — não como executor de pedi
 - **Banco/Auth:** Supabase (Postgres com RLS multi-tenant via `conta_id`).
 - **WhatsApp/notificações:** **uazapi direto (único canal — Meta Cloud API foi removida em 2026-09-21), acionado por cron do Vercel chamado a cada 1min por serviço externo (cron-job.org).** Não existe worker/VPS ativo — ver skill `whatsapp-uazapi` antes de tocar em qualquer coisa de conexão, envio ou lembrete. O diretório `worker/` ainda existe no repositório mas é **código morto**; não editar ali esperando efeito em produção.
 - **Pagamentos:** Mercado Pago (assinatura do SaaS) + EfiBank PIX (cobrança do cliente final) — ver skill `regras-financeiras`.
-- **Integrações adicionais:** LookDefense (renovação de acesso IPTV vinculado a pagamento) — ver skill `regras-financeiras` §5.
 - Domínio em português: `cobranca`, `cliente`, `notificacao`, `agendamento`, `conta`. Manter nomenclatura do domínio em PT-BR; termos técnicos podem ficar em inglês (`handler`, `payload`).
 
 ## Mapa de leitura (referências desta skill)
@@ -97,10 +96,10 @@ export async function cancelarNotificacao(input: unknown) {
 - Novas queries que filtram por coluna não indexada em tabela que cresce (cobranças, parcelas, notificações): criar índice na migration junto.
 - Operação com múltiplas escritas relacionadas (baixa de parcela: status + lançamento + cancelar notificações) é atômica via RPC/transação — não sequência de updates soltos que pode parar no meio.
 
-## Chamadas a serviços externos (uazapi, Meta, Mercado Pago, EfiBank, Resend, LookDefense)
+## Chamadas a serviços externos (uazapi, Mercado Pago, EfiBank, Resend)
 
 - **Retry:** backoff exponencial com jitter, nunca retry imediato em loop; só em erro transitório (timeout, 5xx), nunca em erro de validação (4xx); combinar com idempotência para não duplicar efeito.
-- **Circuit breaker** em chamada não essencial ao caminho principal: depois de N falhas seguidas, parar de tentar por um tempo e falhar rápido com fallback claro, em vez de empilhar timeout — é o que impede uma dependência lenta (ex.: LookDefense fora do ar) de travar a baixa de uma parcela.
+- **Circuit breaker** em chamada não essencial ao caminho principal: depois de N falhas seguidas, parar de tentar por um tempo e falhar rápido com fallback claro, em vez de empilhar timeout — é o que impede uma dependência lenta (ex.: uazapi fora do ar) de travar a baixa de uma parcela.
 - Toda chamada externa que representa um job da fila (`notificacoes_enviadas`) é idempotente: reprocessar o mesmo job não pode duplicar mensagem — checar estado antes de agir.
 - Falha de envio: retry com backoff limitado; após esgotar, marcar `falhou` com motivo legível — nunca deixar job em limbo.
 - Logs sempre com contexto: `conta_id`, id do recurso, integração envolvida. Log sem contexto é inútil em produção.

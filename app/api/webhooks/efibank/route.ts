@@ -10,7 +10,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { calcularVencimento } from '@/lib/utils/parcelas'
 import { enviarWhatsAppImediato } from '@/lib/whatsapp/enviar-imediato'
-import { renovarLookDefenseImediato } from '@/lib/lookdefense/renovar-imediato'
 
 type Supabase = ReturnType<typeof createAdminClient>
 
@@ -125,9 +124,9 @@ async function processarPix(supabase: Supabase, txid: string): Promise<Resultado
     return 'ignorado'
   }
 
-  // Baixa feita. A partir daqui a cobrança PIX está encerrada; os efeitos abaixo são
-  // duráveis por conta própria (notificação em `fila` e `baixas_externas` pendente são
-  // reprocessadas pelos crons), então um erro neles não pede reenvio do webhook.
+  // Baixa feita. A partir daqui a cobrança PIX está encerrada; o efeito abaixo é
+  // durável por conta própria (notificação em `fila` é reprocessada pelo cron),
+  // então um erro nele não pede reenvio do webhook.
   await marcarConcluida(supabase, cobPix.id, txid)
 
   const contaIdFinal = result.conta_id    as string
@@ -140,7 +139,6 @@ async function processarPix(supabase: Supabase, txid: string): Promise<Resultado
 
   if (clienteId) {
     await efeito('confirmação por WhatsApp', () => confirmarPorWhatsApp(supabase, { contaId: contaIdFinal, parcelaId, cobrancaId, clienteId }))
-    await efeito('renovação LookDefense', () => renovarLookDefense(supabase, { contaId: contaIdFinal, parcelaId, clienteId }))
   }
 
   if (result.recorrente) {
@@ -184,32 +182,6 @@ async function confirmarPorWhatsApp(
 
   if (notif?.id) {
     await enviarWhatsAppImediato(contaId, notif.id, parcelaId, cobrancaId, clienteId, 'pagamento_confirmado')
-  }
-}
-
-async function renovarLookDefense(
-  supabase: Supabase,
-  { contaId, parcelaId, clienteId }: { contaId: string; parcelaId: string; clienteId: string },
-) {
-  const { data: cli } = await supabase
-    .from('clientes')
-    .select('login_externo, tipo_integracao')
-    .eq('id', clienteId)
-    .eq('conta_id', contaId)
-    .maybeSingle()
-
-  if (!cli?.login_externo || !cli.tipo_integracao) return
-
-  const { data: baixaExt } = await supabase.from('baixas_externas').insert({
-    conta_id:        contaId,
-    cliente_id:      clienteId,
-    parcela_id:      parcelaId,
-    login_externo:   cli.login_externo,
-    tipo_integracao: cli.tipo_integracao,
-  }).select('id').single()
-
-  if (baixaExt?.id) {
-    await renovarLookDefenseImediato(contaId, baixaExt.id, cli.login_externo, 0)
   }
 }
 

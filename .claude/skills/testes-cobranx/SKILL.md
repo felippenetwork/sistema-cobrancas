@@ -7,7 +7,7 @@ description: Estratégia e padrões de testes automatizados do Cobranx (Vitest +
 
 ## Princípio
 
-Testar onde o erro custa caro, não onde é fácil. No Cobranx, erro caro é: **dinheiro calculado errado, mensagem enviada para quem já pagou, dado de uma conta aparecendo em outra, disparo fora da janela, e renovação LookDefense/baixa PIX duplicada.** Cobertura % é vaidade — a pergunta certa é "as regras que envolvem dinheiro e reputação têm prova automática?". Teste bom é o que falha quando a regra quebra; teste que nunca falha, mesmo com a lógica quebrada, é teatro de cobertura, não proteção.
+Testar onde o erro custa caro, não onde é fácil. No Cobranx, erro caro é: **dinheiro calculado errado, mensagem enviada para quem já pagou, dado de uma conta aparecendo em outra, disparo fora da janela, e baixa PIX duplicada.** Cobertura % é vaidade — a pergunta certa é "as regras que envolvem dinheiro e reputação têm prova automática?". Teste bom é o que falha quando a regra quebra; teste que nunca falha, mesmo com a lógica quebrada, é teatro de cobertura, não proteção.
 
 **Autoridade sobre qualidade, não concordância automática.** Pedido para pular teste de lógica crítica "para acelerar o prazo" é avaliado tecnicamente: dizer o custo real (o que fica sem prova automática) e propor o mínimo viável que ainda protege — nunca cortar cobertura crítica sem alertar explicitamente o Felippe sobre o risco assumido.
 
@@ -27,7 +27,7 @@ Testar onde o erro custa caro, não onde é fácil. No Cobranx, erro caro é: **
 1. **Regra do bug, com prova de verdade:** todo bug corrigido ganha, NA MESMA TAREFA, um teste rodado primeiro CONTRA O CÓDIGO AINDA QUEBRADO para confirmar que falha (vermelho real, não suposto) — só depois aplicar a correção e confirmar verde. Teste de regressão nunca visto falhando é aposta, não prova.
 2. **Regra do dinheiro:** lógica financeira/crítica implementada ganha teste na mesma tarefa (par com a skill `regras-financeiras`).
 3. **Datas sempre controladas** (`vi.setSystemTime`) — teste que depende do relógio real é flaky por construção. Testar explicitamente: virada de dia, virada de mês, dia 31→fevereiro, horário de fronteira da janela (08:59 / 09:00 / 20:00 / 20:01).
-4. **Serviços externos SEMPRE mockados** por trás de uma interface: nenhum teste envia WhatsApp de verdade, cobra via Mercado Pago/EfiBank de verdade, ou chama LookDefense de verdade — isso é incidente, não teste.
+4. **Serviços externos SEMPRE mockados** por trás de uma interface: nenhum teste envia WhatsApp de verdade, ou cobra via Mercado Pago/EfiBank de verdade — isso é incidente, não teste.
 5. **Dados falsos, nunca reais:** factories com dados brasileiros sintéticos (telefones inválidos de propósito, nomes genéricos); nenhum dado pessoal real em fixture.
 6. **Permissões e isolamento testados de verdade:** testes de integração autenticam como usuário comum (client anon + sessão, RLS valendo) — testar com service role "para facilitar" anula o propósito. O teste de isolamento de tenant é o mais importante da suíte (skill `isolamento-de-contas`).
 7. **Idempotência:** processar o mesmo evento duas vezes (job de notificação, webhook de PIX/Mercado Pago) = um efeito só.
@@ -89,7 +89,7 @@ Seletores por role/label (`getByRole('button', { name: 'Criar cobrança' })`) �
 - [ ] Regra de dinheiro/régua implementada tem teste na mesma tarefa?
 - [ ] Bug corrigido tem teste de regressão que foi visto falhando ANTES da correção?
 - [ ] Datas testadas com relógio controlado (incluindo fronteiras)?
-- [ ] Nenhum teste toca produção, dado real, WhatsApp real ou integração externa real (Mercado Pago/EfiBank/LookDefense)?
+- [ ] Nenhum teste toca produção, dado real, WhatsApp real ou integração externa real (Mercado Pago/EfiBank/uazapi)?
 - [ ] Tabela nova entrou nos testes de isolamento e provisionamento?
 - [ ] Lógica mais crítica tocada passou por quebra deliberada para confirmar que o teste pegaria?
 - [ ] Suíte inteira verde localmente antes do commit?

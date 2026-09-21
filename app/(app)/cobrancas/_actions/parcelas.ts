@@ -11,7 +11,6 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { calcularVencimento } from '@/lib/utils/parcelas'
 import { enviarWhatsAppImediato } from '@/lib/whatsapp/enviar-imediato'
-import { renovarLookDefenseImediato } from '@/lib/lookdefense/renovar-imediato'
 
 const schemaId = z.string().uuid()
 
@@ -288,32 +287,6 @@ export async function baixarParcelaComConfirmacaoAction(
     if (cfgPag?.ativo_email) {
       const { error: e } = await supabase.from('notificacoes_enviadas').insert({ ...baseNotif, canal: 'email' as const })
       if (e) console.error('[baixarComConfirmacao] notif.email', e)
-    }
-  }
-
-  // Passo 5b: integração externa — enfileirar renovação no LookDefense
-  if (clienteId) {
-    const { data: integ } = await supabase
-      .from('clientes')
-      .select('login_externo, tipo_integracao')
-      .eq('id', clienteId)
-      .maybeSingle()
-
-    if ((integ as any)?.login_externo && (integ as any)?.tipo_integracao) {
-      const { data: baixaExt, error: integErr } = await supabase.from('baixas_externas').insert({
-        conta_id:        contaIdFinal,
-        cliente_id:      clienteId,
-        parcela_id:      parcelaId,
-        login_externo:   (integ as any).login_externo,
-        tipo_integracao: (integ as any).tipo_integracao,
-      }).select('id').single()
-      if (integErr) console.error('[baixarComConfirmacao] baixa_externa', integErr)
-      else if (baixaExt?.id) {
-        await renovarLookDefenseImediato(
-          contaIdFinal, baixaExt.id,
-          (integ as any).login_externo as string, 0,
-        )
-      }
     }
   }
 

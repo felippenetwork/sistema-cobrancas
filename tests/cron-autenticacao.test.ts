@@ -1,6 +1,6 @@
-// Autenticação de todos os crons (whatsapp-uazapi, scheduler, lookdefense).
+// Autenticação do cron scheduler (whatsapp-uazapi tem cobertura própria em cron-whatsapp-uazapi.test.ts).
 // Achado da auditoria de 2026-09-19: sem CRON_SECRET no servidor, "Bearer undefined"
-// passava nos crons whatsapp/scheduler e o cron lookdefense ficava sem autenticação.
+// passava — cron novo sem o helper `cronAutorizado()` repete o mesmo erro.
 import { NextRequest } from 'next/server'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { FakeDb } from './helpers/fake-supabase'
@@ -15,7 +15,6 @@ vi.mock('@/lib/supabase/admin', () => ({ createAdminClient: () => mocks.db.atual
 vi.mock('@/lib/atendimento/encontrar-ou-criar', () => ({ encontrarOuCriarAtendimento: mocks.encontrarOuCriarAtendimento }))
 
 import { GET as cronScheduler } from '@/app/api/cron/scheduler/route'
-import { GET as cronLookDefense } from '@/app/api/cron/lookdefense/route'
 
 const SEGREDO = 'segredo-cron-de-teste'
 const MEIO_DIA_SP = '2026-09-19T15:00:00Z'
@@ -41,25 +40,22 @@ afterEach(() => {
   delete process.env.CRON_SECRET
 })
 
-describe.each([
-  ['scheduler', cronScheduler],
-  ['lookdefense', cronLookDefense],
-])('autenticação do cron %s', (_nome, GET) => {
+describe('autenticação do cron scheduler', () => {
   it('recusa sem Authorization', async () => {
-    expect((await GET(req())).status).toBe(401)
+    expect((await cronScheduler(req())).status).toBe(401)
   })
 
   it('recusa Authorization errado', async () => {
-    expect((await GET(req({ authorization: 'Bearer errado' }))).status).toBe(401)
+    expect((await cronScheduler(req({ authorization: 'Bearer errado' }))).status).toBe(401)
   })
 
   it('recusa "Bearer undefined" quando CRON_SECRET não está configurado no servidor', async () => {
     delete process.env.CRON_SECRET
-    expect((await GET(req({ authorization: 'Bearer undefined' }))).status).toBe(401)
+    expect((await cronScheduler(req({ authorization: 'Bearer undefined' }))).status).toBe(401)
   })
 
   it('recusa qualquer requisição quando CRON_SECRET não está configurado (nunca fica aberto)', async () => {
     delete process.env.CRON_SECRET
-    expect((await GET(req())).status).toBe(401)
+    expect((await cronScheduler(req())).status).toBe(401)
   })
 })
