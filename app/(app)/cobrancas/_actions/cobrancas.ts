@@ -3,6 +3,7 @@
 import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
 import { gerarParcelasFixas, gerarParcelasRecorrentes } from '@/lib/utils/parcelas'
+import { enviarWhatsAppImediato } from '@/lib/whatsapp/enviar-imediato'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
@@ -132,7 +133,12 @@ export async function criarCobrancaAction(
       if (cfgBv?.ativo_whatsapp) inserts.push({ ...baseNotif, canal: 'whatsapp' as const })
       if (cfgBv?.ativo_email)    inserts.push({ ...baseNotif, canal: 'email' as const })
       if (inserts.length) {
-        await supabase.from('notificacoes_enviadas').insert(inserts).throwOnError()
+        const { data: notifsBv } = await supabase
+          .from('notificacoes_enviadas').insert(inserts).select('id, canal').throwOnError()
+        // Boas-vindas sai NA HORA (Meta ou uazapi, conforme a conta) — se não der,
+        // fica em 'fila' para o cron processar no próximo ciclo.
+        const notifWaId = notifsBv?.find(n => n.canal === 'whatsapp')?.id
+        if (notifWaId) await enviarWhatsAppImediato(contaId, notifWaId, null, cob.id, clienteId, 'boasvindas')
       }
     }
 
@@ -249,7 +255,12 @@ export async function criarCobrancaRapidaAction(
       if (cfgBv?.ativo_whatsapp) inserts.push({ ...baseNotif, canal: 'whatsapp' as const })
       if (cfgBv?.ativo_email)    inserts.push({ ...baseNotif, canal: 'email' as const })
       if (inserts.length) {
-        await supabase.from('notificacoes_enviadas').insert(inserts).throwOnError()
+        const { data: notifsBv } = await supabase
+          .from('notificacoes_enviadas').insert(inserts).select('id, canal').throwOnError()
+        // Boas-vindas sai NA HORA (Meta ou uazapi, conforme a conta) — se não der,
+        // fica em 'fila' para o cron processar no próximo ciclo.
+        const notifWaId = notifsBv?.find(n => n.canal === 'whatsapp')?.id
+        if (notifWaId) await enviarWhatsAppImediato(contaId, notifWaId, null, cob.id, clienteId, 'boasvindas')
       }
     }
 

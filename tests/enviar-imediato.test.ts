@@ -7,14 +7,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { FakeDb } from './helpers/fake-supabase'
 
-const mocks = vi.hoisted(() => ({
-  db: { atual: null as unknown },
-  encontrarOuCriarAtendimento: vi.fn(),
-  fetch: vi.fn(),
-}))
+const mocks = vi.hoisted(() => {
+  class UazapiRateLimitError extends Error {}
+  return {
+    db: { atual: null as unknown },
+    encontrarOuCriarAtendimento: vi.fn(),
+    fetch: vi.fn(),
+    UazapiRateLimitError,
+    sendText: vi.fn(),
+  }
+})
 
 vi.mock('@/lib/supabase/admin', () => ({ createAdminClient: () => mocks.db.atual }))
 vi.mock('@/lib/atendimento/encontrar-ou-criar', () => ({ encontrarOuCriarAtendimento: mocks.encontrarOuCriarAtendimento }))
+vi.mock('@/lib/uazapi', () => ({ sendText: mocks.sendText, UazapiRateLimitError: mocks.UazapiRateLimitError }))
 
 import { enviarWhatsAppImediato } from '@/lib/whatsapp/enviar-imediato'
 
@@ -22,12 +28,24 @@ const CONTA = 'conta-1'
 const CLIENTE = 'cli-1'
 const PARCELA = 'parc-1'
 
-function cenario(opts: { meta: boolean; cliente?: Record<string, unknown> | null; statusNotif?: string } = { meta: true }) {
+function cenario(opts: {
+  meta: boolean; cliente?: Record<string, unknown> | null; statusNotif?: string
+  uazapiConectado?: boolean; templateUazapi?: string | null
+} = { meta: true }) {
   const db = new FakeDb({
     configuracoes: [opts.meta
       ? { conta_id: CONTA, meta_api_ativo: true, meta_access_token: 'tok', meta_phone_number_id: '123' }
       : { conta_id: CONTA, meta_api_ativo: null, meta_access_token: null, meta_phone_number_id: null }],
-    notificacoes_config: [],
+    conexoes: [{
+      conta_id: CONTA,
+      status:   opts.uazapiConectado === false ? 'desconectado' : 'conectado',
+      uazapi_instance_token: opts.uazapiConectado === false ? null : 'uaz-tok',
+    }],
+    notificacoes_config: opts.templateUazapi === undefined
+      ? [{ conta_id: CONTA, tipo: 'pagamento_confirmado', template_whatsapp: 'Recebemos, #NOME#! Valor #VALOR#' }]
+      : (opts.templateUazapi ? [{ conta_id: CONTA, tipo: 'pagamento_confirmado', template_whatsapp: opts.templateUazapi }] : []),
+    saudacoes: [],
+    meios_pagamento: [],
     clientes: opts.cliente === null ? [] : [{ id: CLIENTE, conta_id: CONTA, celular: '5521900000001', nome: 'Maria', deleted_at: null, ...opts.cliente }],
     parcelas: [{ id: PARCELA, conta_id: CONTA, valor: 150, data_vencimento: '2026-10-05', status: 'paga' }],
     notificacoes_enviadas: [{ id: 'n1', conta_id: CONTA, status: opts.statusNotif ?? 'fila' }],
@@ -43,25 +61,71 @@ const statusFinal = (db: FakeDb) => db.linhas('notificacoes_enviadas')[0].status
 beforeEach(() => {
   mocks.encontrarOuCriarAtendimento.mockReset().mockResolvedValue('atend-1')
   mocks.fetch.mockReset().mockResolvedValue({ ok: true, json: async () => ({}) })
+  mocks.sendText.mockReset().mockResolvedValue(undefined)
   vi.stubGlobal('fetch', mocks.fetch)
   vi.spyOn(console, 'error').mockImplementation(() => {})
   vi.spyOn(console, 'log').mockImplementation(() => {})
 })
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
-describe('enviarWhatsAppImediato — conta sem Meta (uazapi)', () => {
-  it('não reivindica a notificação: ela continua em "fila" para o cron da uazapi enviar', async () => {
+// Pedido do dono do projeto (2026-09-21): confirmação de pagamento e
+// boas-vindas devem sair NA HORA também em conta uazapi (QR Code), não só
+// Meta — antes ficavam sempre em "fila" esperando o próximo tick do cron,
+// mesmo com o WhatsApp genuinamente conectado.
+describe('enviarWhatsAppImediato — conta uazapi (sem Meta, QR Code conectado)', () => {
+  it('envia na hora pela uazapi, marca "enviado" e registra no histórico', async () => {
     const db = cenario({ meta: false })
+    expect(await enviar('pagamento_confirmado')).toBe(true)
+    expect(mocks.sendText).toHaveBeenCalledWith('uaz-tok', '5521900000001', expect.stringContaining('Maria'))
+    expect(mocks.fetch).not.toHaveBeenCalled() // não passa pela Meta
+    const nota = db.linhas('notificacoes_enviadas')[0]
+    expect(nota.status).toBe('enviado')
+    expect(db.linhas('mensagens_wa')).toHaveLength(1)
+  })
+
+  it('vale também para a cobrança manual ("Cobrar agora")', async () => {
+    const db = cenario({ meta: false, templateUazapi: 'Lembrete manual, #NOME#' })
+    db.linhas('notificacoes_config')[0].tipo = 'manual'
+    expect(await enviar('manual')).toBe(true)
+    expect(statusFinal(db)).toBe('enviado')
+  })
+
+  it('uazapi desconectada: devolve/mantém em "fila" para o cron tentar depois', async () => {
+    const db = cenario({ meta: false, uazapiConectado: false })
+    expect(await enviar('pagamento_confirmado')).toBe(false)
+    expect(statusFinal(db)).toBe('fila')
+    expect(db.updates('notificacoes_enviadas')).toHaveLength(0) // nem chega a reivindicar
+    expect(mocks.sendText).not.toHaveBeenCalled()
+  })
+
+  it('sem template configurado para o tipo: devolve para "fila"', async () => {
+    const db = cenario({ meta: false, templateUazapi: null })
+    expect(await enviar('pagamento_confirmado')).toBe(false)
+    expect(statusFinal(db)).toBe('fila')
+    expect(mocks.sendText).not.toHaveBeenCalled()
+  })
+
+  it('rate limit (429) da uazapi: devolve para "fila", não marca como falha definitiva', async () => {
+    const db = cenario({ meta: false })
+    mocks.sendText.mockRejectedValue(new mocks.UazapiRateLimitError('429'))
+    expect(await enviar('pagamento_confirmado')).toBe(false)
+    expect(statusFinal(db)).toBe('fila')
+  })
+
+  it('uazapi recusa o envio: devolve para "fila" para o cron tentar de novo', async () => {
+    const db = cenario({ meta: false })
+    mocks.sendText.mockRejectedValue(new Error('uazapi sendText HTTP 500'))
+    expect(await enviar('pagamento_confirmado')).toBe(false)
+    expect(statusFinal(db)).toBe('fila')
+  })
+
+  it('conta sem Meta E sem uazapi conectada: não reivindica, fica em "fila" pro cron', async () => {
+    const db = cenario({ meta: false, uazapiConectado: false })
     expect(await enviar('pagamento_confirmado')).toBe(false)
     expect(statusFinal(db)).toBe('fila')
     expect(db.updates('notificacoes_enviadas')).toHaveLength(0)
     expect(mocks.fetch).not.toHaveBeenCalled()
-  })
-
-  it('vale também para a cobrança manual ("Cobrar agora")', async () => {
-    const db = cenario({ meta: false })
-    await enviar('manual')
-    expect(statusFinal(db)).toBe('fila')
+    expect(mocks.sendText).not.toHaveBeenCalled()
   })
 })
 

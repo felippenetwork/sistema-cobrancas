@@ -94,6 +94,7 @@ Já houve incidente de credencial exposta em projeto anterior. Regras permanente
 - Vazou → rotacionar IMEDIATAMENTE (Supabase, Mercado Pago, EfiBank, uazapi) e atualizar na Vercel.
 - **Credenciais de integração por conta hoje ficam em texto claro no banco (SEG-A5, aberto):** `conexoes.uazapi_instance_token`, e em `configuracoes`: `meta_access_token`, `meta_app_secret` (novo, migration 0032), `efi_client_secret`, `efi_cert_base64`, `ld_password`. Ao tocar qualquer uma dessas colunas, avaliar criptografia em repouso (ex.: `pgsodium`/Vault do Supabase ou cifra na aplicação com chave fora do banco) em vez de acrescentar mais um segredo em claro.
 - **Rotação programada:** a cada 6 meses ou quando alguém com acesso sair, rotacionar service role e tokens de integração.
+- **`vercel env pull` não prova que uma variável está vazia.** Achado real (2026-09-19): variáveis marcadas "Sensitive" no painel da Vercel voltam como valor vazio (`""`) no `env pull` mesmo quando estão preenchidas de verdade — é redação de segurança da própria Vercel, não o estado real. Um valor vazio no pull é indício, nunca prova; confirmar via comportamento observado (teste direto contra o serviço, log de erro específico) ou perguntando ao dono do projeto, nunca só pelo `env pull`.
 - **Ambientes separados:** projeto Supabase de dev ≠ produção; chaves distintas; NUNCA dados reais (telefones/dívidas de verdade) em dev ou teste. Segredo de produção nunca marcado para Preview na Vercel quando previews são publicamente acessíveis.
 
 ## 7. Pagamentos (Mercado Pago + EfiBank PIX)
