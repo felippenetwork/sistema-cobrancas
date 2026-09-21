@@ -15,7 +15,7 @@ Mas a migração de arquitetura (worker/Baileys → uazapi direto) abriu buracos
 2. ~~**Qualquer atendente lia e alterava as credenciais da conta (SEG-N4)**~~ — **resolvido** (migration `0033_papeis_na_conta.sql`; 21 testes provam em Postgres real que só dono/admin conseguem).
 3. **Não existe landing page, preço público nem cadastro self-service** — o domínio manda direto pro login. É a lacuna que mais impede vender.
 
-Outros pontos que pedem decisão sua: **RN-C1** (reanalisado: é decisão de produto, ver `regras-financeiras` §2.2) e **SEG-N5** (webhook EfiBank confia no corpo da notificação; confirmar via API exige o escopo `cob.read`).
+Outros pontos que pedem decisão sua: **SEG-N5** (webhook EfiBank confia no corpo da notificação; confirmar via API exige o escopo `cob.read`).
 
 ---
 
@@ -57,7 +57,7 @@ Outros pontos que pedem decisão sua: **RN-C1** (reanalisado: é decisão de pro
 
 | ID | Status | Gravidade | Achado | Arquivo:linha |
 |---|---|---|---|---|
-| **RN-C1** | ⚠️ **REANALISADO (2026-09-19) — é decisão de produto, não bug simples** | **DECISÃO** | Eram "3 lugares", na verdade **4** (`baixarParcelaAction`, `baixarParcelaComConfirmacaoAction`, `renovarParcelaAction`, webhook EfiBank) que geram a próxima parcela na baixa — deliberadamente ("garante UX imediata"; o modal tem "próximo vencimento" editável que depende disso). E o scheduler **não** gera por data como a regra escrita afirma: só cria a próxima quando não há NENHUMA parcela aberta. Remover a geração na baixa (minha proposta anterior) quebraria o modal e a contagem de "Cobranças ativas" até o cron rodar. Nada foi alterado. Opções e custos em `regras-financeiras` §2.2 | `cobrancas/_actions/parcelas.ts`, `atendimento/_actions/renovar.ts`, `webhooks/efibank/route.ts`, `cron/scheduler/route.ts` |
+| **RN-C1** | ✅ **DECIDIDO (2026-09-21)** | — | Decisão do Felippe: manter a geração na baixa + scheduler de segurança (opção 1 de `regras-financeiras` §2.2), mais uma correção adicional — a criação da cobrança recorrente também estava gerando um lote de 3 parcelas "de cobertura inicial" em vez de só a próxima, achado real num card de cliente (Thomaz Martins, #2/#3 abertas simultaneamente). Uma recorrente agora nunca tem mais de 1 parcela aberta: `gerarParcelasRecorrentes` (`lib/utils/parcelas.ts`) cria sempre 1; os 4 caminhos de geração-na-baixa e o scheduler não mudaram (já geravam 1 por vez, correto). Teste vermelho/verde em `tests/utils.test.ts`. Não retroativo — cobranças já existentes com mais de 1 parcela aberta não foram limpas | `lib/utils/parcelas.ts`, `tests/utils.test.ts` |
 | RN-A1 | ✅ RESOLVIDO | — | Baixa agora é RPC transacional (`baixar_parcela`, migration 0013) — parcela+lançamento+cancelamento em uma transação | `0013_baixar_parcela_rpc.sql` |
 | RN-A2 | 🔁 melhorou | BAIXO | Passos secundários (notificação, próxima parcela) ainda fora da transação mas agora logam erro | `parcelas.ts` |
 | RN-M1, M2 | ✅ RESOLVIDOS | — | Boas-vindas respeita config de canal; janela/intervalo lidos de `configuracoes` no caminho ativo | `cobrancas.ts:119-137`; `cron/whatsapp-uazapi/route.ts:229-247` |
@@ -151,7 +151,7 @@ Isso é mais estrutural do que qualquer bug encontrado:
 2. ~~**SEG-A6**~~ ✅ feito em 2026-09-19
 3. ~~**ISO-N3**~~ ✅ feito em 2026-09-19 (+ ISO-M2 de brinde)
 4. ~~**SEG-N4**~~ ✅ feito em 2026-09-19 (migration 0033 + service role nos fluxos do atendente)
-5. **RN-C1** — reanalisado: contradição entre a regra escrita e o produto, precisa de decisão do Felippe entre 3 opções (ver skill `regras-financeiras` §2.2). Não é para remover a geração na baixa
+5. ~~**RN-C1**~~ ✅ decidido em 2026-09-21 (ver skill `regras-financeiras` §2.2) — recorrente nunca tem mais de 1 parcela aberta; criação da cobrança corrigida para gerar só 1
 
 **Passos manuais pendentes para a Onda 0 funcionar em produção** — a correção de código sozinha faz o webhook de mensagens recusar tudo até isso ser feito:
 - Aplicar a migration `supabase/migrations/0032_meta_app_secret.sql` no Supabase (adiciona `configuracoes.meta_app_secret`)

@@ -7,6 +7,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
   calcularVencimento,
   gerarParcelasFixas,
+  gerarParcelasRecorrentes,
   calcularStatusVisual,
   badgesCobranca,
 } from '@/lib/utils/parcelas'
@@ -109,6 +110,30 @@ describe('gerarParcelasFixas', () => {
     const result = gerarParcelasFixas(COB, CONTA, INICIO, 31, 100, 2)
     expect(result[0].data_vencimento).toBe('2025-01-31')
     expect(result[1].data_vencimento).toBe('2025-02-28') // fev 2025
+  })
+})
+
+// ── gerarParcelasRecorrentes (RN-C1, decisão 2026-09-21) ─────────────────────
+// Uma cobrança recorrente nunca tem mais de 1 parcela aberta ao mesmo tempo —
+// a próxima só nasce quando esta é paga (ou pelo scheduler, como rede de
+// segurança). Criar a cobrança não pode pré-gerar um lote como se fosse
+// parcela fixa: isso deixava parcelas futuras "penduradas" sem terem vencido.
+describe('gerarParcelasRecorrentes', () => {
+  const CONTA  = 'conta-123'
+  const COB    = 'cobranca-456'
+  const INICIO = new Date(2025, 0, 1) // jan 2025
+
+  it('gera SOMENTE 1 parcela, nunca um lote', () => {
+    const result = gerarParcelasRecorrentes(COB, CONTA, INICIO, 10, 150)
+    expect(result).toHaveLength(1)
+  })
+
+  it('a única parcela é a número 1, com o valor e o primeiro vencimento informados', () => {
+    const result = gerarParcelasRecorrentes(COB, CONTA, INICIO, 10, 150)
+    expect(result[0]).toMatchObject({
+      conta_id: CONTA, cobranca_id: COB, numero: 1, valor: 150,
+      data_vencimento: '2025-01-10', status: 'aberta',
+    })
   })
 })
 
