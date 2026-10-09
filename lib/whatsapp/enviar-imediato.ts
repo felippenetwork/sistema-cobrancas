@@ -100,7 +100,7 @@ export async function enviarWhatsAppImediato(
   try {
     textoMensagem = tipo === 'agendada'
       ? await resolverVariaveisLeves(supabase, { contaId, clienteId, template })
-      : await resolverVariaveis(supabase, { contaId, parcelaId: pid as string, clienteId, template, cobrancaId })
+      : await resolverVariaveis(supabase, { contaId, parcelaId: pid as string, clienteId, template, cobrancaId, tipo })
   } catch (err) {
     if (err instanceof VariaveisIndisponiveisError && err.motivo === 'nao_encontrado') {
       await liberar('dados_inexistentes')

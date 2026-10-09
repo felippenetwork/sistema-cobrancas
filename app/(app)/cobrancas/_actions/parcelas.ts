@@ -104,46 +104,12 @@ export async function baixarParcelaAction(formData: FormData) {
   const cobrancaId = result.cobranca_id as string
   const contaIdDaParcela = result.conta_id as string
 
-  // Passo 5: enfileirar confirmação de pagamento
   const clienteId = result.cliente_id as string | null
-  if (clienteId) {
-    const { data: cfgPag } = await supabase
-      .from('notificacoes_config')
-      .select('ativo_whatsapp, ativo_email')
-      .eq('conta_id', contaIdDaParcela)
-      .eq('tipo', 'pagamento_confirmado')
-      .maybeSingle()
 
-    const agora     = new Date().toISOString()
-    const baseNotif = {
-      conta_id:      contaIdDaParcela,
-      parcela_id:    parcelaId,
-      cobranca_id:   cobrancaId,
-      cliente_id:    clienteId,
-      tipo:          'pagamento_confirmado' as const,
-      status:        'fila' as const,
-      agendado_para: agora,
-    }
-
-    if (cfgPag?.ativo_whatsapp) {
-      const { data: notifWa, error: confWaErr } = await supabase
-        .from('notificacoes_enviadas')
-        .insert({ ...baseNotif, canal: 'whatsapp' as const })
-        .select('id').single()
-      if (confWaErr) console.error('[baixarParcela] pagamento_confirmado.whatsapp', confWaErr)
-      else if (notifWa?.id) {
-        await enviarWhatsAppImediato(contaIdDaParcela, notifWa.id, parcelaId, cobrancaId, clienteId, 'pagamento_confirmado')
-      }
-    }
-    if (cfgPag?.ativo_email) {
-      const { error: confEmErr } = await supabase
-        .from('notificacoes_enviadas').insert({ ...baseNotif, canal: 'email' as const })
-      if (confEmErr) console.error('[baixarParcela] pagamento_confirmado.email', confEmErr)
-    }
-  }
-
-  // Passo 6: recorrente → gerar próxima parcela imediatamente se não sobrou nenhuma aberta.
-  //          O scheduler (1h) serve de safety net; aqui garante UX imediata.
+  // Passo 5: recorrente → gerar próxima parcela imediatamente se não sobrou nenhuma aberta.
+  //          O scheduler (1h) serve de safety net; aqui garante UX imediata. Roda ANTES da
+  //          confirmação de pagamento (passo 6): #VENCIMENTO# na mensagem usa a próxima parcela em
+  //          aberto (ver resolverVariaveis), que precisa já existir quando a mensagem é montada.
   if (result.recorrente) {
     const { data: cob } = await supabase
       .from('cobrancas')
@@ -186,6 +152,43 @@ export async function baixarParcelaAction(formData: FormData) {
         })
         if (nextErr) console.error('[baixarParcela] proxima_parcela.insert', nextErr, { cobrancaId })
       }
+    }
+  }
+
+  // Passo 6: enfileirar confirmação de pagamento
+  if (clienteId) {
+    const { data: cfgPag } = await supabase
+      .from('notificacoes_config')
+      .select('ativo_whatsapp, ativo_email')
+      .eq('conta_id', contaIdDaParcela)
+      .eq('tipo', 'pagamento_confirmado')
+      .maybeSingle()
+
+    const agora     = new Date().toISOString()
+    const baseNotif = {
+      conta_id:      contaIdDaParcela,
+      parcela_id:    parcelaId,
+      cobranca_id:   cobrancaId,
+      cliente_id:    clienteId,
+      tipo:          'pagamento_confirmado' as const,
+      status:        'fila' as const,
+      agendado_para: agora,
+    }
+
+    if (cfgPag?.ativo_whatsapp) {
+      const { data: notifWa, error: confWaErr } = await supabase
+        .from('notificacoes_enviadas')
+        .insert({ ...baseNotif, canal: 'whatsapp' as const })
+        .select('id').single()
+      if (confWaErr) console.error('[baixarParcela] pagamento_confirmado.whatsapp', confWaErr)
+      else if (notifWa?.id) {
+        await enviarWhatsAppImediato(contaIdDaParcela, notifWa.id, parcelaId, cobrancaId, clienteId, 'pagamento_confirmado')
+      }
+    }
+    if (cfgPag?.ativo_email) {
+      const { error: confEmErr } = await supabase
+        .from('notificacoes_enviadas').insert({ ...baseNotif, canal: 'email' as const })
+      if (confEmErr) console.error('[baixarParcela] pagamento_confirmado.email', confEmErr)
     }
   }
 
@@ -257,40 +260,12 @@ export async function baixarParcelaComConfirmacaoAction(
     if (updParErr) console.error('[baixarComConfirmacao] update.parcelas.valor', updParErr)
   }
 
-  // Passo 5: enfileirar confirmação de pagamento
   const clienteId = result.cliente_id as string | null
-  if (clienteId) {
-    const { data: cfgPag } = await supabase
-      .from('notificacoes_config').select('ativo_whatsapp, ativo_email')
-      .eq('conta_id', contaIdFinal).eq('tipo', 'pagamento_confirmado').maybeSingle()
 
-    const agora     = new Date().toISOString()
-    const baseNotif = {
-      conta_id:      contaIdFinal,
-      parcela_id:    parcelaId,
-      cobranca_id:   cobrancaIdFinal,
-      cliente_id:    clienteId,
-      tipo:          'pagamento_confirmado' as const,
-      status:        'fila'                as const,
-      agendado_para: agora,
-    }
-    if (cfgPag?.ativo_whatsapp) {
-      const { data: notifWa, error: e } = await supabase
-        .from('notificacoes_enviadas')
-        .insert({ ...baseNotif, canal: 'whatsapp' as const })
-        .select('id').single()
-      if (e) console.error('[baixarComConfirmacao] notif.whatsapp', e)
-      else if (notifWa?.id) {
-        await enviarWhatsAppImediato(contaIdFinal, notifWa.id, parcelaId, cobrancaIdFinal, clienteId, 'pagamento_confirmado')
-      }
-    }
-    if (cfgPag?.ativo_email) {
-      const { error: e } = await supabase.from('notificacoes_enviadas').insert({ ...baseNotif, canal: 'email' as const })
-      if (e) console.error('[baixarComConfirmacao] notif.email', e)
-    }
-  }
-
-  // Passo 6: recorrente → gerar próxima parcela com vencimento informado ou calculado
+  // Passo 5: recorrente → gerar próxima parcela com vencimento informado ou calculado. Roda ANTES
+  // da confirmação de pagamento (passo 6): #VENCIMENTO# na mensagem usa a próxima parcela em
+  // aberto (ver resolverVariaveis), que precisa já existir quando a mensagem é montada — é a data
+  // escolhida aqui no modal que precisa chegar ao cliente, não a da parcela que acabou de ser paga.
   if (result.recorrente && cob) {
     const { count: abertas } = await supabase
       .from('parcelas').select('*', { count: 'exact', head: true })
@@ -320,6 +295,38 @@ export async function baixarParcelaComConfirmacaoAction(
         })
         if (nextErr) console.error('[baixarComConfirmacao] proxima_parcela', nextErr, { cobrancaId: cobrancaIdFinal })
       }
+    }
+  }
+
+  // Passo 6: enfileirar confirmação de pagamento
+  if (clienteId) {
+    const { data: cfgPag } = await supabase
+      .from('notificacoes_config').select('ativo_whatsapp, ativo_email')
+      .eq('conta_id', contaIdFinal).eq('tipo', 'pagamento_confirmado').maybeSingle()
+
+    const agora     = new Date().toISOString()
+    const baseNotif = {
+      conta_id:      contaIdFinal,
+      parcela_id:    parcelaId,
+      cobranca_id:   cobrancaIdFinal,
+      cliente_id:    clienteId,
+      tipo:          'pagamento_confirmado' as const,
+      status:        'fila'                as const,
+      agendado_para: agora,
+    }
+    if (cfgPag?.ativo_whatsapp) {
+      const { data: notifWa, error: e } = await supabase
+        .from('notificacoes_enviadas')
+        .insert({ ...baseNotif, canal: 'whatsapp' as const })
+        .select('id').single()
+      if (e) console.error('[baixarComConfirmacao] notif.whatsapp', e)
+      else if (notifWa?.id) {
+        await enviarWhatsAppImediato(contaIdFinal, notifWa.id, parcelaId, cobrancaIdFinal, clienteId, 'pagamento_confirmado')
+      }
+    }
+    if (cfgPag?.ativo_email) {
+      const { error: e } = await supabase.from('notificacoes_enviadas').insert({ ...baseNotif, canal: 'email' as const })
+      if (e) console.error('[baixarComConfirmacao] notif.email', e)
     }
   }
 

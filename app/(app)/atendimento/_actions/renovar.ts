@@ -211,42 +211,9 @@ export async function renovarParcelaAction(parcelaId: string, cobrancaId: string
   const contaIdFinal = result.conta_id as string
   const clienteId    = result.cliente_id as string | null
 
-  // Notificação WhatsApp
-  if (clienteId) {
-    const { data: cfgPag } = await admin
-      .from('notificacoes_config')
-      .select('ativo_whatsapp, ativo_email')
-      .eq('conta_id', contaIdFinal)
-      .eq('tipo', 'pagamento_confirmado')
-      .maybeSingle()
-
-    const agora     = new Date().toISOString()
-    const baseNotif = {
-      conta_id:      contaIdFinal,
-      parcela_id:    parcelaId,
-      cobranca_id:   cobrancaId,
-      cliente_id:    clienteId,
-      tipo:          'pagamento_confirmado' as const,
-      status:        'fila'                as const,
-      agendado_para: agora,
-    }
-
-    if (cfgPag?.ativo_whatsapp) {
-      const { data: notifWa, error: e } = await admin
-        .from('notificacoes_enviadas')
-        .insert({ ...baseNotif, canal: 'whatsapp' as const })
-        .select('id').single()
-      if (e) console.error('[renovarParcela] notif.whatsapp', e)
-      else if (notifWa?.id) {
-        await enviarWhatsAppImediato(contaIdFinal, notifWa.id, parcelaId, cobrancaId, clienteId, 'pagamento_confirmado')
-      }
-    }
-    if (cfgPag?.ativo_email) {
-      await admin.from('notificacoes_enviadas').insert({ ...baseNotif, canal: 'email' as const })
-    }
-  }
-
-  // Gerar próxima parcela se recorrente
+  // Gerar próxima parcela se recorrente — ANTES da notificação: #VENCIMENTO# na mensagem de
+  // confirmação usa a próxima parcela em aberto (ver resolverVariaveis), que precisa já existir
+  // quando a mensagem é montada.
   if (result.recorrente) {
     const { data: cob } = await supabase
       .from('cobrancas')
@@ -288,6 +255,41 @@ export async function renovarParcelaAction(parcelaId: string, cobrancaId: string
           status:          'aberta',
         })
       }
+    }
+  }
+
+  // Notificação WhatsApp
+  if (clienteId) {
+    const { data: cfgPag } = await admin
+      .from('notificacoes_config')
+      .select('ativo_whatsapp, ativo_email')
+      .eq('conta_id', contaIdFinal)
+      .eq('tipo', 'pagamento_confirmado')
+      .maybeSingle()
+
+    const agora     = new Date().toISOString()
+    const baseNotif = {
+      conta_id:      contaIdFinal,
+      parcela_id:    parcelaId,
+      cobranca_id:   cobrancaId,
+      cliente_id:    clienteId,
+      tipo:          'pagamento_confirmado' as const,
+      status:        'fila'                as const,
+      agendado_para: agora,
+    }
+
+    if (cfgPag?.ativo_whatsapp) {
+      const { data: notifWa, error: e } = await admin
+        .from('notificacoes_enviadas')
+        .insert({ ...baseNotif, canal: 'whatsapp' as const })
+        .select('id').single()
+      if (e) console.error('[renovarParcela] notif.whatsapp', e)
+      else if (notifWa?.id) {
+        await enviarWhatsAppImediato(contaIdFinal, notifWa.id, parcelaId, cobrancaId, clienteId, 'pagamento_confirmado')
+      }
+    }
+    if (cfgPag?.ativo_email) {
+      await admin.from('notificacoes_enviadas').insert({ ...baseNotif, canal: 'email' as const })
     }
   }
 

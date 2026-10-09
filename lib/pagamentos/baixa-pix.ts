@@ -90,12 +90,15 @@ export async function baixarPixPago(
     try { await fn() } catch (err) { console.error(`${log} ${nome} falhou`, { txid, contaId: contaIdFinal, err }) }
   }
 
-  if (clienteId) {
-    await efeito('confirmação por WhatsApp', () => confirmarPorWhatsApp(supabase, { contaId: contaIdFinal, parcelaId, cobrancaId, clienteId }))
-  }
-
+  // Próxima parcela recorrente ANTES da confirmação por WhatsApp: #VENCIMENTO# na mensagem usa a
+  // próxima parcela em aberto da cobrança (ver resolverVariaveis), que precisa já existir quando a
+  // mensagem é montada.
   if (result.recorrente) {
     await efeito('próxima parcela', () => gerarProximaParcela(supabase, { contaId: contaIdFinal, cobrancaId }, log))
+  }
+
+  if (clienteId) {
+    await efeito('confirmação por WhatsApp', () => confirmarPorWhatsApp(supabase, { contaId: contaIdFinal, parcelaId, cobrancaId, clienteId }))
   }
 
   return 'processado'

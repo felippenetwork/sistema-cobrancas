@@ -213,7 +213,7 @@ async function enviarNotificacao(
 
     try {
       mensagem = await resolverVariaveis(supabase, {
-        contaId, parcelaId, clienteId: notif.cliente_id, template, cobrancaId: notif.cobranca_id,
+        contaId, parcelaId, clienteId: notif.cliente_id, template, cobrancaId: notif.cobranca_id, tipo: notif.tipo,
       })
     } catch (err) {
       return semVariaveis(err)

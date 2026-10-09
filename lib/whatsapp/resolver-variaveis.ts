@@ -57,8 +57,8 @@ export async function resolverVariaveisLeves(
 
 export async function resolverVariaveis(
   supabase: AnySupabase,
-  { contaId, parcelaId, clienteId, template, cobrancaId }: {
-    contaId: string; parcelaId: string; clienteId: string; template: string; cobrancaId?: string | null
+  { contaId, parcelaId, clienteId, template, cobrancaId, tipo }: {
+    contaId: string; parcelaId: string; clienteId: string; template: string; cobrancaId?: string | null; tipo?: string
   },
 ): Promise<string> {
   // Meio de pagamento: específico da cobrança (se informado) ou o padrão da conta.
@@ -84,11 +84,26 @@ export async function resolverVariaveis(
     return padrao.data?.mensagem ?? null
   }
 
-  const [parcela, cliente, saudacoes, pix] = await Promise.all([
+  // Para "pagamento confirmado", #VENCIMENTO# é o vencimento da PRÓXIMA parcela em aberto da
+  // cobrança — a mensagem comunica quando é o próximo pagamento, não quando era o que acabou de
+  // ser pago (parcela já paga/fechada no momento em que esta mensagem é montada). Sem próxima
+  // aberta (última parcela de uma cobrança fixa), cai no vencimento da própria parcela.
+  async function buscarVencimentoProximo(): Promise<string | null> {
+    if (tipo !== 'pagamento_confirmado' || !template.includes('#VENCIMENTO#') || !cobrancaId) return null
+    const proxima = await supabase
+      .from('parcelas').select('data_vencimento')
+      .eq('cobranca_id', cobrancaId).eq('conta_id', contaId).eq('status', 'aberta')
+      .order('numero', { ascending: true }).limit(1).maybeSingle()
+    if (proxima.error) throw new VariaveisIndisponiveisError('erro_banco', `próxima parcela: ${proxima.error.message}`)
+    return (proxima.data as { data_vencimento: string } | null)?.data_vencimento ?? null
+  }
+
+  const [parcela, cliente, saudacoes, pix, vencimentoProximo] = await Promise.all([
     supabase.from('parcelas').select('valor, data_vencimento').eq('id', parcelaId).eq('conta_id', contaId).maybeSingle(),
     supabase.from('clientes').select('nome, sobrenome').eq('id', clienteId).eq('conta_id', contaId).maybeSingle(),
     supabase.from('saudacoes').select('texto').eq('conta_id', contaId),
     buscarPix(),
+    buscarVencimentoProximo(),
   ])
 
   const dadosParcela = exigir<{ valor: number; data_vencimento: string }>(parcela, 'parcela')
@@ -100,6 +115,6 @@ export async function resolverVariaveis(
     nome:         dadosCliente.nome ?? '',
     pix:          pix ?? '(Pix não configurado)',
     saudacao:     escolherSaudacao(saudacoes),
-    vencimento:   formatData(dadosParcela.data_vencimento),
+    vencimento:   formatData(vencimentoProximo ?? dadosParcela.data_vencimento),
   })
 }

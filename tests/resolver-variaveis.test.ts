@@ -84,6 +84,62 @@ describe('resolverVariaveis', () => {
     expect(await resolverVariaveis(supabase, { ...base, template: '#SAUDACAO#' })).toBe('Olá!')
   })
 
+  // Bug relatado pelo Felippe (2026-10-08): no modal "Confirmar Pagamento", a data escolhida em
+  // "Próximo pagamento" não aparecia na mensagem enviada ao cliente. Causa: #VENCIMENTO# sempre
+  // vinha da parcela que acabou de ser paga (a amarrada à notificação), nunca da próxima parcela em
+  // aberto — que é a data que o dono efetivamente escolheu/gerou na tela.
+  describe('#VENCIMENTO# em pagamento_confirmado', () => {
+    function cenarioComProxima() {
+      const { db, supabase } = cenario()
+      db.linhas('parcelas').push(
+        { id: 'p2', conta_id: CONTA, cobranca_id: 'cob1', numero: 2, valor: 1234.5, data_vencimento: '2026-12-25', status: 'aberta' },
+      )
+      db.linhas('parcelas')[0].cobranca_id = 'cob1'
+      db.linhas('parcelas')[0].numero = 1
+      db.linhas('parcelas')[0].status = 'paga'
+      return { db, supabase }
+    }
+
+    it('usa o vencimento da PRÓXIMA parcela em aberto da cobrança, não o da parcela paga', async () => {
+      const { supabase } = cenarioComProxima()
+      const texto = await resolverVariaveis(supabase, {
+        ...base, cobrancaId: 'cob1', tipo: 'pagamento_confirmado', template: 'vence em #VENCIMENTO#',
+      })
+      expect(texto).toBe('vence em 25/12/2026')
+    })
+
+    it('sem próxima parcela em aberto (última de uma cobrança fixa): cai no vencimento da parcela paga', async () => {
+      const { db, supabase } = cenario()
+      db.linhas('parcelas')[0].cobranca_id = 'cob1'
+      db.linhas('parcelas')[0].status = 'paga'
+      const texto = await resolverVariaveis(supabase, {
+        ...base, cobrancaId: 'cob1', tipo: 'pagamento_confirmado', template: 'vence em #VENCIMENTO#',
+      })
+      expect(texto).toBe('vence em 05/10/2026')
+    })
+
+    it('outros tipos (lembrete, manual) continuam usando o vencimento da PRÓPRIA parcela — não regride', async () => {
+      const { supabase } = cenarioComProxima()
+      const texto = await resolverVariaveis(supabase, {
+        ...base, cobrancaId: 'cob1', tipo: '3d', template: 'vence em #VENCIMENTO#',
+      })
+      expect(texto).toBe('vence em 05/10/2026')
+    })
+
+    it('sem #VENCIMENTO# no template não consulta a próxima parcela (nada para falhar por dado não usado)', async () => {
+      const { db, supabase } = cenarioComProxima()
+      db.falhas.push({ tabela: 'parcelas', operacao: 'select', quando: c => c.filtros.some(f => f.col === 'status' && f.val === 'aberta'), vezes: 99 })
+      await expect(resolverVariaveis(supabase, { ...base, cobrancaId: 'cob1', tipo: 'pagamento_confirmado', template: '#NOME#' })).resolves.toBe('Maria')
+    })
+
+    it('erro ao consultar a próxima parcela lança erro_banco (nunca manda a data da parcela errada por engano)', async () => {
+      const { db, supabase } = cenarioComProxima()
+      db.falhas.push({ tabela: 'parcelas', operacao: 'select', quando: c => c.filtros.some(f => f.col === 'status' && f.val === 'aberta'), vezes: 1 })
+      await expect(resolverVariaveis(supabase, { ...base, cobrancaId: 'cob1', tipo: 'pagamento_confirmado', template: '#VENCIMENTO#' }))
+        .rejects.toMatchObject({ motivo: 'erro_banco' })
+    })
+  })
+
   describe('#PIX#', () => {
     it('sem #PIX# no template não consulta meios de pagamento (nada para falhar por dado não usado)', async () => {
       const { db, supabase } = cenario()
