@@ -46,7 +46,7 @@ describe('criarCobrancaPix', () => {
     const res = await criarCobrancaPix(CONTA, PARCELA, 150, 'Mensalidade')
     expect(res).toMatchObject({ txid: 'TX123', pixCopiaCola: '000201PIXCOPIACOLA' })
     expect(db.linhas('cobrancas_pix')).toHaveLength(1)
-    expect(db.linhas('cobrancas_pix')[0]).toMatchObject({ conta_id: CONTA, parcela_id: PARCELA, txid: 'TX123', status: 'ativa', valor: 150 })
+    expect(db.linhas('cobrancas_pix')[0]).toMatchObject({ conta_id: CONTA, parcela_id: PARCELA, provedor: 'efibank', txid: 'TX123', status: 'ativa', valor: 150 })
   })
 
   it('se NÃO conseguir gravar a cobrança, devolve erro e NÃO entrega o código PIX (senão o pagamento não seria reconhecido)', async () => {
@@ -64,7 +64,7 @@ describe('criarCobrancaPix', () => {
 
   it('reutiliza a cobrança ativa e ainda não expirada em vez de criar outra', async () => {
     cenario([{
-      id: 'x', conta_id: CONTA, parcela_id: PARCELA, txid: 'TX-ANTIGO', status: 'ativa',
+      id: 'x', conta_id: CONTA, parcela_id: PARCELA, provedor: 'efibank', valor: 150, txid: 'TX-ANTIGO', status: 'ativa',
       pix_copia_cola: '000201ANTIGO', qr_code_base64: null, link_pagamento: null,
       expira_em: new Date(Date.now() + 30 * 60_000).toISOString(),
     }])
@@ -75,7 +75,7 @@ describe('criarCobrancaPix', () => {
 
   it('cobrança expirada não é reutilizada', async () => {
     cenario([{
-      id: 'x', conta_id: CONTA, parcela_id: PARCELA, txid: 'TX-VELHO', status: 'ativa',
+      id: 'x', conta_id: CONTA, parcela_id: PARCELA, provedor: 'efibank', valor: 150, txid: 'TX-VELHO', status: 'ativa',
       pix_copia_cola: '000201VELHO', expira_em: new Date(Date.now() - 60_000).toISOString(),
     }])
     const res = await criarCobrancaPix(CONTA, PARCELA, 150)
@@ -85,11 +85,38 @@ describe('criarCobrancaPix', () => {
 
   it('cobrança ativa de OUTRA conta não é reutilizada', async () => {
     cenario([{
-      id: 'x', conta_id: 'conta-2', parcela_id: PARCELA, txid: 'TX-OUTRA', status: 'ativa',
+      id: 'x', conta_id: 'conta-2', parcela_id: PARCELA, provedor: 'efibank', valor: 150, txid: 'TX-OUTRA', status: 'ativa',
       pix_copia_cola: '000201OUTRA', expira_em: new Date(Date.now() + 30 * 60_000).toISOString(),
     }])
     const res = await criarCobrancaPix(CONTA, PARCELA, 150)
     expect(res).toMatchObject({ txid: 'TX123' })
+  })
+
+  it('cobrança ativa de OUTRO provedor (Mercado Pago) não é reutilizada', async () => {
+    cenario([{
+      id: 'x', conta_id: CONTA, parcela_id: PARCELA, provedor: 'mercadopago', valor: 150, txid: '5466310457', status: 'ativa',
+      pix_copia_cola: '000201MERCADOPAGO', expira_em: new Date(Date.now() + 30 * 60_000).toISOString(),
+    }])
+    const res = await criarCobrancaPix(CONTA, PARCELA, 150)
+    expect(res).toMatchObject({ txid: 'TX123' })
+    expect(mocks.efiAuthRequest).toHaveBeenCalled()
+  })
+
+  it('parcela com valor editado: o PIX ativo com o valor antigo não é reutilizado (senão cobra o valor errado)', async () => {
+    cenario([{
+      id: 'x', conta_id: CONTA, parcela_id: PARCELA, provedor: 'efibank', valor: 100, txid: 'TX-VALOR-ANTIGO', status: 'ativa',
+      pix_copia_cola: '000201ANTIGO', expira_em: new Date(Date.now() + 30 * 60_000).toISOString(),
+    }])
+    const res = await criarCobrancaPix(CONTA, PARCELA, 150)
+    expect(res).toMatchObject({ txid: 'TX123' })
+    expect(mocks.efiAuthRequest).toHaveBeenCalled()
+  })
+
+  it('erro ao consultar cobranças PIX existentes: devolve erro em vez de gerar um segundo PIX às cegas', async () => {
+    const db = cenario()
+    db.falhas.push({ tabela: 'cobrancas_pix', operacao: 'select', vezes: 1 })
+    expect(await criarCobrancaPix(CONTA, PARCELA, 150)).toHaveProperty('erro')
+    expect(mocks.efiAuthRequest).not.toHaveBeenCalled()
   })
 
   it('EfiBank não configurada na conta: devolve erro sem chamar a API', async () => {

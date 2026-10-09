@@ -1,15 +1,8 @@
 import { createAdminClient } from '@/lib/supabase/admin'
+import { PIX_EXPIRACAO_SEG, type PixGerado } from '@/lib/pagamentos/tipos'
 import { getEfiCreds, getEfiToken, efiAuthRequest, efiBaseUrl } from './client'
 
-export type PixGerado = {
-  txid:          string
-  pixCopiaCola:  string
-  qrCodeBase64:  string | null
-  linkPagamento: string | null
-  expiraEm:      string
-}
-
-const EXPIRACAO_SEG = 3600 // 1h
+const EXPIRACAO_SEG = PIX_EXPIRACAO_SEG
 
 export async function criarCobrancaPix(
   contaId:   string,
@@ -22,16 +15,22 @@ export async function criarCobrancaPix(
 
   const supabase = createAdminClient()
 
-  // Reutiliza cobrança ativa não expirada
-  const { data: existing } = await supabase
+  // Reutiliza cobrança ativa, não expirada, deste provedor e com o mesmo valor (parcela editada gera outro PIX)
+  const { data: existing, error: existingErr } = await supabase
     .from('cobrancas_pix')
     .select('txid, pix_copia_cola, qr_code_base64, link_pagamento, expira_em')
     .eq('conta_id', contaId)
     .eq('parcela_id', parcelaId)
+    .eq('provedor', 'efibank')
     .eq('status', 'ativa')
+    .eq('valor', valor)
     .gt('expira_em', new Date().toISOString())
     .maybeSingle()
 
+  if (existingErr) {
+    console.error('[criarCobrancaPix] leitura de cobrancas_pix falhou', { contaId, parcelaId, existingErr })
+    return { erro: 'Não foi possível consultar as cobranças PIX. Tente novamente.' }
+  }
   if (existing?.pix_copia_cola && existing.expira_em) {
     return {
       txid:          existing.txid,
@@ -87,6 +86,7 @@ export async function criarCobrancaPix(
     const { error: persistErr } = await supabase.from('cobrancas_pix').upsert({
       conta_id:       contaId,
       parcela_id:     parcelaId,
+      provedor:       'efibank',
       txid,
       valor,
       status:         'ativa',

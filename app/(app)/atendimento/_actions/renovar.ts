@@ -1,10 +1,12 @@
 'use server'
 
+import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { calcularVencimento } from '@/lib/utils/parcelas'
 import { enviarWhatsAppImediato } from '@/lib/whatsapp/enviar-imediato'
-import { criarCobrancaPix, type PixGerado } from '@/lib/efibank/pix'
+import { criarCobrancaPixDaConta } from '@/lib/pagamentos/pix'
+import type { PixGerado } from '@/lib/pagamentos/tipos'
 
 export type ActionState = { error: string | null; success?: boolean }
 
@@ -116,12 +118,14 @@ async function resolverContaId(supabase: Awaited<ReturnType<typeof createClient>
   return (membro as any)?.conta_id ?? null
 }
 
-// Gera uma cobrança PIX via EfiBanK para a parcela aberta do cliente
+// Gera a cobrança PIX da parcela pelo provedor ativo da conta (EfiBank ou Mercado Pago).
+// O valor é o da parcela no banco — nunca o que o navegador mandar.
 export async function gerarPixParcelaAction(
   parcelaId: string,
-  valor: number,
   descricao?: string,
 ): Promise<(PixGerado & { error?: undefined }) | { error: string }> {
+  if (!z.string().uuid().safeParse(parcelaId).success) return { error: 'Parcela inválida.' }
+
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: 'Não autenticado.' }
@@ -129,7 +133,7 @@ export async function gerarPixParcelaAction(
   const contaId = await resolverContaId(supabase, user.id)
   if (!contaId) return { error: 'Conta não encontrada.' }
 
-  const result = await criarCobrancaPix(contaId, parcelaId, valor, descricao)
+  const result = await criarCobrancaPixDaConta(contaId, parcelaId, descricao)
   if ('erro' in result) return { error: result.erro }
   return result
 }

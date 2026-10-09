@@ -671,7 +671,7 @@ function PainelCliente({
     const parcela = dados?.parcela
     if (!parcela) return
     setGerandoPix(true); setErroPix(null); setPixDados(null)
-    const r = await gerarPixParcelaAction(parcela.id, parcela.valor)
+    const r = await gerarPixParcelaAction(parcela.id)
     setGerandoPix(false)
     if ('error' in r) { setErroPix(r.error ?? null) } else { setPixDados(r) }
   }

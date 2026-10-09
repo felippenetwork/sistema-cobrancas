@@ -21,6 +21,8 @@ Outros pontos que pedem decisão sua: **SEG-N5** (webhook EfiBank confia no corp
 
 **Nota (2026-09-21):** a integração LookDefense (renovação IPTV/P2P na baixa) também foi removida do produto inteiro (migration `0035_remove_lookdefense.sql`, dropa `baixas_externas`, `clientes.login_externo`/`tipo_integracao` e `configuracoes.ld_username`/`ld_password`). Achados que citam `lib/lookdefense/`, `baixas_externas` ou o cron `lookdefense` (SEG-A5 no trecho da senha LookDefense, ISO-N4, SEG-N3 no trecho do cron) descrevem código que não existe mais — registro histórico, não pendência.
 
+**Nota (2026-09-21):** o Mercado Pago foi adicionado como segundo provedor de PIX do cliente final (migration `0036_mercadopago_pix.sql`; webhook próprio `/api/webhooks/mercadopago-pix`, que reconsulta o pagamento na API do provedor). `configuracoes.mp_access_token` é o **primeiro segredo cifrado em repouso** do projeto (`lib/crypto/segredos.ts`, chave `CREDENCIAIS_KEY`) — a **SEG-A5 continua aberta** para `uazapi_instance_token`, `efi_client_secret` e `efi_cert_base64`, que agora têm um helper pronto para reutilizar. O achado **SEG-N5** (webhook EfiBank confia no corpo da notificação) segue aberto: o do Mercado Pago não sofre disso.
+
 ---
 
 ## FRENTE 1 — Segurança

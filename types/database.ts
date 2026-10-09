@@ -1,4 +1,4 @@
-// Espelho do schema em supabase/migrations/*, mantido À MÃO (última sincronização: migration 0033).
+// Espelho do schema em supabase/migrations/*, mantido À MÃO (última sincronização: migration 0036).
 // Toda migration que cria/altera tabela ou coluna atualiza este arquivo na MESMA tarefa — tabela ou
 // coluna faltando aqui vira `as any` no código (foi assim que cobrancas_pix e mensagens_rapidas
 // ficaram sem tipo). Para regenerar do banco real (precisa de SUPABASE_ACCESS_TOKEN):
@@ -207,7 +207,10 @@ export type Database = {
           horario_inicio: string
           intervalo_max_seg: number
           intervalo_min_seg: number
+          mp_access_token: string | null
+          mp_webhook_secret: string | null
           nome_comercial: string | null
+          pix_provedor: string
           twilio_account_sid: string | null
           twilio_ativo: boolean
           twilio_auth_token: string | null
@@ -228,7 +231,10 @@ export type Database = {
           horario_inicio?: string
           intervalo_max_seg?: number
           intervalo_min_seg?: number
+          mp_access_token?: string | null
+          mp_webhook_secret?: string | null
           nome_comercial?: string | null
+          pix_provedor?: string
           twilio_account_sid?: string | null
           twilio_ativo?: boolean
           twilio_auth_token?: string | null
@@ -249,7 +255,10 @@ export type Database = {
           horario_inicio?: string
           intervalo_max_seg?: number
           intervalo_min_seg?: number
+          mp_access_token?: string | null
+          mp_webhook_secret?: string | null
           nome_comercial?: string | null
+          pix_provedor?: string
           twilio_account_sid?: string | null
           twilio_ativo?: boolean
           twilio_auth_token?: string | null
@@ -936,6 +945,7 @@ export type Database = {
           expira_em: string | null
           pago_em: string | null
           criado_em: string
+          provedor: string
         }
         Insert: {
           id?: string
@@ -950,6 +960,7 @@ export type Database = {
           expira_em?: string | null
           pago_em?: string | null
           criado_em?: string
+          provedor?: string
         }
         Update: {
           id?: string
@@ -964,6 +975,7 @@ export type Database = {
           expira_em?: string | null
           pago_em?: string | null
           criado_em?: string
+          provedor?: string
         }
         Relationships: [
           { foreignKeyName: 'cobrancas_pix_conta_id_fkey'; columns: ['conta_id']; isOneToOne: false; referencedRelation: 'contas'; referencedColumns: ['id'] },

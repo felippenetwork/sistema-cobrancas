@@ -190,6 +190,72 @@ describe('meios de pagamento (o texto da chave PIX enviado ao cliente)', () => {
   })
 })
 
+// Migration 0036: Mercado Pago como provedor de PIX. O Access Token e o Webhook Secret (cifrados
+// pela aplicação) moram em configuracoes — a mesma policy das demais credenciais precisa valer.
+describe('Mercado Pago (0036): token e provedor de PIX', () => {
+  const TOKEN_CIFRADO  = 'enc:v1:dGVzdGU='
+  const SECRET_CIFRADO = 'enc:v1:c2VncmVkbw=='
+
+  it('o provedor de PIX nasce como EfiBank (quem já usa não muda de comportamento)', async () => {
+    const { rows } = await db.sql<{ pix_provedor: string }>(`select pix_provedor from public.configuracoes where conta_id = $1`, [contaA])
+    expect(rows).toEqual([{ pix_provedor: 'efibank' }])
+  })
+
+  it('o banco recusa um provedor de PIX desconhecido', async () => {
+    const r = await db.sql(`update public.configuracoes set pix_provedor = 'pagseguro' where conta_id = $1`, [contaA]).then(() => 'aceitou', () => 'recusou')
+    expect(r).toBe('recusou')
+  })
+
+  it('cobrancas_pix nasce como EfiBank e recusa provedor desconhecido', async () => {
+    const eq = await criarConta(db, 'pix')
+    const cli = (await db.sql<{ id: string }>(
+      `insert into public.clientes (conta_id, nome, celular) values ($1, 'Cliente Pix', '5521900000002') returning id`, [eq.contaId])).rows[0].id
+    const cob = (await db.sql<{ id: string }>(
+      `insert into public.cobrancas (conta_id, cliente_id, valor_mensalidade, dia_pagamento, mes_ano_inicio)
+       values ($1, $2, 150, 5, '2026-10-01') returning id`, [eq.contaId, cli])).rows[0].id
+    const parcela = (await db.sql<{ id: string }>(
+      `insert into public.parcelas (conta_id, cobranca_id, numero, valor, data_vencimento)
+       values ($1, $2, 1, 150, '2026-10-05') returning id`, [eq.contaId, cob])).rows[0].id
+
+    const padrao = await db.sql<{ provedor: string }>(
+      `insert into public.cobrancas_pix (conta_id, parcela_id, txid, valor) values ($1, $2, 'TX-1', 150) returning provedor`, [eq.contaId, parcela])
+    expect(padrao.rows).toEqual([{ provedor: 'efibank' }])
+
+    const invalido = await db.sql(
+      `insert into public.cobrancas_pix (conta_id, parcela_id, txid, valor, provedor) values ($1, $2, 'TX-2', 150, 'pagseguro')`, [eq.contaId, parcela],
+    ).then(() => 'aceitou', () => 'recusou')
+    expect(invalido).toBe('recusou')
+  })
+
+  it('o dono e o administrador leem e gravam token e webhook secret; um ATENDENTE não lê nem troca', async () => {
+    await db.sql(
+      `update public.configuracoes set mp_access_token = $2, mp_webhook_secret = $3 where conta_id = $1`,
+      [contaA, TOKEN_CIFRADO, SECRET_CIFRADO],
+    )
+
+    for (const usuario of [donoA, adminA]) {
+      const r = await db.como(usuario).query(`select mp_access_token, mp_webhook_secret from public.configuracoes where conta_id = $1`, [contaA])
+      expect(r.rows).toEqual([{ mp_access_token: TOKEN_CIFRADO, mp_webhook_secret: SECRET_CIFRADO }])
+    }
+
+    const leitura = await db.como(atendenteA).query(`select mp_access_token, mp_webhook_secret from public.configuracoes where conta_id = $1`, [contaA])
+    expect(leitura.rows).toHaveLength(0)
+
+    const troca = await db.como(atendenteA).tentar(
+      `update public.configuracoes set mp_access_token = 'enc:v1:do-atacante', mp_webhook_secret = 'enc:v1:do-atacante', pix_provedor = 'mercadopago' where conta_id = $1 returning conta_id`, [contaA])
+    expect(troca.ok ? troca.rows : []).toHaveLength(0)
+    const { rows } = await db.sql<{ mp_access_token: string; mp_webhook_secret: string; pix_provedor: string }>(
+      `select mp_access_token, mp_webhook_secret, pix_provedor from public.configuracoes where conta_id = $1`, [contaA])
+    expect(rows).toEqual([{ mp_access_token: TOKEN_CIFRADO, mp_webhook_secret: SECRET_CIFRADO, pix_provedor: 'efibank' }])
+  })
+
+  it('o dono de OUTRA conta não lê nem troca o token nem o webhook secret', async () => {
+    expect((await db.como(donoB).query(`select mp_access_token, mp_webhook_secret from public.configuracoes where conta_id = $1`, [contaA])).rows).toHaveLength(0)
+    const r = await db.como(donoB).query(`update public.configuracoes set mp_access_token = 'x' where conta_id = $1 returning conta_id`, [contaA])
+    expect(r.rows).toHaveLength(0)
+  })
+})
+
 describe('o atendente continua conseguindo trabalhar (nada foi restringido além do necessário)', () => {
   it('lê os clientes da própria conta', async () => {
     const r = await db.como(atendenteA).query(`select nome from public.clientes where conta_id = $1`, [contaA])
