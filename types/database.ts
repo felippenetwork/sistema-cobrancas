@@ -1,4 +1,4 @@
-// Espelho do schema em supabase/migrations/*, mantido À MÃO (última sincronização: migration 0037).
+// Espelho do schema em supabase/migrations/*, mantido À MÃO (última sincronização: migration 0038).
 // Toda migration que cria/altera tabela ou coluna atualiza este arquivo na MESMA tarefa — tabela ou
 // coluna faltando aqui vira `as any` no código (foi assim que cobrancas_pix e mensagens_rapidas
 // ficaram sem tipo). Para regenerar do banco real (precisa de SUPABASE_ACCESS_TOKEN):
@@ -21,8 +21,9 @@ type NotifTipo         = '5d' | '3d' | '2d' | '1d' | 'dia' | 'vencido1d' | 'manu
 type ParcelaStatus      = 'aberta' | 'paga' | 'vencida'
 type ModeloCategoria   = 'UTILITY' | 'MARKETING' | 'AUTHENTICATION'
 type ModeloStatus      = 'rascunho' | 'em_analise' | 'aprovado' | 'rejeitado'
-type CampanhaStatus    = 'rascunho' | 'agendada' | 'enviando' | 'concluida' | 'cancelada'
-type DestinatarioStatus = 'pendente' | 'enviado' | 'falhou' | 'lido'
+type CampanhaStatus    = 'rascunho' | 'agendada' | 'enviando' | 'pausada' | 'concluida' | 'cancelada'
+type CampanhaTipo      = 'normal' | 'progressivo'
+type DestinatarioStatus = 'pendente' | 'enviado' | 'falhou' | 'lido' | 'pulado'
 
 export type Database = {
   public: {
@@ -664,6 +665,18 @@ export type Database = {
           iniciado_em: string | null
           concluido_em: string | null
           criado_em: string
+          tipo: CampanhaTipo
+          mensagem: string | null
+          variacoes: string[]
+          janela_inicio: string | null
+          janela_fim: string | null
+          prog_inicio: number | null
+          prog_maximo: number | null
+          prog_dia: number
+          prog_planejado_em: string | null
+          registrar_enviados: boolean
+          excluir_ja_enviados: boolean
+          total_pulados: number
         }
         Insert: {
           id?: string
@@ -678,6 +691,18 @@ export type Database = {
           iniciado_em?: string | null
           concluido_em?: string | null
           criado_em?: string
+          tipo?: CampanhaTipo
+          mensagem?: string | null
+          variacoes?: string[]
+          janela_inicio?: string | null
+          janela_fim?: string | null
+          prog_inicio?: number | null
+          prog_maximo?: number | null
+          prog_dia?: number
+          prog_planejado_em?: string | null
+          registrar_enviados?: boolean
+          excluir_ja_enviados?: boolean
+          total_pulados?: number
         }
         Update: {
           id?: string
@@ -692,6 +717,18 @@ export type Database = {
           iniciado_em?: string | null
           concluido_em?: string | null
           criado_em?: string
+          tipo?: CampanhaTipo
+          mensagem?: string | null
+          variacoes?: string[]
+          janela_inicio?: string | null
+          janela_fim?: string | null
+          prog_inicio?: number | null
+          prog_maximo?: number | null
+          prog_dia?: number
+          prog_planejado_em?: string | null
+          registrar_enviados?: boolean
+          excluir_ja_enviados?: boolean
+          total_pulados?: number
         }
         Relationships: [
           { foreignKeyName: 'campanhas_wa_conta_id_fkey'; columns: ['conta_id']; isOneToOne: false; referencedRelation: 'contas'; referencedColumns: ['id'] },
@@ -710,6 +747,9 @@ export type Database = {
           wa_id: string | null
           enviado_em: string | null
           erro: string | null
+          nome: string | null
+          ordem: number | null
+          agendado_para: string | null
         }
         Insert: {
           id?: string
@@ -722,6 +762,9 @@ export type Database = {
           wa_id?: string | null
           enviado_em?: string | null
           erro?: string | null
+          nome?: string | null
+          ordem?: number | null
+          agendado_para?: string | null
         }
         Update: {
           id?: string
@@ -734,10 +777,46 @@ export type Database = {
           wa_id?: string | null
           enviado_em?: string | null
           erro?: string | null
+          nome?: string | null
+          ordem?: number | null
+          agendado_para?: string | null
         }
         Relationships: [
           { foreignKeyName: 'campanha_dest_campanha_id_fkey'; columns: ['campanha_id']; isOneToOne: false; referencedRelation: 'campanhas_wa'; referencedColumns: ['id'] },
           { foreignKeyName: 'campanha_dest_conta_id_fkey'; columns: ['conta_id']; isOneToOne: false; referencedRelation: 'contas'; referencedColumns: ['id'] },
+        ]
+      }
+      contatos_disparados: {
+        Row: {
+          id: string
+          conta_id: string
+          celular: string
+          nome: string | null
+          campanha_id: string | null
+          primeiro_envio_em: string
+          ultimo_envio_em: string
+        }
+        Insert: {
+          id?: string
+          conta_id: string
+          celular: string
+          nome?: string | null
+          campanha_id?: string | null
+          primeiro_envio_em?: string
+          ultimo_envio_em?: string
+        }
+        Update: {
+          id?: string
+          conta_id?: string
+          celular?: string
+          nome?: string | null
+          campanha_id?: string | null
+          primeiro_envio_em?: string
+          ultimo_envio_em?: string
+        }
+        Relationships: [
+          { foreignKeyName: 'contatos_disparados_conta_id_fkey'; columns: ['conta_id']; isOneToOne: false; referencedRelation: 'contas'; referencedColumns: ['id'] },
+          { foreignKeyName: 'contatos_disparados_campanha_id_fkey'; columns: ['campanha_id']; isOneToOne: false; referencedRelation: 'campanhas_wa'; referencedColumns: ['id'] },
         ]
       }
     }

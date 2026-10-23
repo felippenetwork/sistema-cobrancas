@@ -6,7 +6,7 @@
 type Linha = Record<string, any>
 type Operacao = 'select' | 'update' | 'insert' | 'upsert'
 type Filtro =
-  | { tipo: 'eq' | 'neq' | 'lte' | 'gt' | 'is'; col: string; val: unknown }
+  | { tipo: 'eq' | 'neq' | 'lte' | 'lt' | 'gt' | 'is'; col: string; val: unknown }
   | { tipo: 'in'; col: string; val: unknown[] }
   | { tipo: 'not-is'; col: string; val: unknown }
 
@@ -89,6 +89,7 @@ export class FakeDb {
           case 'eq':     return v === f.val
           case 'neq':    return v !== f.val
           case 'lte':    return v != null && (v as any) <= (f.val as any)
+          case 'lt':     return v != null && (v as any) < (f.val as any)
           case 'gt':     return v != null && (v as any) > (f.val as any)
           case 'is':     return f.val === null ? v == null : v === f.val
           case 'in':     return f.val.includes(v)
@@ -114,7 +115,9 @@ export class FakeDb {
         resultado = this.linhas(tabela).filter(casa)
         resultado.forEach(l => Object.assign(l, consulta.patch))
       } else {
-        resultado = this.linhas(tabela).filter(casa)
+        // Cópias, como o Supabase real: quem leu não enxerga um UPDATE feito depois por outra
+        // execução — sem isso, corrida entre execuções simultâneas nunca aparece no teste.
+        resultado = this.linhas(tabela).filter(casa).map(l => ({ ...l }))
         if (ordem) {
           const { col, asc } = ordem
           resultado = [...resultado].sort((a, b) => (a[col] < b[col] ? -1 : a[col] > b[col] ? 1 : 0) * (asc ? 1 : -1))
@@ -144,6 +147,7 @@ export class FakeDb {
       eq(col: string, val: unknown) { consulta.filtros.push({ tipo: 'eq', col, val }); return api },
       neq(col: string, val: unknown) { consulta.filtros.push({ tipo: 'neq', col, val }); return api },
       lte(col: string, val: unknown) { consulta.filtros.push({ tipo: 'lte', col, val }); return api },
+      lt(col: string, val: unknown) { consulta.filtros.push({ tipo: 'lt', col, val }); return api },
       gt(col: string, val: unknown) { consulta.filtros.push({ tipo: 'gt', col, val }); return api },
       upsert(linhas: Linha | Linha[], opts?: { onConflict?: string }) {
         consulta.operacao = 'upsert'

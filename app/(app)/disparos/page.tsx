@@ -22,8 +22,10 @@ export default async function DisparosPage() {
     supabase
       .from('campanhas_wa')
       .select(`
-        id, nome, status, total_destinatarios, total_enviados, total_falhas,
+        id, nome, status, tipo, total_destinatarios, total_enviados, total_falhas, total_pulados,
         agendado_para, iniciado_em, concluido_em, criado_em,
+        janela_inicio, janela_fim, prog_inicio, prog_maximo, prog_dia, prog_planejado_em,
+        registrar_enviados, excluir_ja_enviados,
         modelos_wa(nome, status)
       `)
       .eq('conta_id', contaId)
@@ -31,7 +33,7 @@ export default async function DisparosPage() {
       .limit(50),
     supabase
       .from('modelos_wa')
-      .select('id, nome, status')
+      .select('id, nome, status, corpo')
       .eq('conta_id', contaId)
       .in('status', ['aprovado', 'rascunho'])
       .order('nome'),

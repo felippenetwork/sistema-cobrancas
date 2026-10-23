@@ -21,6 +21,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { resolverVariaveis, resolverVariaveisLeves, VariaveisIndisponiveisError } from '@/lib/whatsapp/resolver-variaveis'
 import { atualizarStatusNotificacao, vereditoLembrete } from '@/lib/whatsapp/status-notificacao'
 import { cronAutorizado } from '@/lib/cron-auth'
+import { processarCampanhas } from '@/lib/disparo/campanhas'
 import {
   instName,
   getAllInstances,
@@ -333,114 +334,9 @@ async function processarConta(
     await sleep(intervalAleatorioMs(intMin, intMax))
   }
 
-  // Campanha de disparo em massa (/disparos), se houver uma ativa — mesmo
-  // orçamento de tempo restante desta execução, não um adicional.
-  enviados += await processarCampanha(supabase, contaId, token, cfg, inicioExecucao, budgetMs)
-
-  return enviados
-}
-
-// ── Drena a campanha de disparo em massa (/disparos) ativa da conta, se houver.
-// Mesmo ritmo (intervalo + digitação) e mesma lógica de orçamento/janela dos
-// lembretes — substitui o loop síncrono que existia em enviarCampanhaAction,
-// que estourava o tempo de execução da Vercel com o ritmo anti-ban correto. ──
-
-async function processarCampanha(
-  supabase: Supabase,
-  contaId: string,
-  token: string,
-  cfg: ContaCfg,
-  inicioExecucao: number,
-  budgetMs: number,
-): Promise<number> {
-  const hInicio = cfg?.horario_inicio ?? '09:00'
-  const hFim    = cfg?.horario_fim    ?? '20:00'
-  const intMin  = cfg?.intervalo_min_seg ?? 45
-  const intMax  = cfg?.intervalo_max_seg ?? 80
-
-  const { data: campanha } = await supabase
-    .from('campanhas_wa')
-    .select('id, modelos_wa(corpo)')
-    .eq('conta_id', contaId)
-    .eq('status', 'enviando')
-    .order('iniciado_em', { ascending: true })
-    .limit(1)
-    .maybeSingle()
-
-  if (!campanha) return 0
-
-  const corpo = (campanha as any).modelos_wa?.corpo as string | undefined
-  if (!corpo) return 0
-
-  let enviados = 0
-
-  while (Date.now() - inicioExecucao < budgetMs) {
-    if (!dentroDaJanela(hInicio, hFim)) break
-
-    const { data: pendentes } = await supabase
-      .from('campanha_destinatarios')
-      .select('id, celular, variaveis')
-      .eq('campanha_id', campanha.id)
-      .eq('status', 'pendente')
-      .limit(1)
-
-    const dest = pendentes?.[0]
-
-    if (!dest) {
-      // Fila esgotada — fecha a campanha e consolida os totais.
-      const [{ count: totalEnviados }, { count: totalFalhas }] = await Promise.all([
-        supabase.from('campanha_destinatarios').select('id', { count: 'exact', head: true })
-          .eq('campanha_id', campanha.id).eq('status', 'enviado'),
-        supabase.from('campanha_destinatarios').select('id', { count: 'exact', head: true })
-          .eq('campanha_id', campanha.id).eq('status', 'falhou'),
-      ])
-      await supabase.from('campanhas_wa').update({
-        status: 'concluida', concluido_em: new Date().toISOString(),
-        total_enviados: totalEnviados ?? 0, total_falhas: totalFalhas ?? 0,
-      }).eq('id', campanha.id).eq('status', 'enviando')
-      break
-    }
-
-    // Claim atômico: marca 'enviado' ANTES de mandar, reverte se der erro —
-    // status da tabela não tem um estado "processando" intermediário.
-    const { data: claimed, error: claimErr } = await supabase
-      .from('campanha_destinatarios')
-      .update({ status: 'enviado', enviado_em: new Date().toISOString() })
-      .eq('id', dest.id)
-      .eq('status', 'pendente')
-      .select('id')
-      .maybeSingle()
-    if (claimErr) {
-      console.error('[cron/whatsapp-uazapi] claim de destinatário falhou', { destId: dest.id, contaId, claimErr })
-      break
-    }
-    if (!claimed) continue // outra execução já levou este destinatário
-
-    const celular = dest.celular as string
-    let texto = corpo
-    const vars = (dest.variaveis as string[] | null) ?? []
-    vars.forEach((v, i) => { texto = texto.replace(new RegExp(`\\{\\{${i + 1}\\}\\}`, 'g'), v) })
-
-    try {
-      await simularDigitacao(token, celular)
-      await sendText(token, celular, texto)
-      enviados++
-    } catch (err) {
-      if (err instanceof UazapiRateLimitError) {
-        // Não foi recusa — devolve pra pendente e para nesta conta neste tick.
-        const { error: revErr } = await supabase.from('campanha_destinatarios')
-          .update({ status: 'pendente', enviado_em: null }).eq('id', dest.id)
-        if (revErr) console.error('[cron/whatsapp-uazapi] não conseguiu devolver destinatário para pendente — ficou "enviado" sem envio', { destId: dest.id, contaId, revErr })
-        break
-      }
-      const { error: falhaErr } = await supabase.from('campanha_destinatarios')
-        .update({ status: 'falhou', erro: String(err).slice(0, 500) })
-        .eq('id', dest.id)
-      if (falhaErr) console.error('[cron/whatsapp-uazapi] não conseguiu marcar destinatário como falhou — ficou "enviado" sem envio', { destId: dest.id, contaId, falhaErr })
-    }
-
-    await sleep(intervalAleatorioMs(intMin, intMax))
-  }
+  // Campanhas de /disparos (normal e progressivas) — mesmo orçamento de tempo
+  // restante desta execução, não um adicional. Ver lib/disparo/campanhas.ts.
+  enviados += await processarCampanhas(supabase, contaId, token, cfg, inicioExecucao, budgetMs)
 
   return enviados
 }
