@@ -7,7 +7,6 @@ import { FakeDb } from './helpers/fake-supabase'
 
 const mocks = vi.hoisted(() => ({
   db: { atual: null as unknown },
-  encontrarOuCriarAtendimento: vi.fn(),
   fetch: vi.fn(),
 }))
 
@@ -19,7 +18,6 @@ vi.mock('@/lib/supabase/server', () => ({
     from: () => ({ select: () => ({ eq: () => ({ single: async () => ({ data: { id: 'conta-1' } }) }) }) }),
   }),
 }))
-vi.mock('@/lib/atendimento/encontrar-ou-criar', () => ({ encontrarOuCriarAtendimento: mocks.encontrarOuCriarAtendimento }))
 
 import { forcarEnvioAction } from '@/app/(app)/log/_actions/log'
 
@@ -47,7 +45,6 @@ function cenario(opts: {
       status:   opts.conexaoStatus ?? 'conectado',
       uazapi_instance_token: opts.semToken ? null : 'tok',
     }],
-    mensagens_wa: [],
   })
   mocks.db.atual = db.cliente()
   return db
@@ -69,7 +66,6 @@ function uazapi(opts: { envioOk?: boolean } = {}) {
 beforeEach(() => {
   process.env.UAZAPI_URL = 'https://uazapi.exemplo.test'
   process.env.UAZAPI_ADMIN_TOKEN = 'admin'
-  mocks.encontrarOuCriarAtendimento.mockReset().mockResolvedValue('atend-1')
   mocks.fetch.mockReset()
   vi.stubGlobal('fetch', mocks.fetch)
   vi.spyOn(console, 'error').mockImplementation(() => {})

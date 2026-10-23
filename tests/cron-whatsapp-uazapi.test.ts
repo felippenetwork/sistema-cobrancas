@@ -16,7 +16,6 @@ const mocks = vi.hoisted(() => {
     sendPresence: vi.fn(),
     resolverVariaveis: vi.fn(),
     resolverVariaveisLeves: vi.fn(),
-    encontrarOuCriarAtendimento: vi.fn(),
     // Por padrão (sem mockImplementation), lança — reproduz o after() de verdade
     // fora de uma requisição real do Next, que é a situação de todo teste aqui
     // (chamamos GET() direto). Testes que precisam do caminho "produção" trocam
@@ -44,7 +43,6 @@ vi.mock('@/lib/whatsapp/resolver-variaveis', async importOriginal => ({
   resolverVariaveis: mocks.resolverVariaveis,
   resolverVariaveisLeves: mocks.resolverVariaveisLeves,
 }))
-vi.mock('@/lib/atendimento/encontrar-ou-criar', () => ({ encontrarOuCriarAtendimento: mocks.encontrarOuCriarAtendimento }))
 
 import { GET } from '@/app/api/cron/whatsapp-uazapi/route'
 import { VariaveisIndisponiveisError } from '@/lib/whatsapp/resolver-variaveis'
@@ -74,7 +72,6 @@ function cenario(notif: Record<string, unknown> = {}, config: Record<string, unk
       agendado_para: '2026-09-19T10:00:00.000Z', ...notif,
     }],
     campanhas_wa: [],
-    mensagens_wa: [],
   })
   mocks.db.atual = db.cliente()
   return db
@@ -105,7 +102,6 @@ beforeEach(() => {
   mocks.sendPresence.mockReset().mockResolvedValue(undefined)
   mocks.resolverVariaveis.mockReset().mockResolvedValue('mensagem pronta')
   mocks.resolverVariaveisLeves.mockReset().mockResolvedValue('mensagem avulsa pronta')
-  mocks.encontrarOuCriarAtendimento.mockReset().mockResolvedValue('atend-1')
   mocks.after.mockReset().mockImplementation(() => {
     throw new Error('`after` was called outside a request scope.')
   })
@@ -174,14 +170,13 @@ describe('autenticação', () => {
 })
 
 describe('envio de lembrete', () => {
-  it('envia a mensagem, marca "enviado" e registra no histórico de atendimento', async () => {
+  it('envia a mensagem e marca "enviado"', async () => {
     const db = cenario()
     await rodarCron()
     expect(mocks.sendText).toHaveBeenCalledTimes(1)
     expect(mocks.sendText).toHaveBeenCalledWith('tok', '5521900000001', 'mensagem pronta')
     expect(nota(db).status).toBe('enviado')
     expect(nota(db).mensagem_final).toBe('mensagem pronta')
-    expect(db.linhas('mensagens_wa')).toHaveLength(1)
   })
 
   it('simula digitação ANTES de enviar', async () => {
@@ -380,13 +375,6 @@ describe('depois que a mensagem foi enviada', () => {
     )
   })
 
-  it('erro no histórico de atendimento não desfaz nem repete o envio', async () => {
-    const db = cenario()
-    mocks.encontrarOuCriarAtendimento.mockRejectedValue(new Error('banco caiu'))
-    await rodarCron()
-    expect(mocks.sendText).toHaveBeenCalledTimes(1)
-    expect(nota(db).status).toBe('enviado')
-  })
 })
 
 describe('isolamento entre contas', () => {

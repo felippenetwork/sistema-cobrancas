@@ -186,11 +186,3 @@ export async function sendPresence(
     body:    JSON.stringify({ number: formatPhoneNumber(number), presence, delay: delayMs }),
   }).catch(() => {})
 }
-
-export async function setWebhook(instanceToken: string, url: string): Promise<void> {
-  await fetch(`${UAZAPI_URL}/webhook`, {
-    method:  'POST',
-    headers: { token: instanceToken, 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ url, enabled: true }),
-  }).catch(() => {})
-}

@@ -11,14 +11,12 @@ const mocks = vi.hoisted(() => {
   class UazapiRateLimitError extends Error {}
   return {
     db: { atual: null as unknown },
-    encontrarOuCriarAtendimento: vi.fn(),
     UazapiRateLimitError,
     sendText: vi.fn(),
   }
 })
 
 vi.mock('@/lib/supabase/admin', () => ({ createAdminClient: () => mocks.db.atual }))
-vi.mock('@/lib/atendimento/encontrar-ou-criar', () => ({ encontrarOuCriarAtendimento: mocks.encontrarOuCriarAtendimento }))
 vi.mock('@/lib/uazapi', () => ({ sendText: mocks.sendText, UazapiRateLimitError: mocks.UazapiRateLimitError }))
 
 import { enviarWhatsAppImediato } from '@/lib/whatsapp/enviar-imediato'
@@ -45,7 +43,6 @@ function cenario(opts: {
     clientes: opts.cliente === null ? [] : [{ id: CLIENTE, conta_id: CONTA, celular: '5521900000001', nome: 'Maria', deleted_at: null, ...opts.cliente }],
     parcelas: [{ id: PARCELA, conta_id: CONTA, valor: 150, data_vencimento: '2026-10-05', status: 'paga' }],
     notificacoes_enviadas: [{ id: 'n1', conta_id: CONTA, status: opts.statusNotif ?? 'fila' }],
-    mensagens_wa: [],
   })
   mocks.db.atual = db.cliente()
   return db
@@ -55,7 +52,6 @@ const enviar = (tipo = 'pagamento_confirmado') => enviarWhatsAppImediato(CONTA, 
 const statusFinal = (db: FakeDb) => db.linhas('notificacoes_enviadas')[0].status
 
 beforeEach(() => {
-  mocks.encontrarOuCriarAtendimento.mockReset().mockResolvedValue('atend-1')
   mocks.sendText.mockReset().mockResolvedValue(undefined)
   vi.spyOn(console, 'error').mockImplementation(() => {})
   vi.spyOn(console, 'log').mockImplementation(() => {})
@@ -72,7 +68,6 @@ describe('enviarWhatsAppImediato', () => {
     expect(mocks.sendText).toHaveBeenCalledWith('uaz-tok', '5521900000001', expect.stringContaining('Maria'))
     const nota = db.linhas('notificacoes_enviadas')[0]
     expect(nota.status).toBe('enviado')
-    expect(db.linhas('mensagens_wa')).toHaveLength(1)
   })
 
   it('vale também para a cobrança manual ("Cobrar agora")', async () => {
@@ -136,14 +131,6 @@ describe('enviarWhatsAppImediato', () => {
     await enviar()
     expect(statusFinal(db)).toBe('fila')
     expect(mocks.sendText).not.toHaveBeenCalled()
-  })
-
-  it('erro DEPOIS do envio (histórico de atendimento) não devolve para "fila" — senão o cliente recebe 2x', async () => {
-    const db = cenario()
-    mocks.encontrarOuCriarAtendimento.mockRejectedValue(new Error('banco caiu'))
-    expect(await enviar()).toBe(true)
-    expect(statusFinal(db)).toBe('enviado')
-    expect(mocks.sendText).toHaveBeenCalledTimes(1)
   })
 
   it('falha ao gravar "enviado" é repetida e nunca reenvia a mensagem', async () => {

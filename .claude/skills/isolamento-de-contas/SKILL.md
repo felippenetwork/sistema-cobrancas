@@ -15,34 +15,13 @@ O isolamento vive em **4 camadas de dado + 1 de recurso**. Uma falha em qualquer
 
 ## Conceito de tenant neste projeto
 
-- **1 conta = 1 empresa.** O tenant é a `conta`. Desde a migration 0020 (multi-atendimento) uma conta pode ter vários usuários: o **dono** (`contas.owner_user_id`) e membros convidados em `membros_conta`, cada um com `role` `admin` ou `atendente`.
-- O usuário autenticado (`auth.uid()`) mapeia para **uma** `conta`, seja como dono, seja como membro ativo — `conta_do_usuario()` (atualizada em 0020) resolve os dois casos.
-- Admin (Felippe) é um papel separado (plataforma inteira), com acesso cross-conta controlado (ver "Modo admin" abaixo) — não confundir com o `role = 'admin'` de `membros_conta`, que é interno a UMA conta.
+- **1 conta = 1 empresa = 1 usuário (o dono, `contas.owner_user_id`).** O tenant é a `conta`. Entre as migrations 0020 e 0037 existiu equipe (membros convidados em `membros_conta`, papéis `admin`/`atendente`); foi removida em 2026-10-23 junto com o multi-atendimento — não recriar convite/equipe sem decisão de produto nova.
+- O usuário autenticado (`auth.uid()`) mapeia para **uma** `conta`, como dono — `conta_do_usuario()` (redefinida em 0037) só olha `contas.owner_user_id`.
+- Admin (Felippe) é um papel separado (plataforma inteira), com acesso cross-conta controlado (ver "Modo admin" abaixo).
 
-### Papéis dentro da conta (dono / admin / atendente)
+### Credenciais e dados sensíveis dentro da conta
 
-Isolamento entre contas não basta quando a conta tem mais de um usuário — falta isolar **papéis dentro da mesma conta**. Achado real (SEG-N4, auditoria 2026-09-19): `conta_do_usuario()` passou a valer para qualquer membro ativo, mas as policies de `configuracoes`, `membros_conta` e `meios_pagamento` só checavam isso — nenhuma olhava o `role`. Um atendente lia e alterava credenciais (Meta, EfiBank, LookDefense — Meta e LookDefense já removidos do produto —, a chave PIX enviada ao cliente) e conseguia se promover a admin, tudo pelo próprio login, direto na API — a separação existia só na interface.
-
-Regra: qualquer tabela onde uma ação (ler credencial, mudar papel de outro membro, trocar o texto que vai pro cliente) só deveria valer para dono/admin usa o helper, não `conta_do_usuario()` sozinho:
-
-```sql
-create or replace function public.pode_administrar_conta(p_conta_id uuid)
-returns boolean language sql stable security definer set search_path = public as $$
-  select p_conta_id is not null
-     and p_conta_id = public.conta_do_usuario()
-     and (
-       exists (select 1 from public.contas where id = p_conta_id and owner_user_id = auth.uid())
-       or exists (
-         select 1 from public.membros_conta
-          where conta_id = p_conta_id and user_id = auth.uid() and ativo = true and role = 'admin'
-       )
-     );
-$$;
-```
-
-`SELECT` que todo membro precisa para trabalhar (listar a equipe, ler qual é a chave PIX padrão para montar a cobrança) continua liberado pra todos com `conta_do_usuario()`; é só a escrita/leitura de credencial que exige `pode_administrar_conta()`. Ver a migration `0033_papeis_na_conta.sql` e os 21 testes em `tests/db-papeis.test.ts` (Postgres real via PGlite, não o projeto compartilhado — ver skill `testes-cobranx`).
-
-Consequência do lado do app: quando um fluxo do atendente (enviar mensagem, listar templates aprovados) precisa da credencial que ele não pode mais ler pela RLS, o servidor lê com **service role** depois de confirmar a conta via `getConta()` — nunca solta a policy para o atendente só para não reescrever a leitura (ver `atendimento/_actions/mensagens.ts`).
+As policies de `configuracoes` e da escrita em `meios_pagamento` usam `pode_administrar_conta(conta_id)` em vez de `conta_do_usuario()` sozinho. Desde a 0037 essa função vale só para o dono (a checagem de `membros_conta.role` saiu com a tabela), mas **continua sendo o helper certo** para qualquer tabela onde ler credencial ou trocar o texto que vai pro cliente deve exigir mais do que "pertencer à conta" — se a equipe voltar um dia, a regra de papel volta para dentro dela, sem reescrever policy. Origem: achado SEG-N4 (auditoria 2026-09-19), em que um atendente lia credenciais e se promovia a admin porque as policies só checavam `conta_do_usuario()`. Testes: `tests/db-conta-unica.test.ts` (Postgres real via PGlite, não o projeto compartilhado — ver skill `testes-cobranx`).
 
 ## Camada 1 — Banco (a fonte da verdade, mecanismo concreto)
 
@@ -145,4 +124,4 @@ Ciclo de vida: suspensão bloqueia ações novas mas mantém leitura/exportaçã
 - [ ] Tabela nova incluída no teste de isolamento E no de provisionamento?
 - [ ] Rate limit/cota de recurso pesado é por conta, não só global?
 - [ ] Acesso admin cross-conta (se tocado) audita e sinaliza impersonação? Agregação cross-conta passou pela via separada?
-- [ ] Tabela nova/tocada com dado sensível a papel (credencial, chave PIX, gestão de equipe) usa `pode_administrar_conta()`, não só `conta_do_usuario()`? Se um fluxo de atendente precisa da credencial mesmo assim, lê com service role depois de `getConta()` — nunca afrouxa a policy.
+- [ ] Tabela nova/tocada com dado sensível (credencial, chave PIX) usa `pode_administrar_conta()`, não só `conta_do_usuario()`?

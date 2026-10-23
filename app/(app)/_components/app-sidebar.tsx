@@ -3,7 +3,7 @@
 import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Users, FileText, Wallet, Smartphone, Bell, CreditCard, ScrollText, Settings, X, CalendarClock, MessageSquare, UserCheck, Send, FilePlus, Zap } from 'lucide-react'
+import { LayoutDashboard, Users, FileText, Wallet, Smartphone, Bell, CreditCard, ScrollText, Settings, X, CalendarClock, Send, FilePlus } from 'lucide-react'
 import { signOutAction } from '../_actions/auth'
 import { SairButton } from '@/app/_components/sair-button'
 
@@ -23,10 +23,7 @@ const NAV_COBRANCAS: NavItem[] = [
   { href: '/log',            label: 'Log',           icon: <ScrollText    className="h-4 w-4" /> },
 ]
 
-const NAV_ATENDIMENTO: NavItem[] = [
-  { href: '/atendimento',        label: 'Atendimento',     icon: <MessageSquare className="h-4 w-4" /> },
-  { href: '/equipe',             label: 'Equipe',          icon: <UserCheck     className="h-4 w-4" /> },
-  { href: '/mensagens-rapidas',  label: 'Msgs. Rápidas',   icon: <Zap           className="h-4 w-4" /> },
+const NAV_WHATSAPP: NavItem[] = [
   { href: '/wa-templates',       label: 'Modelos',         icon: <FilePlus      className="h-4 w-4" /> },
   { href: '/disparos',           label: 'Disparos',        icon: <Send          className="h-4 w-4" /> },
   { href: '/conexao',            label: 'Conexão WA',      icon: <Smartphone    className="h-4 w-4" /> },
@@ -38,12 +35,10 @@ const NAV_SISTEMA: NavItem[] = [
 
 export function AppSidebar({
   nomeEmpresa,
-  isOwner,
   isOpen = false,
   onClose,
 }: {
   nomeEmpresa: string
-  isOwner: boolean
   isOpen?: boolean
   onClose?: () => void
 }) {
@@ -112,28 +107,24 @@ export function AppSidebar({
         ))}
 
         <p className="mb-1 mt-4 px-2 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
-          Atendimento
+          WhatsApp
         </p>
-        {NAV_ATENDIMENTO.map(item => (
+        {NAV_WHATSAPP.map(item => (
           <Link key={item.href} href={item.href} className={cls(item.href)} onClick={onClose}>
             {item.icon}
             {item.label}
           </Link>
         ))}
 
-        {isOwner && (
-          <>
-            <p className="mb-1 mt-4 px-2 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
-              Sistema
-            </p>
-            {NAV_SISTEMA.map(item => (
-              <Link key={item.href} href={item.href} className={cls(item.href)} onClick={onClose}>
-                {item.icon}
-                {item.label}
-              </Link>
-            ))}
-          </>
-        )}
+        <p className="mb-1 mt-4 px-2 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
+          Sistema
+        </p>
+        {NAV_SISTEMA.map(item => (
+          <Link key={item.href} href={item.href} className={cls(item.href)} onClick={onClose}>
+            {item.icon}
+            {item.label}
+          </Link>
+        ))}
       </nav>
 
       {/* Sair com confirmação */}

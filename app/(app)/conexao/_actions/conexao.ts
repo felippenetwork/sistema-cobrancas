@@ -18,18 +18,9 @@ import {
   deleteInstanceByName,
   connectInstance,
   getAllInstances,
-  setWebhook,
   UazapiRateLimitError,
   type InstanceInfo,
 } from '@/lib/uazapi'
-
-function webhookUrlDaConta(contaId: string): string | null {
-  const base = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, '')
-  if (!base) return null
-  const secret = process.env.UAZAPI_WEBHOOK_SECRET
-  const query  = secret ? `conta=${contaId}&secret=${secret}` : `conta=${contaId}`
-  return `${base}/api/webhooks/whatsapp?${query}`
-}
 
 type AdminClient = ReturnType<typeof createAdminClient>
 
@@ -120,11 +111,6 @@ export async function conectarAction() {
       uazapi_instance_token: token, rate_limitado: false },
     { onConflict: 'conta_id' },
   )
-
-  // Sem isso a uazapi não avisa o sistema de mensagens recebidas/status de
-  // entrega — o painel nunca fica sabendo de nada até o próximo poll manual.
-  const webhookUrl = webhookUrlDaConta(contaId)
-  if (webhookUrl) await setWebhook(token, webhookUrl)
 
   const info = await connectInstance(token)
   await aplicarInfo(admin, contaId, info)

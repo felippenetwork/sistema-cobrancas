@@ -9,20 +9,11 @@ export default async function WaTemplatesPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  let contaId: string | null = null
   const { data: conta } = await supabase
     .from('contas').select('id').eq('owner_user_id', user.id).maybeSingle()
 
-  if (conta) {
-    contaId = conta.id
-  } else {
-    const { data: membro } = await supabase
-      .from('membros_conta').select('conta_id')
-      .eq('user_id', user.id).eq('ativo', true).maybeSingle()
-    contaId = membro?.conta_id ?? null
-  }
-
-  if (!contaId) redirect('/login')
+  if (!conta) redirect('/login')
+  const contaId = conta.id
 
   const { data: modelos } = await supabase
     .from('modelos_wa')

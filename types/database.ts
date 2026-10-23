@@ -1,4 +1,4 @@
-// Espelho do schema em supabase/migrations/*, mantido À MÃO (última sincronização: migration 0036).
+// Espelho do schema em supabase/migrations/*, mantido À MÃO (última sincronização: migration 0037).
 // Toda migration que cria/altera tabela ou coluna atualiza este arquivo na MESMA tarefa — tabela ou
 // coluna faltando aqui vira `as any` no código (foi assim que cobrancas_pix e mensagens_rapidas
 // ficaram sem tipo). Para regenerar do banco real (precisa de SUPABASE_ACCESS_TOKEN):
@@ -19,8 +19,6 @@ type NotifCanal        = 'whatsapp' | 'email'
 type NotifStatus       = 'fila' | 'processando' | 'enviado' | 'entregue' | 'lido' | 'aberto' | 'falhou' | 'cancelado'
 type NotifTipo         = '5d' | '3d' | '2d' | '1d' | 'dia' | 'vencido1d' | 'manual' | 'boasvindas' | 'pagamento_confirmado' | 'agendada'
 type ParcelaStatus      = 'aberta' | 'paga' | 'vencida'
-type AtendimentoStatus = 'aguardando' | 'em_atendimento' | 'finalizado'
-type MembroRole        = 'admin' | 'atendente'
 type ModeloCategoria   = 'UTILITY' | 'MARKETING' | 'AUTHENTICATION'
 type ModeloStatus      = 'rascunho' | 'em_analise' | 'aprovado' | 'rejeitado'
 type CampanhaStatus    = 'rascunho' | 'agendada' | 'enviando' | 'concluida' | 'cancelada'
@@ -197,20 +195,12 @@ export type Database = {
           contato: string | null
           conta_id: string
           cpf_cnpj: string | null
-          efi_cert_base64: string | null
-          efi_client_id: string | null
-          efi_client_secret: string | null
-          efi_pix_key: string | null
-          efi_sandbox: boolean
           endereco: string | null
           horario_fim: string
           horario_inicio: string
           intervalo_max_seg: number
           intervalo_min_seg: number
-          mp_access_token: string | null
-          mp_webhook_secret: string | null
           nome_comercial: string | null
-          pix_provedor: string
           twilio_account_sid: string | null
           twilio_ativo: boolean
           twilio_auth_token: string | null
@@ -221,20 +211,12 @@ export type Database = {
           contato?: string | null
           conta_id: string
           cpf_cnpj?: string | null
-          efi_cert_base64?: string | null
-          efi_client_id?: string | null
-          efi_client_secret?: string | null
-          efi_pix_key?: string | null
-          efi_sandbox?: boolean
           endereco?: string | null
           horario_fim?: string
           horario_inicio?: string
           intervalo_max_seg?: number
           intervalo_min_seg?: number
-          mp_access_token?: string | null
-          mp_webhook_secret?: string | null
           nome_comercial?: string | null
-          pix_provedor?: string
           twilio_account_sid?: string | null
           twilio_ativo?: boolean
           twilio_auth_token?: string | null
@@ -245,20 +227,12 @@ export type Database = {
           contato?: string | null
           conta_id?: string
           cpf_cnpj?: string | null
-          efi_cert_base64?: string | null
-          efi_client_id?: string | null
-          efi_client_secret?: string | null
-          efi_pix_key?: string | null
-          efi_sandbox?: boolean
           endereco?: string | null
           horario_fim?: string
           horario_inicio?: string
           intervalo_max_seg?: number
           intervalo_min_seg?: number
-          mp_access_token?: string | null
-          mp_webhook_secret?: string | null
           nome_comercial?: string | null
-          pix_provedor?: string
           twilio_account_sid?: string | null
           twilio_ativo?: boolean
           twilio_auth_token?: string | null
@@ -465,58 +439,6 @@ export type Database = {
         }
         Relationships: [{ foreignKeyName: 'meios_pagamento_conta_id_fkey'; columns: ['conta_id']; isOneToOne: false; referencedRelation: 'contas'; referencedColumns: ['id'] }]
       }
-      mensagens_wa: {
-        Row: {
-          id: string
-          conta_id: string
-          cliente_id: string | null
-          atendimento_id: string | null
-          celular: string
-          direcao: 'in' | 'out'
-          texto: string
-          tipo: string
-          status: string
-          wa_id: string | null
-          midia_url: string | null
-          recebido_em: string
-          lida: boolean
-        }
-        Insert: {
-          id?: string
-          conta_id: string
-          cliente_id?: string | null
-          atendimento_id?: string | null
-          celular: string
-          direcao: 'in' | 'out'
-          texto: string
-          tipo?: string
-          status?: string
-          wa_id?: string | null
-          midia_url?: string | null
-          recebido_em?: string
-          lida?: boolean
-        }
-        Update: {
-          id?: string
-          conta_id?: string
-          cliente_id?: string | null
-          atendimento_id?: string | null
-          celular?: string
-          direcao?: 'in' | 'out'
-          texto?: string
-          tipo?: string
-          status?: string
-          wa_id?: string | null
-          midia_url?: string | null
-          recebido_em?: string
-          lida?: boolean
-        }
-        Relationships: [
-          { foreignKeyName: 'mensagens_wa_conta_id_fkey'; columns: ['conta_id']; isOneToOne: false; referencedRelation: 'contas'; referencedColumns: ['id'] },
-          { foreignKeyName: 'mensagens_wa_cliente_id_fkey'; columns: ['cliente_id']; isOneToOne: false; referencedRelation: 'clientes'; referencedColumns: ['id'] },
-          { foreignKeyName: 'mensagens_wa_atendimento_id_fkey'; columns: ['atendimento_id']; isOneToOne: false; referencedRelation: 'atendimentos'; referencedColumns: ['id'] },
-        ]
-      }
       notificacoes_config: {
         Row: {
           assunto_email: string | null
@@ -678,119 +600,6 @@ export type Database = {
         Update: { conta_id?: string; created_at?: string; id?: string; texto?: string }
         Relationships: [{ foreignKeyName: 'saudacoes_conta_id_fkey'; columns: ['conta_id']; isOneToOne: false; referencedRelation: 'contas'; referencedColumns: ['id'] }]
       }
-      membros_conta: {
-        Row: {
-          id: string
-          conta_id: string
-          user_id: string
-          nome: string
-          email: string
-          role: MembroRole
-          ativo: boolean
-          criado_em: string
-        }
-        Insert: {
-          id?: string
-          conta_id: string
-          user_id: string
-          nome: string
-          email: string
-          role?: MembroRole
-          ativo?: boolean
-          criado_em?: string
-        }
-        Update: {
-          id?: string
-          conta_id?: string
-          user_id?: string
-          nome?: string
-          email?: string
-          role?: MembroRole
-          ativo?: boolean
-          criado_em?: string
-        }
-        Relationships: [
-          { foreignKeyName: 'membros_conta_conta_id_fkey'; columns: ['conta_id']; isOneToOne: false; referencedRelation: 'contas'; referencedColumns: ['id'] },
-        ]
-      }
-      departamentos: {
-        Row: {
-          id: string
-          conta_id: string
-          nome: string
-          cor: string
-          criado_em: string
-        }
-        Insert: {
-          id?: string
-          conta_id: string
-          nome: string
-          cor?: string
-          criado_em?: string
-        }
-        Update: {
-          id?: string
-          conta_id?: string
-          nome?: string
-          cor?: string
-          criado_em?: string
-        }
-        Relationships: [
-          { foreignKeyName: 'departamentos_conta_id_fkey'; columns: ['conta_id']; isOneToOne: false; referencedRelation: 'contas'; referencedColumns: ['id'] },
-        ]
-      }
-      atendimentos: {
-        Row: {
-          id: string
-          conta_id: string
-          numero: number
-          celular: string
-          cliente_id: string | null
-          departamento_id: string | null
-          status: AtendimentoStatus
-          atendente_id: string | null
-          ultima_mensagem: string | null
-          ultima_msg_em: string | null
-          criado_em: string
-          aceito_em: string | null
-          finalizado_em: string | null
-        }
-        Insert: {
-          id?: string
-          conta_id: string
-          numero?: number
-          celular: string
-          cliente_id?: string | null
-          departamento_id?: string | null
-          status?: AtendimentoStatus
-          atendente_id?: string | null
-          ultima_mensagem?: string | null
-          ultima_msg_em?: string | null
-          criado_em?: string
-          aceito_em?: string | null
-          finalizado_em?: string | null
-        }
-        Update: {
-          id?: string
-          conta_id?: string
-          numero?: number
-          celular?: string
-          cliente_id?: string | null
-          departamento_id?: string | null
-          status?: AtendimentoStatus
-          atendente_id?: string | null
-          ultima_mensagem?: string | null
-          ultima_msg_em?: string | null
-          criado_em?: string
-          aceito_em?: string | null
-          finalizado_em?: string | null
-        }
-        Relationships: [
-          { foreignKeyName: 'atendimentos_conta_id_fkey'; columns: ['conta_id']; isOneToOne: false; referencedRelation: 'contas'; referencedColumns: ['id'] },
-          { foreignKeyName: 'atendimentos_cliente_id_fkey'; columns: ['cliente_id']; isOneToOne: false; referencedRelation: 'clientes'; referencedColumns: ['id'] },
-          { foreignKeyName: 'atendimentos_departamento_id_fkey'; columns: ['departamento_id']; isOneToOne: false; referencedRelation: 'departamentos'; referencedColumns: ['id'] },
-        ]
-      }
       modelos_wa: {
         Row: {
           id: string
@@ -930,84 +739,6 @@ export type Database = {
           { foreignKeyName: 'campanha_dest_campanha_id_fkey'; columns: ['campanha_id']; isOneToOne: false; referencedRelation: 'campanhas_wa'; referencedColumns: ['id'] },
           { foreignKeyName: 'campanha_dest_conta_id_fkey'; columns: ['conta_id']; isOneToOne: false; referencedRelation: 'contas'; referencedColumns: ['id'] },
         ]
-      }
-      cobrancas_pix: {
-        Row: {
-          id: string
-          conta_id: string
-          parcela_id: string
-          txid: string
-          valor: number
-          status: string
-          pix_copia_cola: string | null
-          qr_code_base64: string | null
-          link_pagamento: string | null
-          expira_em: string | null
-          pago_em: string | null
-          criado_em: string
-          provedor: string
-        }
-        Insert: {
-          id?: string
-          conta_id: string
-          parcela_id: string
-          txid: string
-          valor: number
-          status?: string
-          pix_copia_cola?: string | null
-          qr_code_base64?: string | null
-          link_pagamento?: string | null
-          expira_em?: string | null
-          pago_em?: string | null
-          criado_em?: string
-          provedor?: string
-        }
-        Update: {
-          id?: string
-          conta_id?: string
-          parcela_id?: string
-          txid?: string
-          valor?: number
-          status?: string
-          pix_copia_cola?: string | null
-          qr_code_base64?: string | null
-          link_pagamento?: string | null
-          expira_em?: string | null
-          pago_em?: string | null
-          criado_em?: string
-          provedor?: string
-        }
-        Relationships: [
-          { foreignKeyName: 'cobrancas_pix_conta_id_fkey'; columns: ['conta_id']; isOneToOne: false; referencedRelation: 'contas'; referencedColumns: ['id'] },
-          { foreignKeyName: 'cobrancas_pix_parcela_id_fkey'; columns: ['parcela_id']; isOneToOne: false; referencedRelation: 'parcelas'; referencedColumns: ['id'] },
-        ]
-      }
-      mensagens_rapidas: {
-        Row: {
-          id: string
-          conta_id: string
-          titulo: string
-          texto: string
-          ordem: number
-          criado_em: string
-        }
-        Insert: {
-          id?: string
-          conta_id: string
-          titulo: string
-          texto: string
-          ordem?: number
-          criado_em?: string
-        }
-        Update: {
-          id?: string
-          conta_id?: string
-          titulo?: string
-          texto?: string
-          ordem?: number
-          criado_em?: string
-        }
-        Relationships: [{ foreignKeyName: 'mensagens_rapidas_conta_id_fkey'; columns: ['conta_id']; isOneToOne: false; referencedRelation: 'contas'; referencedColumns: ['id'] }]
       }
     }
     Views: Record<never, never>

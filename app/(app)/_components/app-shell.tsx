@@ -3,24 +3,22 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, MessageSquare, Users, FileText, Menu } from 'lucide-react'
+import { LayoutDashboard, Users, FileText, Wallet, Menu } from 'lucide-react'
 import { AppSidebar } from './app-sidebar'
 
 const BOTTOM_NAV = [
   { href: '/dashboard',   label: 'Início',      Icon: LayoutDashboard },
-  { href: '/atendimento', label: 'Atendimento', Icon: MessageSquare },
   { href: '/clientes',    label: 'Clientes',    Icon: Users },
   { href: '/cobrancas',   label: 'Cobranças',   Icon: FileText },
+  { href: '/caixa',       label: 'Caixa',       Icon: Wallet },
 ]
 
 export function AppShell({
   children,
   nomeEmpresa,
-  isOwner,
 }: {
   children: React.ReactNode
   nomeEmpresa: string
-  isOwner: boolean
 }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const pathname = usePathname()
@@ -36,7 +34,6 @@ export function AppShell({
 
       <AppSidebar
         nomeEmpresa={nomeEmpresa}
-        isOwner={isOwner}
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
       />

@@ -114,26 +114,3 @@ export async function criarConta(db: BancoTeste, nome: string): Promise<{ contaI
   )
   return { contaId: rows[0].id, donoId }
 }
-
-export async function adicionarMembro(
-  db: BancoTeste,
-  contaId: string,
-  role: 'admin' | 'atendente',
-  apelido: string = role,
-): Promise<string> {
-  const userId = await criarUsuario(db, apelido)
-  await db.sql(
-    `insert into public.membros_conta (conta_id, user_id, nome, email, role)
-     values ($1, $2, $3, $4, $5)`,
-    [contaId, userId, `Membro ${apelido}`, `${apelido}-${userId}@teste.local`, role],
-  )
-  return userId
-}
-
-/** Conta nova com dono, um administrador e um atendente — para testes que alteram a equipe. */
-export async function criarEquipe(db: BancoTeste, nome: string) {
-  const { contaId, donoId } = await criarConta(db, nome)
-  const adminId = await adicionarMembro(db, contaId, 'admin', `admin-${nome}`)
-  const atendenteId = await adicionarMembro(db, contaId, 'atendente', `atendente-${nome}`)
-  return { contaId, donoId, adminId, atendenteId }
-}

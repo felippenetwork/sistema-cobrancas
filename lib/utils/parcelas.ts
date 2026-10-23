@@ -50,8 +50,7 @@ export function gerarParcelasFixas(
  * Gera a parcela inicial de uma cobrança recorrente — SEMPRE 1 (RN-C1,
  * decisão de 2026-09-21, ver regras-financeiras §2.2). Uma recorrente nunca
  * tem mais de 1 parcela aberta ao mesmo tempo: a próxima só nasce quando esta
- * é paga (baixarParcelaAction/baixarParcelaComConfirmacaoAction/
- * renovarParcelaAction/webhook EfiBank) ou, como rede de segurança, quando o
+ * é paga (baixarParcelaAction/baixarParcelaComConfirmacaoAction) ou, como rede de segurança, quando o
  * scheduler (app/api/cron/scheduler) encontra a cobrança sem nenhuma aberta.
  * O histórico da cobrança fica só com o que já foi de fato cobrado: as pagas
  * + a próxima em aberto — nunca parcelas futuras pré-criadas sem ter vencido.

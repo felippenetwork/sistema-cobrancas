@@ -12,7 +12,7 @@ Atue como engenheiro sênior avaliando a decisão — não como executor de pedi
 - **Frontend/API:** Next.js 15 (App Router) na Vercel, TypeScript estrito.
 - **Banco/Auth:** Supabase (Postgres com RLS multi-tenant via `conta_id`).
 - **WhatsApp/notificações:** **uazapi direto (único canal — Meta Cloud API foi removida em 2026-09-21), acionado por cron do Vercel chamado a cada 1min por serviço externo (cron-job.org).** Não existe worker/VPS ativo — ver skill `whatsapp-uazapi` antes de tocar em qualquer coisa de conexão, envio ou lembrete. O diretório `worker/` ainda existe no repositório mas é **código morto**; não editar ali esperando efeito em produção.
-- **Pagamentos:** Mercado Pago (assinatura do SaaS, token da plataforma) + PIX do cliente final pelo **provedor ativo da conta** — EfiBank ou Mercado Pago (token da própria conta, cifrado) — ver skill `regras-financeiras` §3.2/§3.3.
+- **Pagamentos:** só Mercado Pago da assinatura do SaaS (token da plataforma). Baixa de parcela é manual — o PIX do cliente final (EfiBank/Mercado Pago) foi removido em 2026-10-23, ver skill `regras-financeiras` §3.2/§3.3.
 - Domínio em português: `cobranca`, `cliente`, `notificacao`, `agendamento`, `conta`. Manter nomenclatura do domínio em PT-BR; termos técnicos podem ficar em inglês (`handler`, `payload`).
 
 ## Mapa de leitura (referências desta skill)
@@ -37,7 +37,7 @@ Nenhuma linha de código antes desta fase (exceção: mudanças triviais como ty
 **Freios de emergência** — parar e alinhar mesmo com pedido aparentemente claro:
 - Alterar schema de tabela core (`contas`, `clientes`, `cobrancas`, `parcelas`, `notificacoes_enviadas`)
 - Alterar lógica de envio/agendamento/recorrência (risco de disparo indevido, ban de número, ou mexer na geração de parcela recorrente — contradição RN-C1 com decisão pendente, ver `regras-financeiras` §2.2)
-- Alterar pagamento/assinatura ou webhooks (Mercado Pago, EfiBank)
+- Alterar pagamento/assinatura ou webhooks (Mercado Pago)
 - Alterar autenticação, RLS ou qualquer área das skills `seguranca-cobranx` / `isolamento-de-contas`
 - Excluir dados ou código "aparentemente morto" (provar que está morto: grep + auditoria de uso — `worker/` já está confirmado morto, mas qualquer outra suspeita exige a mesma prova)
 
@@ -55,7 +55,7 @@ Nenhuma linha de código antes desta fase (exceção: mudanças triviais como ty
 ## Padrões TypeScript
 
 - `strict: true` sempre. Zero `any` novo; tipo desconhecido → `unknown` e estreitar. **Achado aberto (COD-A2):** ainda há ~112 ocorrências de `any` em `app/`+`lib/` (eram 152 em 2026-09-19; as causadas por tipo de tabela/coluna faltando já saíram) — ao tocar um arquivo com isso, corrigir a ocorrência tocada, não a base inteira de uma vez fora do escopo.
-- `types/database.ts` é o espelho tipado do schema. Hoje é **mantido à mão** (sem `SUPABASE_ACCESS_TOKEN` no ambiente não dá para rodar `supabase gen types`): **toda migration que cria/altera tabela ou coluna atualiza esse arquivo na MESMA tarefa** (última sincronização: migration 0036). `as any` porque "a tabela/coluna não está nos types" é o sintoma de que essa regra foi esquecida — foi assim que `cobrancas_pix` e `mensagens_rapidas` passaram meses sem tipo, inclusive dentro do webhook que confirma pagamento PIX. Nunca redeclarar shapes de tabela em outro lugar.
+- `types/database.ts` é o espelho tipado do schema. Hoje é **mantido à mão** (sem `SUPABASE_ACCESS_TOKEN` no ambiente não dá para rodar `supabase gen types`): **toda migration que cria/altera tabela ou coluna atualiza esse arquivo na MESMA tarefa** (última sincronização: migration 0037). `as any` porque "a tabela/coluna não está nos types" é o sintoma de que essa regra foi esquecida — foi assim que duas tabelas (hoje já removidas) passaram meses sem tipo, inclusive dentro do webhook que confirmava pagamento PIX. Nunca redeclarar shapes de tabela em outro lugar.
 - Valores monetários: regra do projeto é **centavos como `number` inteiro**; formatar para R$ só na borda da UI. **Achado aberto (COD-A1):** o banco hoje usa `numeric(12,2)` e há `parseFloat` em produção — migrar é mudança de schema, alinhar antes (freio de emergência acima), não fazer de passagem.
 - Datas: armazenar em UTC (`timestamptz`); converter para `America/Sao_Paulo` apenas na exibição e na interpretação de "janela de envio". Toda lógica de agendamento declara timezone explicitamente.
 
@@ -96,7 +96,7 @@ export async function cancelarNotificacao(input: unknown) {
 - Novas queries que filtram por coluna não indexada em tabela que cresce (cobranças, parcelas, notificações): criar índice na migration junto.
 - Operação com múltiplas escritas relacionadas (baixa de parcela: status + lançamento + cancelar notificações) é atômica via RPC/transação — não sequência de updates soltos que pode parar no meio.
 
-## Chamadas a serviços externos (uazapi, Mercado Pago, EfiBank, Resend)
+## Chamadas a serviços externos (uazapi, Mercado Pago, Resend)
 
 - **Retry:** backoff exponencial com jitter, nunca retry imediato em loop; só em erro transitório (timeout, 5xx), nunca em erro de validação (4xx); combinar com idempotência para não duplicar efeito.
 - **Circuit breaker** em chamada não essencial ao caminho principal: depois de N falhas seguidas, parar de tentar por um tempo e falhar rápido com fallback claro, em vez de empilhar timeout — é o que impede uma dependência lenta (ex.: uazapi fora do ar) de travar a baixa de uma parcela.
@@ -133,7 +133,7 @@ Nunca inverter essa ordem para "economizar tempo agora".
 Reler o diff como revisor exigente que NÃO escreveu o código:
 - Nomes dizem o que as coisas são? Faz sentido pra alguém daqui a 6 meses?
 - Edge cases cobertos: vazio, nulo, duplicado, dois cliques simultâneos, fuso horário, conta recém-criada sem dados?
-- O que acontece quando isso FALHA (rede, Supabase fora, uazapi/Mercado Pago/EfiBank fora)? Falha é estado previsto com tratamento, não exceção surpresa.
+- O que acontece quando isso FALHA (rede, Supabase fora, uazapi/Mercado Pago fora)? Falha é estado previsto com tratamento, não exceção surpresa.
 - Alguma lógica foi duplicada em vez de reutilizada? Introduzi acoplamento novo que vai doer depois?
 - Alterei algum arquivo que a tarefa não pedia (violação do modo cirúrgico)?
 

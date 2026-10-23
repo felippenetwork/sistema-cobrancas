@@ -1,5 +1,4 @@
 import { createAdminClient } from '@/lib/supabase/admin'
-import { encontrarOuCriarAtendimento } from '@/lib/atendimento/encontrar-ou-criar'
 import { atualizarStatusNotificacao } from '@/lib/whatsapp/status-notificacao'
 import { resolverVariaveis, resolverVariaveisLeves, VariaveisIndisponiveisError } from '@/lib/whatsapp/resolver-variaveis'
 import { sendText, UazapiRateLimitError } from '@/lib/uazapi'
@@ -8,7 +7,7 @@ import type { NotifTipo } from '@/lib/notificacao/tipos'
 /**
  * Tenta enviar uma notificação WhatsApp imediatamente via uazapi (QR Code),
  * se a conta estiver conectada. Se bem-sucedido: atualiza notificacoes_enviadas
- * para 'enviado' e registra em mensagens_wa. Se não puder enviar por aqui
+ * para 'enviado'. Se não puder enviar por aqui
  * (desconectada, template ausente, cliente inválido, falha no envio): a
  * notificação volta/permanece em 'fila' para o cron processar depois.
  * Retorna true se enviou com sucesso.
@@ -132,25 +131,6 @@ export async function enviarWhatsAppImediato(
   )
   if (!gravado) {
     console.error('[enviarWhatsAppImediato] MENSAGEM ENVIADA MAS STATUS NÃO GRAVADO — conferir manualmente', { notifId, contaId })
-  }
-
-  try {
-    const atendimentoId = await encontrarOuCriarAtendimento(
-      supabase, contaId, celular, clienteId, textoMensagem,
-    )
-
-    const { error: mwaErr } = await supabase.from('mensagens_wa').insert({
-      conta_id:       contaId,
-      cliente_id:     clienteId,
-      atendimento_id: atendimentoId,
-      celular,
-      direcao:        'out',
-      texto:          textoMensagem,
-      lida:           true,
-    })
-    if (mwaErr) console.error('[enviarWhatsAppImediato] mensagens_wa', mwaErr)
-  } catch (err) {
-    console.error('[enviarWhatsAppImediato] histórico de atendimento falhou (mensagem já enviada)', { notifId, contaId, err })
   }
 
   return true

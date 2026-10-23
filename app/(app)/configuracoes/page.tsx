@@ -1,8 +1,8 @@
 'use client'
 
 import { useActionState, useState, useEffect, useRef } from 'react'
-import { Loader2, CheckCircle, Eye, EyeOff } from 'lucide-react'
-import { salvarConfiguracoesAction, salvarEfiBankAction, salvarMercadoPagoAction, salvarProvedorPixAction } from './_actions/configuracoes'
+import { Loader2, CheckCircle } from 'lucide-react'
+import { salvarConfiguracoesAction } from './_actions/configuracoes'
 import { sanitizarLocalPart } from '@/lib/email/template'
 import { createClient } from '@/lib/supabase/client'
 
@@ -15,14 +15,6 @@ type Data = {
     cpf_cnpj?: string | null
     endereco?: string | null
     nome_comercial?: string | null
-    efi_client_id?:     string | null
-    efi_client_secret?: string | null
-    efi_pix_key?:       string | null
-    efi_cert_base64?:   string | null
-    efi_sandbox?:       boolean | null
-    mp_access_token?:   string | null   // cifrado no banco; aqui só serve para saber se existe
-    mp_webhook_secret?: string | null   // idem
-    pix_provedor?:      string | null
   } | null
   rem:    { local_part?: string | null; from_name?: string | null } | null
   domain: string | null
@@ -32,21 +24,10 @@ export const dynamic = 'force-dynamic'
 
 export default function ConfiguracoesPage() {
   const [stateGeral,  formActionGeral,  isPendingGeral]  = useActionState(salvarConfiguracoesAction, { error: null })
-  const [stateEfi,         formActionEfi,         isPendingEfi]         = useActionState(salvarEfiBankAction,    { error: null })
-  const [stateMp,          formActionMp,          isPendingMp]          = useActionState(salvarMercadoPagoAction, { error: null })
-  const [stateProv,        formActionProv,        isPendingProv]        = useActionState(salvarProvedorPixAction, { error: null })
 
   const [data, setData]                   = useState<Data | null>(null)
   const [localPart, setLocalPart]         = useState('')
   const [loading, setLoading]             = useState(true)
-  const [showEfiSecret, setShowEfiSecret]     = useState(false)
-  const [showMpToken, setShowMpToken]         = useState(false)
-  const [showMpSecret, setShowMpSecret]       = useState(false)
-  const [mpToken, setMpToken]                 = useState('')
-  const [mpSecret, setMpSecret]               = useState('')
-  const [provedorSel, setProvedorSel]         = useState<'efibank' | 'mercadopago'>('efibank')
-  const [efiSandbox, setEfiSandbox]           = useState(false)
-  const [efiCert, setEfiCert]                 = useState('')
   const scrollSaveRef = useRef(0)
 
   const SCROLL_KEY = 'cfg-scroll-y'
@@ -68,7 +49,7 @@ export default function ConfiguracoesPage() {
 
     const [{ data: cfgRaw }, { data: rem }] = await Promise.all([
       sb.from('configuracoes')
-        .select('contato, cpf_cnpj, endereco, nome_comercial, efi_client_id, efi_client_secret, efi_pix_key, efi_cert_base64, efi_sandbox, mp_access_token, mp_webhook_secret, pix_provedor')
+        .select('contato, cpf_cnpj, endereco, nome_comercial')
         .eq('conta_id', conta.id)
         .maybeSingle(),
       sb.from('email_remetente').select('local_part, from_name').eq('conta_id', conta.id).maybeSingle(),
@@ -77,9 +58,6 @@ export default function ConfiguracoesPage() {
     const cfg = cfgRaw as Data['cfg']
     setData({ cfg, rem, domain: plat?.dominio_email_operador ?? null })
     setLocalPart(rem?.local_part ?? '')
-    setEfiSandbox(!!cfg?.efi_sandbox)
-    setEfiCert(cfg?.efi_cert_base64 ?? '')
-    setProvedorSel(cfg?.pix_provedor === 'mercadopago' ? 'mercadopago' : 'efibank')
     setLoading(false)
 
     if (preserveScroll && scrollSaveRef.current > 0) {
@@ -110,13 +88,6 @@ export default function ConfiguracoesPage() {
 
   // Recargas após salvar — preservando posição de scroll
   useEffect(() => { if (stateGeral.success)  loadData(true) }, [stateGeral.success])
-  useEffect(() => { if (stateEfi.success)         loadData(true) }, [stateEfi.success])
-  // Estado inteiro como dependência: cada salvamento devolve um objeto novo, então recarrega sempre.
-  useEffect(() => { if (stateMp.success)   { setMpToken(''); setMpSecret(''); loadData(true) } }, [stateMp])
-  useEffect(() => { if (stateProv.success) loadData(true) }, [stateProv])
-
-  const efiConfigurado = !!(data?.cfg?.efi_client_id && data.cfg.efi_client_secret && data.cfg.efi_pix_key && data.cfg.efi_cert_base64)
-  const mpConfigurado  = !!(data?.cfg?.mp_access_token && data.cfg.mp_webhook_secret)
 
   const previewEmail = data?.domain && localPart
     ? `${sanitizarLocalPart(localPart)}@${data.domain}`
@@ -216,275 +187,6 @@ export default function ConfiguracoesPage() {
           {isPendingGeral && <Loader2 className="h-4 w-4 animate-spin" />}
           {isPendingGeral ? 'Salvando…' : 'Salvar configurações'}
         </button>
-      </form>
-
-
-      {/* ── Provedor de PIX ─────────────────────────────────────────────────── */}
-      <form action={formActionProv} className="space-y-6">
-        <section className="rounded-2xl border border-border bg-card p-6 space-y-4">
-          <div>
-            <h2 className="text-sm font-semibold text-foreground">Provedor de PIX</h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              Qual provedor gera o PIX quando você cobra pelo Atendimento. Configure as credenciais nas seções abaixo antes de selecionar.
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            {([
-              ['efibank',     'EfiBank',      efiConfigurado],
-              ['mercadopago', 'Mercado Pago', mpConfigurado],
-            ] as const).map(([valor, nome, configurado]) => (
-              <label
-                key={valor}
-                className="flex cursor-pointer items-center gap-3 rounded-xl border border-border px-4 py-3"
-              >
-                <input
-                  type="radio"
-                  name="pix_provedor"
-                  value={valor}
-                  checked={provedorSel === valor}
-                  onChange={() => setProvedorSel(valor)}
-                  className="h-4 w-4 accent-primary"
-                />
-                <span className="flex-1 text-sm font-medium text-foreground">{nome}</span>
-                {configurado ? (
-                  <span className="flex items-center gap-1 rounded-full bg-green-500/15 px-2.5 py-1 text-[11px] font-medium text-green-500">
-                    <CheckCircle className="h-3 w-3" />
-                    Configurado
-                  </span>
-                ) : (
-                  <span className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
-                    Não configurado
-                  </span>
-                )}
-              </label>
-            ))}
-          </div>
-        </section>
-
-        {stateProv.error && (
-          <p className="rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">{stateProv.error}</p>
-        )}
-        {stateProv.success && (
-          <p className="flex items-center gap-2 rounded-xl bg-success-bg px-3 py-2 text-sm text-success">
-            <CheckCircle className="h-4 w-4" />
-            Provedor de PIX salvo.
-          </p>
-        )}
-
-        <button
-          type="submit" disabled={isPendingProv}
-          className="flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
-        >
-          {isPendingProv && <Loader2 className="h-4 w-4 animate-spin" />}
-          {isPendingProv ? 'Salvando…' : 'Salvar provedor'}
-        </button>
-      </form>
-
-      {/* ── EfiBanK PIX ─────────────────────────────────────────────────────── */}
-      <form action={formActionEfi} className="space-y-6">
-        <section className="rounded-2xl border border-border bg-card p-6 space-y-4">
-          <h2 className="text-sm font-semibold text-foreground">EfiBanK PIX</h2>
-
-          <div className="rounded-xl border border-border bg-muted/30 p-4 text-xs text-muted-foreground space-y-2">
-            <p className="font-medium text-foreground">Como configurar:</p>
-            <ol className="list-decimal list-inside space-y-1">
-              <li>Acesse <strong>developers.efipay.com.br</strong> → Aplicações → Nova Aplicação → marque <strong>API Pix</strong></li>
-              <li>Copie o <strong>Client ID</strong> e o <strong>Client Secret</strong></li>
-              <li>Baixe o certificado <strong>.p12</strong> em Meus Certificados</li>
-              <li>Converta para Base64: <code className="bg-muted px-1 rounded">base64 -i certificado.p12</code> (Mac/Linux) ou use um conversor online</li>
-              <li>Informe sua chave PIX (CPF/CNPJ, telefone, e-mail ou chave aleatória)</li>
-              <li>Configure o webhook na EfiBanK (o token é o valor de EFIBANK_WEBHOOK_SECRET na Vercel; se essa variável não existir, use o CRON_SECRET): URL → <code className="bg-muted px-1 rounded">https://www.cobranx.site/api/webhooks/efibank?token=SEU_TOKEN</code></li>
-            </ol>
-          </div>
-
-          <div className="space-y-4">
-            {/* Ambiente */}
-            <div className="flex items-center justify-between rounded-xl border border-border px-4 py-3">
-              <div>
-                <p className="text-sm font-medium text-foreground">Ambiente sandbox (homologação)</p>
-                <p className="text-xs text-muted-foreground">Ative apenas para testes. Desative em produção.</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setEfiSandbox(v => !v)}
-                className={[
-                  'relative h-6 w-11 rounded-full transition-colors focus:outline-none',
-                  efiSandbox ? 'bg-amber-500' : 'bg-muted',
-                ].join(' ')}
-              >
-                <span className={['absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform', efiSandbox ? 'translate-x-5' : 'translate-x-0.5'].join(' ')} />
-              </button>
-              <input type="hidden" name="efi_sandbox" value={String(efiSandbox)} />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className={LABEL}>Client ID</label>
-              <input
-                name="efi_client_id"
-                defaultValue={data?.cfg?.efi_client_id ?? ''}
-                placeholder="Client_Id_..."
-                autoComplete="off"
-                className={INPUT}
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className={LABEL}>Client Secret</label>
-              <div className="relative">
-                <input
-                  name="efi_client_secret"
-                  type={showEfiSecret ? 'text' : 'password'}
-                  defaultValue={data?.cfg?.efi_client_secret ?? ''}
-                  placeholder="Client_Secret_..."
-                  autoComplete="new-password"
-                  className={INPUT + ' pr-10'}
-                />
-                <button type="button" onClick={() => setShowEfiSecret(v => !v)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-                  {showEfiSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className={LABEL}>Chave PIX (recebimento)</label>
-              <input
-                name="efi_pix_key"
-                defaultValue={data?.cfg?.efi_pix_key ?? ''}
-                placeholder="CPF, CNPJ, e-mail, telefone ou chave aleatória"
-                className={INPUT}
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className={LABEL}>Certificado .p12 em Base64</label>
-              <textarea
-                name="efi_cert_base64"
-                value={efiCert}
-                onChange={e => setEfiCert(e.target.value)}
-                placeholder="Cole aqui o conteúdo base64 do arquivo .p12..."
-                rows={4}
-                className={INPUT + ' resize-none font-mono text-xs'}
-              />
-              <p className="text-xs text-muted-foreground">
-                {data?.cfg?.efi_cert_base64 ? '✓ Certificado salvo.' : 'Nenhum certificado salvo.'}
-              </p>
-            </div>
-          </div>
-        </section>
-
-        {stateEfi.error && (
-          <p className="rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">{stateEfi.error}</p>
-        )}
-        {stateEfi.success && (
-          <p className="flex items-center gap-2 rounded-xl bg-success-bg px-3 py-2 text-sm text-success">
-            <CheckCircle className="h-4 w-4" />
-            Credenciais EfiBanK salvas.
-          </p>
-        )}
-
-        <button
-          type="submit" disabled={isPendingEfi}
-          className="flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
-        >
-          {isPendingEfi && <Loader2 className="h-4 w-4 animate-spin" />}
-          {isPendingEfi ? 'Salvando…' : 'Salvar credenciais EfiBanK'}
-        </button>
-      </form>
-
-      {/* ── Mercado Pago PIX ────────────────────────────────────────────────── */}
-      <form action={formActionMp} className="space-y-6">
-        <section className="rounded-2xl border border-border bg-card p-6 space-y-4">
-          <div className="flex items-start justify-between gap-3">
-            <h2 className="text-sm font-semibold text-foreground">Mercado Pago PIX</h2>
-            {mpConfigurado ? (
-              <span className="flex items-center gap-1 rounded-full bg-green-500/15 px-2.5 py-1 text-[11px] font-medium text-green-500">
-                <CheckCircle className="h-3 w-3" />
-                Configurado
-              </span>
-            ) : (
-              <span className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
-                Não configurado
-              </span>
-            )}
-          </div>
-
-          <div className="rounded-xl border border-border bg-muted/30 p-4 text-xs text-muted-foreground space-y-2">
-            <p className="font-medium text-foreground">Como configurar:</p>
-            <ol className="list-decimal list-inside space-y-1">
-              <li>Acesse <strong>mercadopago.com.br/developers</strong> → Suas integrações → crie ou abra uma aplicação de <strong>Pagamentos online</strong></li>
-              <li>Em <strong>Credenciais de produção</strong>, copie o <strong>Access Token</strong> (começa com <code className="bg-muted px-1 rounded">APP_USR-</code>)</li>
-              <li>Confirme que a sua conta Mercado Pago tem uma <strong>chave PIX</strong> cadastrada (no app do Mercado Pago)</li>
-              <li>Na mesma aplicação, vá em <strong>Webhooks</strong> → configure a URL <code className="bg-muted px-1 rounded">https://www.cobranx.site/api/webhooks/mercadopago-pix</code> e copie a <strong>Secret Key</strong> gerada lá</li>
-              <li>Cole o Access Token e a Secret Key abaixo e salve</li>
-            </ol>
-            <p>O dinheiro cai na sua conta Mercado Pago, não na do Cobranx. As duas credenciais ficam cifradas e nunca são exibidas de volta.</p>
-          </div>
-
-          <div className="space-y-1.5">
-            <label className={LABEL}>Access Token</label>
-            <div className="relative">
-              <input
-                name="mp_access_token"
-                type={showMpToken ? 'text' : 'password'}
-                value={mpToken}
-                onChange={e => setMpToken(e.target.value)}
-                placeholder={data?.cfg?.mp_access_token ? '•••••••• token salvo — cole outro para substituir' : 'APP_USR-...'}
-                autoComplete="new-password"
-                className={INPUT + ' pr-10'}
-              />
-              <button type="button" onClick={() => setShowMpToken(v => !v)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-                {showMpToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </button>
-            </div>
-          </div>
-
-          <div className="space-y-1.5">
-            <label className={LABEL}>Webhook Secret</label>
-            <div className="relative">
-              <input
-                name="mp_webhook_secret"
-                type={showMpSecret ? 'text' : 'password'}
-                value={mpSecret}
-                onChange={e => setMpSecret(e.target.value)}
-                placeholder={data?.cfg?.mp_webhook_secret ? '•••••••• secret salva — cole outra para substituir' : 'Secret Key gerada em Webhooks'}
-                autoComplete="new-password"
-                className={INPUT + ' pr-10'}
-              />
-              <button type="button" onClick={() => setShowMpSecret(v => !v)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-                {showMpSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </button>
-            </div>
-          </div>
-        </section>
-
-        {stateMp.error && (
-          <p className="rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">{stateMp.error}</p>
-        )}
-        {stateMp.success && (
-          <p className="flex items-center gap-2 rounded-xl bg-success-bg px-3 py-2 text-sm text-success">
-            <CheckCircle className="h-4 w-4" />
-            Mercado Pago atualizado.
-          </p>
-        )}
-
-        <div className="flex flex-wrap items-center gap-3">
-          <button
-            type="submit" disabled={isPendingMp || (!mpToken.trim() && !mpSecret.trim())}
-            className="flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
-          >
-            {isPendingMp && <Loader2 className="h-4 w-4 animate-spin" />}
-            {isPendingMp ? 'Validando…' : 'Salvar Mercado Pago'}
-          </button>
-          {(data?.cfg?.mp_access_token || data?.cfg?.mp_webhook_secret) && (
-            <button
-              type="submit" name="remover" value="true" disabled={isPendingMp}
-              className="rounded-xl border border-destructive/40 px-5 py-2.5 text-sm font-medium text-destructive transition hover:bg-destructive/10 disabled:opacity-50"
-            >
-              Remover credenciais
-            </button>
-          )}
-        </div>
       </form>
     </div>
   )

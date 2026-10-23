@@ -1,6 +1,6 @@
 ---
 name: seguranca-cobranx
-description: Programa de segurança completo do Cobranx (SaaS multi-tenant de cobrança via WhatsApp/e-mail/PIX), nível produto financeiro maduro — cobre aplicação, banco, hospedagem (Vercel) e integrações (uazapi, Mercado Pago, EfiBank). Use SEMPRE que criar ou alterar tabelas, RLS, login, cadastro, recuperação de senha, sessões, API routes, server actions, webhooks, pagamentos, filas, exportações, variáveis de ambiente, ou qualquer código que leia/grave dados. Use também ao revisar código, criar testes, configurar deploy ou responder a incidentes. Nenhuma vulnerabilidade é aceitável em nenhuma camada.
+description: Programa de segurança completo do Cobranx (SaaS multi-tenant de cobrança via WhatsApp/e-mail), nível produto financeiro maduro — cobre aplicação, banco, hospedagem (Vercel) e integrações (uazapi, Mercado Pago da assinatura). Use SEMPRE que criar ou alterar tabelas, RLS, login, cadastro, recuperação de senha, sessões, API routes, server actions, webhooks, pagamentos, filas, exportações, variáveis de ambiente, ou qualquer código que leia/grave dados. Use também ao revisar código, criar testes, configurar deploy ou responder a incidentes. Nenhuma vulnerabilidade é aceitável em nenhuma camada.
 ---
 
 # Segurança — Cobranx
@@ -10,7 +10,7 @@ Programa de segurança de produto financeiro. As ameaças, em ordem de gravidade
 1. **Vazamento entre contas** (cliente A vê dados do cliente B)
 2. **Sequestro de instância WhatsApp** (token uazapi = controle do número do cliente)
 3. **Invasão de conta de usuário** (brute force, sessão roubada, recuperação de senha frágil)
-4. **Fraude de pagamento** (webhook forjado do Mercado Pago ou da EfiBank liberando acesso/baixa indevida)
+4. **Fraude de pagamento** (webhook forjado do Mercado Pago liberando acesso indevido)
 5. **Vazamento de dados pessoais** (LGPD: multa + reputação)
 6. **Indisponibilidade** (DoS/DDoS, dependência externa lenta travando o sistema)
 
@@ -67,7 +67,7 @@ Views e funções `SECURITY DEFINER` **não herdam RLS automaticamente** — fil
 
 ## 4. Autorização, IDOR e mass assignment
 
-- **Papel dentro da conta (`admin` × `atendente`) é imposto no BANCO, não só na interface.** Achado SEG-N4 (auditoria 2026-09-19, resolvido): `conta_do_usuario()` (migration 0020) inclui `membros_conta`, e as policies de `configuracoes`/`membros_conta`/`meios_pagamento` usavam só essa função — um atendente lia pelo client anon as credenciais da conta (Meta, EfiBank incl. certificado, LookDefense — Meta e LookDefense já removidos do produto) e a chave PIX, podia trocá-las e se promover a admin. Corrigido na migration `0033_papeis_na_conta.sql` com o helper `pode_administrar_conta(conta_id)` (dono OU membro admin ativo) — regra e exemplo completos na skill `isolamento-de-contas` (seção "Papéis dentro da conta"). Ação que o atendente precisa (ex.: responder cliente, que usa a conexão uazapi da conta) roda no servidor com service role depois de verificar a associação via `getConta()` — nunca afrouxando a policy para o atendente ler o segredo direto.
+- **Credencial da conta é protegida no BANCO por `pode_administrar_conta()`, não só por `conta_do_usuario()`.** Achado SEG-N4 (auditoria 2026-09-19, resolvido na migration `0033_papeis_na_conta.sql`): com equipe (migration 0020), um atendente lia e trocava credenciais e a chave PIX e se promovia a admin, porque as policies só checavam a associação à conta. A equipe saiu do produto em 2026-10-23 (migration 0037) e hoje a função vale só para o dono, mas continua sendo o helper obrigatório para credenciais — ver skill `isolamento-de-contas`.
 - ID vindo do client nunca é confiável: confirmar que o recurso pertence à `conta_id` da sessão antes de agir. Ações destrutivas (excluir cliente, desconectar WhatsApp, cancelar assinatura, exportar base) exigem papel de dono.
 - **Mass assignment:** PROIBIDO gravar o body/objeto inteiro do request direto no banco — whitelist explícita dos campos graváveis por action/rota. Campo sensível (`role`, `conta_id`, `status` de pagamento, `plano`) NUNCA aceito do client, mesmo que o schema Zod "passe" — é derivado no servidor.
 - **Concorrência em operação crítica** (baixa de parcela, ativação de plano): atômica e idempotente via RPC/transação com lock — "ler, decidir, gravar" sem lock é corrida clássica (duplo clique, retry, dois eventos de webhook) que duplica lançamento ou dá baixa duas vezes.
@@ -92,27 +92,25 @@ Já houve incidente de credencial exposta em projeto anterior. Regras permanente
 - `NEXT_PUBLIC_` só para valores realmente públicos.
 - **Toda variável de ambiente nova é documentada em `.env.example` na mesma tarefa que a introduz.** Achado real deste projeto: `UAZAPI_URL`/`UAZAPI_ADMIN_TOKEN` (SIN-C2) e as credenciais de Twilio/LookDefense/EfiBank ficaram de fora do `.env.example` por meses — regra violada, não repetir.
 - Vazou → rotacionar IMEDIATAMENTE (Supabase, Mercado Pago, EfiBank, uazapi) e atualizar na Vercel.
-- **Credenciais de integração por conta hoje ficam em texto claro no banco (SEG-A5, aberto):** `conexoes.uazapi_instance_token`, e em `configuracoes`: `efi_client_secret`, `efi_cert_base64`. Ao tocar qualquer uma dessas colunas, avaliar criptografia em repouso (ex.: `pgsodium`/Vault do Supabase ou cifra na aplicação com chave fora do banco) em vez de acrescentar mais um segredo em claro. **Primeiro segredo cifrado do projeto: `configuracoes.mp_access_token` (Access Token do Mercado Pago de cada conta, 2026-09-21)** — AES-256-GCM em `lib/crypto/segredos.ts` (`cifrarSegredo`/`decifrarSegredo`), chave `CREDENCIAIS_KEY` (32 bytes em base64) fora do banco, valor com prefixo `enc:v1:`. É o padrão a seguir e o helper a reutilizar quando o SEG-A5 for resolvido para as demais colunas; perder ou trocar a chave invalida os tokens já salvos (cada dono cola de novo). Sem a chave o servidor recusa salvar — nunca cai para texto claro. (As colunas `meta_*` — Meta Cloud API — foram removidas do banco em 2026-09-21, migration `0034_remove_meta_cloud_api.sql`, e `ld_username`/`ld_password` — LookDefense — no mesmo dia, migration `0035_remove_lookdefense.sql`; não citar mais nem recriar.)
+- **Credenciais de integração por conta em texto claro no banco (SEG-A5, aberto):** hoje só `conexoes.uazapi_instance_token`. Ao tocar essa coluna ou criar outra credencial por conta, cifrar em repouso (`pgsodium`/Vault do Supabase ou cifra na aplicação com chave fora do banco) em vez de acrescentar mais um segredo em claro. O helper AES-256-GCM que cifrava o token do Mercado Pago PIX (`lib/crypto/segredos.ts`, chave `CREDENCIAIS_KEY`) saiu junto com o PIX do cliente final em 2026-10-23 — está no git (`2dd6dfc`) para reaproveitar. (Colunas `meta_*`, `ld_*`, `efi_*`, `mp_access_token`/`mp_webhook_secret` foram removidas do banco pelas migrations 0034, 0035 e 0037; não citar mais nem recriar.)
 - **Rotação programada:** a cada 6 meses ou quando alguém com acesso sair, rotacionar service role e tokens de integração.
 - **`vercel env pull` não prova que uma variável está vazia.** Achado real (2026-09-19): variáveis marcadas "Sensitive" no painel da Vercel voltam como valor vazio (`""`) no `env pull` mesmo quando estão preenchidas de verdade — é redação de segurança da própria Vercel, não o estado real. Um valor vazio no pull é indício, nunca prova; confirmar via comportamento observado (teste direto contra o serviço, log de erro específico) ou perguntando ao dono do projeto, nunca só pelo `env pull`.
 - **Ambientes separados:** projeto Supabase de dev ≠ produção; chaves distintas; NUNCA dados reais (telefones/dívidas de verdade) em dev ou teste. Segredo de produção nunca marcado para Preview na Vercel quando previews são publicamente acessíveis.
 
-## 7. Pagamentos (Mercado Pago + EfiBank PIX)
+## 7. Pagamentos (Mercado Pago da assinatura)
 
 - O Cobranx NUNCA armazena, trafega ou loga dados de cartão. Checkout/tokenização do Mercado Pago (assinatura do SaaS) são 100% do provedor; guardar apenas IDs de referência.
-- **EfiBank (PIX do cliente final, ver skill `regras-financeiras` §3.2):** certificado `.p12` e credenciais ficam em `efi_cert_base64`/`efi_client_secret` no banco — mesma régua de segredo em repouso de qualquer credencial sensível (avaliar criptografia em repouso dessas colunas, não só do token uazapi).
-- **Mercado Pago PIX (cliente final, ver `regras-financeiras` §3.3):** cada conta usa o Access Token da própria conta MP — guardado **cifrado** (ver §6) e validado no próprio MP (`GET /users/me`) antes de salvar; nunca exibido de volta na tela nem logado. O valor do PIX vem da parcela no banco (escopada pela conta), nunca do navegador.
+- PIX do cliente final (EfiBank e Mercado Pago do cliente final — removidos em 2026-10-23, migration 0037) — não há mais credencial de pagamento por conta no banco.
 - Nenhum formulário próprio de cartão.
 - Valor e status de pagamento exibidos vêm de consulta à API ou de webhook validado — nunca calculados no client.
 
-## 8. Webhooks (Mercado Pago, EfiBank, uazapi)
+## 8. Webhooks (Mercado Pago, uazapi)
 
 - Validar assinatura/segredo compartilhado antes de processar; inválido → 401 sem side effects. **Segredo não configurado no servidor também é recusa** (fail closed) — nunca `if (secret) { validar }` que aceita tudo quando a env some.
-- Estado atual (auditoria 2026-09-19): Mercado Pago (HMAC obrigatório), webhook de conexão uazapi (`UAZAPI_WEBHOOK_SECRET` obrigatório) e webhook de mensagens `/api/webhooks/whatsapp` (`UAZAPI_WEBHOOK_SECRET` via `?secret=`; a Meta foi removida em 2026-09-21) estão todos corretos. Testes de regressão: `tests/webhook-whatsapp-auth.test.ts`. **Webhook novo nasce assim desde o primeiro commit, nunca "depois eu valido".**
-- `[ainda aberto]` Webhook EfiBank autentica com o mesmo `CRON_SECRET` dos crons internos (SEG-N2) — vazar um compromete o outro; separar em segredo próprio.
-- **Webhook de PIX do Mercado Pago (`/api/webhooks/mercadopago-pix`, cliente final, Orders API):** URL **única e fixa**, sem `conta_id` — a Orders API não aceita `notification_url` por requisição (só a URL fixa do painel do app de cada conta), então o tenant é achado pelo **id da ordem** (globalmente único, atribuído pelo Mercado Pago) em `cobrancas_pix.txid`, buscado sem filtro de conta. Só depois de achar a linha é que sabemos qual conta usar. (1) Assinatura **oficial** do Mercado Pago (`x-signature`: HMAC-SHA256 hex do manifest `id:{id em minúsculo};request-id:{x-request-id};ts:{ts};`, `timingSafeEqual`) com a **Secret Key daquela conta** (`configuracoes.mp_webhook_secret`, colada pelo dono a partir do painel MP — não existe segredo de app da plataforma aqui); sem token/segredo configurado na conta → **fail closed**, 200 sem processar (não é ataque, pode ser notificação de teste do dashboard). Assinatura inválida → 401. (2) A notificação nunca é confiada mesmo com assinatura válida: reconsulta `GET /v1/orders/{id}` com o token da conta e só dá baixa se `status === 'processed'` e `status_detail === 'accredited'` — vocabulário próprio da Orders API, não `approved`. Testes: `tests/webhook-mercadopago-pix.test.ts` (mutação nas checagens de assinatura, status e no lookup por conta/provedor).
+- Estado atual: Mercado Pago da assinatura (HMAC obrigatório) e webhook de conexão uazapi (`UAZAPI_WEBHOOK_SECRET` obrigatório). O webhook de mensagens recebidas (`/api/webhooks/whatsapp`) saiu com o multi-atendimento em 2026-10-23. **Webhook novo nasce assim desde o primeiro commit, nunca "depois eu valido".**
+- Webhooks de PIX (`/api/webhooks/efibank`, `/api/webhooks/mercadopago-pix`) (EfiBank e Mercado Pago do cliente final — removidos em 2026-10-23, migration 0037).
 - **Rotas `/api/cron/*` autenticam com `cronAutorizado(req)` (`lib/cron-auth.ts`), sempre.** Sem `CRON_SECRET` no servidor a resposta é 401 — `=== \`Bearer ${process.env.CRON_SECRET}\`` aceita "Bearer undefined" e `if (secret && ...)` deixa a rota aberta (foi assim que um cron antigo, já removido, ficou sem autenticação). Cron novo usa o helper e ganha os 4 testes de `tests/cron-autenticacao.test.ts`.
-- Idempotência por ID de evento — EfiBank já implementa isso corretamente (marca `concluida` antes de processar, ver `regras-financeiras`).
+- Idempotência por ID de evento em todo webhook que dá baixa ou libera acesso.
 - Ação crítica (liberar acesso, marcar pago) → confirmar via API do provedor, não confiar só no payload.
 
 ## 9. Instância WhatsApp (uazapi) — o ativo mais crítico
@@ -121,7 +119,7 @@ Já houve incidente de credencial exposta em projeto anterior. Regras permanente
 
 - Token da instância (`uazapi_instance_token`) por conta, nunca exposto ao navegador. **Achado aberto (SEG-A5): esse token está gravado em texto claro na tabela `conexoes`** — criptografar em repouso é o correto ao tocar essa coluna, não uma melhoria opcional.
 - Cliente desconectou/churn → desconectar a instância na uazapi.
-- Webhook de conexão (`app/api/webhook/uazapi`) e de mensagens (`app/api/webhooks/whatsapp`) exigem o segredo compartilhado (`UAZAPI_WEBHOOK_SECRET`, injetado como `&secret=` na URL registrada pela action de conexão) — sem isso, qualquer um forjaria desconexão, QR falso ou mensagem de cliente. Conta já conectada antes dessa exigência precisa reiniciar a conexão uma vez para re-registrar o webhook com o segredo.
+- Webhook de conexão (`app/api/webhook/uazapi`) exige o segredo compartilhado (`UAZAPI_WEBHOOK_SECRET`, `?secret=` na URL) — sem isso, qualquer um forjaria desconexão ou QR falso.
 
 ## 10. Endurecimento do app e da hospedagem (Vercel)
 
@@ -142,7 +140,7 @@ Além disso:
 ## 11. Disponibilidade e resiliência
 
 - Operação cara (relatório, exportação, geração de PDF) nunca síncrona numa rota web pública — vai para fila/cron assíncrono.
-- Dependência externa lenta ou fora do ar (uazapi, Resend, EfiBank, Mercado Pago) não pode travar o sistema inteiro: timeout curto + fallback/erro claro em vez de empilhar timeout — já é regra da skill `whatsapp-uazapi` para o cron de WhatsApp (orçamento interno de 270s).
+- Dependência externa lenta ou fora do ar (uazapi, Resend, Mercado Pago) não pode travar o sistema inteiro: timeout curto + fallback/erro claro em vez de empilhar timeout — já é regra da skill `whatsapp-uazapi` para o cron de WhatsApp (orçamento interno de 270s).
 - Timeout e limite de payload em toda rota.
 
 ## 12. Supply chain e CI/CD

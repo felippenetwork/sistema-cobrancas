@@ -18,7 +18,6 @@
 
 import { NextRequest, NextResponse, after } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { encontrarOuCriarAtendimento } from '@/lib/atendimento/encontrar-ou-criar'
 import { resolverVariaveis, resolverVariaveisLeves, VariaveisIndisponiveisError } from '@/lib/whatsapp/resolver-variaveis'
 import { atualizarStatusNotificacao, vereditoLembrete } from '@/lib/whatsapp/status-notificacao'
 import { cronAutorizado } from '@/lib/cron-auth'
@@ -258,18 +257,6 @@ async function enviarNotificacao(
     console.error('[cron/whatsapp-uazapi] MENSAGEM ENVIADA MAS STATUS NÃO GRAVADO — conferir manualmente', {
       notifId: notif.id, contaId,
     })
-  }
-
-  // Garante que a mensagem enviada aparece no histórico de Atendimento, não só no Log.
-  try {
-    const atendimentoId = await encontrarOuCriarAtendimento(supabase, contaId, celular, notif.cliente_id, mensagem)
-    const { error: mwaErr } = await supabase.from('mensagens_wa').insert({
-      conta_id: contaId, cliente_id: notif.cliente_id, atendimento_id: atendimentoId,
-      celular, direcao: 'out', texto: mensagem, lida: true,
-    })
-    if (mwaErr) console.error('[cron/whatsapp-uazapi] mensagens_wa.insert', mwaErr)
-  } catch (err) {
-    console.error('[cron/whatsapp-uazapi] histórico de atendimento falhou (mensagem já enviada)', { notifId: notif.id, contaId, err })
   }
 
   return 'enviado'

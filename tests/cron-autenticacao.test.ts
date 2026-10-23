@@ -7,12 +7,10 @@ import { FakeDb } from './helpers/fake-supabase'
 
 const mocks = vi.hoisted(() => ({
   db: { atual: null as unknown },
-  encontrarOuCriarAtendimento: vi.fn(),
   fetch: vi.fn(),
 }))
 
 vi.mock('@/lib/supabase/admin', () => ({ createAdminClient: () => mocks.db.atual }))
-vi.mock('@/lib/atendimento/encontrar-ou-criar', () => ({ encontrarOuCriarAtendimento: mocks.encontrarOuCriarAtendimento }))
 
 import { GET as cronScheduler } from '@/app/api/cron/scheduler/route'
 
@@ -27,7 +25,6 @@ beforeEach(() => {
   vi.setSystemTime(new Date(MEIO_DIA_SP))
   process.env.CRON_SECRET = SEGREDO
   mocks.db.atual = new FakeDb({}).cliente()
-  mocks.encontrarOuCriarAtendimento.mockReset().mockResolvedValue('atend-1')
   mocks.fetch.mockReset().mockResolvedValue({ ok: true, json: async () => ({}) })
   vi.stubGlobal('fetch', mocks.fetch)
   vi.spyOn(console, 'error').mockImplementation(() => {})
