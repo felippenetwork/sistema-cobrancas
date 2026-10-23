@@ -3,6 +3,8 @@ import { redirect } from 'next/navigation'
 import { DisparosClient } from './_components/disparos-client'
 
 export const dynamic = 'force-dynamic'
+// As ações desta página leem grupos na uazapi (/group/list), que leva dezenas de segundos em grupos grandes.
+export const maxDuration = 60
 
 export default async function DisparosPage() {
   const supabase = await createClient()
@@ -25,7 +27,7 @@ export default async function DisparosPage() {
         id, nome, status, tipo, total_destinatarios, total_enviados, total_falhas, total_pulados,
         agendado_para, iniciado_em, concluido_em, criado_em,
         janela_inicio, janela_fim, prog_inicio, prog_maximo, prog_dia, prog_planejado_em,
-        registrar_enviados, excluir_ja_enviados,
+        registrar_enviados, excluir_ja_enviados, passos, etiqueta_adicionar_nome, etiqueta_remover_nome,
         modelos_wa(nome, status)
       `)
       .eq('conta_id', contaId)

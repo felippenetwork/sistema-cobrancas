@@ -8,6 +8,7 @@ import {
 } from '../_actions'
 import { quotaDoDia } from '@/lib/disparo/progressivo'
 import { ProgressivoForm } from './progressivo-form'
+import { EtiquetasCampo, type EtiquetaEscolhida } from './etiquetas-campo'
 
 type Modelo  = { id: string; nome: string; status: string; corpo: string | null }
 type Cliente = { id: string; nome: string | null; sobrenome: string | null; celular: string }
@@ -33,6 +34,9 @@ type Campanha = {
   prog_planejado_em: string | null
   registrar_enviados: boolean
   excluir_ja_enviados: boolean
+  passos: unknown[] | null
+  etiqueta_adicionar_nome: string | null
+  etiqueta_remover_nome: string | null
   modelos_wa: { nome: string; status: string } | null
 }
 
@@ -93,6 +97,8 @@ function ModalNovaCampanha({
   const [enviando, setEnviando]         = useState(false)
   const [enviada, setEnviada]           = useState(false)
   const [pulados, setPulados]           = useState(0)
+  const [etqAdicionar, setEtqAdd]       = useState<EtiquetaEscolhida>(null)
+  const [etqRemover, setEtqRem]         = useState<EtiquetaEscolhida>(null)
 
   const clientesFiltrados = clientes.filter(c => {
     const nome = [c.nome, c.sobrenome].filter(Boolean).join(' ').toLowerCase()
@@ -237,6 +243,7 @@ function ModalNovaCampanha({
               </p>
             </div>
             <div className="space-y-2">
+              <EtiquetasCampo nomeCampo adicionar={etqAdicionar} remover={etqRemover} onAdicionar={setEtqAdd} onRemover={setEtqRem} />
               <OpcaoRegistro name="registrar_enviados" defaultChecked titulo="Registrar quem receber"
                 descricao="Guarda cada número que recebeu, para os próximos disparos poderem pular." />
               <OpcaoRegistro name="excluir_ja_enviados" titulo="Não enviar para quem já recebeu"
@@ -423,9 +430,19 @@ export function DisparosClient({
                         )}
                       </div>
                       {c.tipo === 'progressivo' ? (
-                        <p className="mt-0.5 text-xs text-muted-foreground tabular-nums">{resumoProgressivo(c)}</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground tabular-nums">
+                          {resumoProgressivo(c)}
+                          {c.passos && c.passos.length > 1 && ` · ${c.passos.length} mensagens por contato`}
+                        </p>
                       ) : c.modelos_wa && (
                         <p className="mt-0.5 text-xs text-muted-foreground">Modelo: {c.modelos_wa.nome}</p>
+                      )}
+                      {(c.etiqueta_adicionar_nome || c.etiqueta_remover_nome) && (
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          Etiqueta:{c.etiqueta_adicionar_nome && ` põe "${c.etiqueta_adicionar_nome}"`}
+                          {c.etiqueta_adicionar_nome && c.etiqueta_remover_nome && ' ·'}
+                          {c.etiqueta_remover_nome && ` tira "${c.etiqueta_remover_nome}"`}
+                        </p>
                       )}
 
                       {/* Estatísticas */}

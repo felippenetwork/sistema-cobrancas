@@ -186,3 +186,103 @@ export async function sendPresence(
     body:    JSON.stringify({ number: formatPhoneNumber(number), presence, delay: delayMs }),
   }).catch(() => {})
 }
+
+async function erroUazapi(res: Response, rotulo: string): Promise<Error> {
+  if (res.status === 429) return new UazapiRateLimitError(`uazapi ${rotulo} → 429`)
+  const err = await res.json().catch(() => ({} as { error?: string }))
+  return new Error((err as { error?: string }).error || `uazapi ${rotulo} HTTP ${res.status}`)
+}
+
+export type TipoMidia = 'image' | 'video' | 'ptt' | 'document'
+
+// POST /send/media com `file` = URL pública/assinada (a uazapi baixa o arquivo). Formato
+// confirmado em produção no ERP-Rifas para image/video; ptt (áudio de voz) e document seguem o
+// mesmo contrato da API. `text` = legenda; `docName` = nome do arquivo no documento.
+export async function sendMedia(
+  instanceToken: string,
+  number: string,
+  tipo: TipoMidia,
+  url: string,
+  opts: { legenda?: string | null; nomeArquivo?: string | null } = {},
+): Promise<void> {
+  const res = await fetch(`${UAZAPI_URL}/send/media`, {
+    method:  'POST',
+    headers: { token: instanceToken, 'Content-Type': 'application/json' },
+    body:    JSON.stringify({
+      number: formatPhoneNumber(number),
+      type:   tipo,
+      file:   url,
+      ...(opts.legenda ? { text: opts.legenda } : {}),
+      ...(tipo === 'document' && opts.nomeArquivo ? { docName: opts.nomeArquivo } : {}),
+    }),
+  })
+  if (!res.ok) throw await erroUazapi(res, 'sendMedia')
+}
+
+// ─── Grupos, contatos e etiquetas (leitura confirmada contra a API real em 2026-10-23) ──
+
+export interface UazapiGrupo {
+  JID: string
+  Name: string
+  ParticipantCount: number
+  IsParent: boolean
+  LinkedParentJID: string
+  IsAnnounce: boolean
+  Participants: { JID: string; PhoneNumber: string; DisplayName: string }[]
+  // `name` aqui é o nome que a pessoa usa no WhatsApp (bate com wa_name do /chat/find); vem
+  // preenchido só para quem o número já "conhece". `pn` vazio = grupo com número oculto (LID).
+  participant_profiles?: { jid: string; pn: string; lid: string; name?: string }[]
+}
+
+/** Grupos do número com os participantes. Pode levar dezenas de segundos em grupos grandes. */
+export async function listGroups(instanceToken: string, timeoutMs = 50_000): Promise<UazapiGrupo[]> {
+  const res = await fetch(`${UAZAPI_URL}/group/list`, {
+    headers: { token: instanceToken },
+    signal:  AbortSignal.timeout(timeoutMs),
+    cache:   'no-store',
+  })
+  if (!res.ok) throw await erroUazapi(res, 'listGroups')
+  const data = await res.json() as { groups?: UazapiGrupo[] }
+  return data.groups ?? []
+}
+
+/** Agenda do celular conectado: telefone (só dígitos) → nome salvo. */
+export async function listSavedContacts(instanceToken: string, timeoutMs = 30_000): Promise<Map<string, string>> {
+  const res = await fetch(`${UAZAPI_URL}/contacts?contactScope=address_book`, {
+    headers: { token: instanceToken },
+    signal:  AbortSignal.timeout(timeoutMs),
+    cache:   'no-store',
+  })
+  if (!res.ok) throw await erroUazapi(res, 'listSavedContacts')
+  const lista = await res.json() as { jid?: string; contact_name?: string; contact_FirstName?: string }[]
+  const mapa = new Map<string, string>()
+  for (const c of Array.isArray(lista) ? lista : []) {
+    if (!c.jid?.endsWith('@s.whatsapp.net')) continue
+    const nome = (c.contact_FirstName || c.contact_name || '').trim()
+    if (nome) mapa.set(c.jid.split('@')[0].replace(/\D/g, ''), nome)
+  }
+  return mapa
+}
+
+export interface UazapiEtiqueta { id: string; nome: string; cor: string | null }
+
+/** Etiquetas do WhatsApp Business. O WhatsApp identifica a etiqueta pelo `labelid`. */
+export async function listLabels(instanceToken: string): Promise<UazapiEtiqueta[]> {
+  const res = await fetch(`${UAZAPI_URL}/labels`, { headers: { token: instanceToken }, cache: 'no-store' })
+  if (!res.ok) throw await erroUazapi(res, 'listLabels')
+  const lista = await res.json() as { id: string; labelid?: string; name: string; colorHex?: string }[]
+  return (Array.isArray(lista) ? lista : []).map(l => ({ id: l.labelid || l.id, nome: l.name, cor: l.colorHex ?? null }))
+}
+
+/** Põe ou tira uma etiqueta da conversa com o número (uma operação por chamada). */
+export async function setChatLabel(instanceToken: string, number: string, acao: 'adicionar' | 'remover', etiquetaId: string): Promise<void> {
+  const res = await fetch(`${UAZAPI_URL}/chat/labels`, {
+    method:  'POST',
+    headers: { token: instanceToken, 'Content-Type': 'application/json' },
+    body:    JSON.stringify({
+      number: formatPhoneNumber(number),
+      ...(acao === 'adicionar' ? { add_labelid: etiquetaId } : { remove_labelid: etiquetaId }),
+    }),
+  })
+  if (!res.ok) throw await erroUazapi(res, 'setChatLabel')
+}

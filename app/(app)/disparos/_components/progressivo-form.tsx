@@ -1,9 +1,12 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { Loader2, Plus, Trash2 } from 'lucide-react'
+import { Download, Loader2 } from 'lucide-react'
 import { criarProgressivoAction } from '../_actions'
 import { interpretarLista, quotaDoDia } from '@/lib/disparo/progressivo'
+import { PassosEditor, novoPasso, type PassoEditavel } from './passos-editor'
+import { ImportarGrupo } from './importar-grupo'
+import { EtiquetasCampo, type EtiquetaEscolhida } from './etiquetas-campo'
 
 type Modelo = { id: string; nome: string; corpo: string | null }
 
@@ -33,19 +36,29 @@ function Interruptor({ id, checked, onChange, titulo, descricao }: {
   )
 }
 
+/** Passos da tela → formato que o servidor valida (lib/disparo/passos.ts). */
+function paraEnvio(passos: PassoEditavel[]) {
+  return passos.map(p => p.tipo === 'texto'
+    ? { tipo: p.tipo, texto: p.texto, variacoes: p.variacoes, digitacao_seg: p.digitacao_seg }
+    : { tipo: p.tipo, caminho: p.caminho ?? '', nome_arquivo: p.nome_arquivo, legenda: p.legenda.trim() || null, digitacao_seg: p.digitacao_seg })
+}
+
 export function ProgressivoForm({ modelos, onConcluido, onVoltar }: {
   modelos: Modelo[]
   onConcluido: (pulados: number) => void
   onVoltar: () => void
 }) {
   const [nome, setNome]               = useState('')
-  const [mensagem, setMensagem]       = useState('')
-  const [variacoes, setVariacoes]     = useState<string[]>([])
+  const [passos, setPassos]           = useState<PassoEditavel[]>(() => [novoPasso('texto', 0)])
   const [lista, setLista]             = useState('')
+  const [importando, setImportando]   = useState(false)
+  const [resumoImport, setResumoImp]  = useState<string | null>(null)
   const [janelaInicio, setJanelaIni]  = useState('09:00')
   const [janelaFim, setJanelaFim]     = useState('18:00')
   const [inicio, setInicio]           = useState(1)
   const [maximo, setMaximo]           = useState(20)
+  const [etqAdicionar, setEtqAdd]     = useState<EtiquetaEscolhida>(null)
+  const [etqRemover, setEtqRem]       = useState<EtiquetaEscolhida>(null)
   const [registrar, setRegistrar]     = useState(true)
   const [excluir, setExcluir]         = useState(true)
   const [erro, setErro]               = useState<string | null>(null)
@@ -53,21 +66,33 @@ export function ProgressivoForm({ modelos, onConcluido, onVoltar }: {
 
   const { contatos, invalidas } = useMemo(() => interpretarLista(lista), [lista])
   const dias = diasParaTerminar(contatos.length, inicio, maximo)
+  const segundosPorContato = passos.reduce((s, p) => s + p.digitacao_seg, 0)
   const exemplo = useMemo(() => {
     if (inicio < 1 || maximo < inicio) return ''
-    const passos = Array.from({ length: Math.min(maximo - inicio + 2, 6) }, (_, d) => quotaDoDia(d, inicio, maximo))
-    const tamanho = maximo - inicio + 1
-    return tamanho > 5
-      ? `${passos.slice(0, 3).join(', ')} … ${maximo}, e volta para ${inicio}`
-      : `${passos.join(', ')}…`
+    const passosCiclo = Array.from({ length: Math.min(maximo - inicio + 2, 6) }, (_, d) => quotaDoDia(d, inicio, maximo))
+    return maximo - inicio + 1 > 5
+      ? `${passosCiclo.slice(0, 3).join(', ')} … ${maximo}, e volta para ${inicio}`
+      : `${passosCiclo.join(', ')}…`
   }, [inicio, maximo])
+
+  const primeiroTexto = passos.find(p => p.tipo === 'texto')
+
+  function usarModelo(id: string) {
+    const m = modelos.find(x => x.id === id)
+    if (!m?.corpo) return
+    const i = passos.findIndex(p => p.tipo === 'texto')
+    if (i >= 0) setPassos(passos.map((p, j) => (j === i && p.tipo === 'texto' ? { ...p, texto: m.corpo as string } : p)))
+    else setPassos([{ ...novoPasso('texto', 0), texto: m.corpo } as PassoEditavel, ...passos])
+  }
 
   async function iniciar(e: React.FormEvent) {
     e.preventDefault()
     setErro(null)
+    if (passos.some(p => p.tipo !== 'texto' && !p.caminho)) { setErro('Uma mensagem de mídia ainda está sem arquivo.'); return }
     setSalvando(true)
     const r = await criarProgressivoAction({
-      nome, mensagem, variacoes, lista, janelaInicio, janelaFim, inicio, maximo,
+      nome, passos: paraEnvio(passos), lista, janelaInicio, janelaFim, inicio, maximo,
+      etiquetaAdicionar: etqAdicionar, etiquetaRemover: etqRemover,
       registrarEnviados: registrar, excluirJaEnviados: excluir,
     })
     setSalvando(false)
@@ -76,67 +101,60 @@ export function ProgressivoForm({ modelos, onConcluido, onVoltar }: {
   }
 
   return (
-    <form onSubmit={iniciar} className="flex flex-col gap-5 overflow-y-auto p-5" style={{ maxHeight: '75dvh' }}>
+    <form onSubmit={iniciar} className="flex flex-col gap-5 overflow-y-auto p-5" style={{ maxHeight: '78dvh' }}>
       <div>
         <label htmlFor="prog-nome" className={LABEL}>Nome do disparo</label>
         <input id="prog-nome" value={nome} onChange={e => setNome(e.target.value)} required maxLength={80}
           placeholder="Prospecção outubro" className={INPUT} />
       </div>
 
-      {/* Mensagem */}
-      <section className="space-y-3">
+      {/* Mensagens */}
+      <section>
         <div className="flex items-end justify-between gap-3">
-          <label htmlFor="prog-msg" className={LABEL + ' mb-0'}>Mensagem</label>
-          {modelos.some(m => m.corpo) && (
-            <select
-              aria-label="Usar um modelo"
-              defaultValue=""
-              onChange={e => { const m = modelos.find(x => x.id === e.target.value); if (m?.corpo) setMensagem(m.corpo); e.target.value = '' }}
-              className="rounded-lg border border-border bg-input px-2 py-1 text-xs text-muted-foreground outline-none focus-visible:border-primary"
-            >
+          <p className={LABEL + ' mb-0'}>Mensagens, na ordem em que chegam</p>
+          {modelos.some(m => m.corpo) && primeiroTexto && (
+            <select aria-label="Usar um modelo no primeiro texto" defaultValue=""
+              onChange={e => { usarModelo(e.target.value); e.target.value = '' }}
+              className="rounded-lg border border-border bg-input px-2 py-1 text-xs text-muted-foreground outline-none focus-visible:border-primary">
               <option value="" disabled>Usar um modelo…</option>
               {modelos.filter(m => m.corpo).map(m => <option key={m.id} value={m.id}>{m.nome}</option>)}
             </select>
           )}
         </div>
-        <textarea id="prog-msg" value={mensagem} onChange={e => setMensagem(e.target.value)} required rows={4} maxLength={4000}
-          placeholder="Oi {{nome}}, tudo bem? …" className={INPUT + ' resize-y'} />
-        <p className="text-xs text-muted-foreground">
-          <code className="rounded bg-muted px-1">{'{{nome}}'}</code> vira o nome do contato. Sem nome, some da frase.
+        <PassosEditor passos={passos} onChange={setPassos} />
+        <p className="mt-2 text-xs text-muted-foreground">
+          <code className="rounded bg-muted px-1">{'{{nome}}'}</code> vira o nome do contato (some da frase se não houver).
+          Cada contato leva cerca de <span className="tabular-nums">{segundosPorContato}</span> s entre digitação e envios.
         </p>
-
-        {variacoes.map((v, i) => (
-          <div key={i} className="flex gap-2">
-            <textarea value={v} onChange={e => setVariacoes(vs => vs.map((x, j) => (j === i ? e.target.value : x)))}
-              rows={3} maxLength={4000} aria-label={`Variação ${i + 1}`}
-              placeholder={`Variação ${i + 1} — outra forma de dizer a mesma coisa`} className={INPUT + ' resize-y'} />
-            <button type="button" onClick={() => setVariacoes(vs => vs.filter((_, j) => j !== i))}
-              aria-label={`Remover variação ${i + 1}`}
-              className="h-10 shrink-0 rounded-lg px-2 text-muted-foreground hover:bg-accent hover:text-foreground">
-              <Trash2 className="h-4 w-4" />
-            </button>
-          </div>
-        ))}
-        {variacoes.length < 5 && (
-          <button type="button" onClick={() => setVariacoes(vs => [...vs, ''])}
-            className="flex items-center gap-1.5 text-xs font-medium text-primary hover:underline">
-            <Plus className="h-3.5 w-3.5" />
-            Adicionar variação
-          </button>
-        )}
-        {variacoes.length > 0 && (
-          <p className="text-xs text-muted-foreground">As versões se alternam a cada contato, para não repetir o mesmo texto.</p>
-        )}
       </section>
 
       {/* Lista */}
       <section className="space-y-2">
-        <label htmlFor="prog-lista" className={LABEL}>Números e nomes</label>
+        <div className="flex items-end justify-between gap-3">
+          <label htmlFor="prog-lista" className={LABEL + ' mb-0'}>Números e nomes</label>
+          {!importando && (
+            <button type="button" onClick={() => setImportando(true)}
+              className="flex items-center gap-1 text-xs font-medium text-primary hover:underline">
+              <Download className="h-3.5 w-3.5" /> Importar de grupo ou comunidade
+            </button>
+          )}
+        </div>
+        {importando && (
+          <ImportarGrupo
+            onFechar={() => setImportando(false)}
+            onImportar={(linhas, resumo) => {
+              setLista(atual => (atual.trim() ? `${atual.trim()}\n${linhas}` : linhas))
+              setResumoImp(resumo)
+              setImportando(false)
+            }}
+          />
+        )}
+        {resumoImport && <p className="text-xs text-muted-foreground">Importado: {resumoImport}.</p>}
         <textarea id="prog-lista" value={lista} onChange={e => setLista(e.target.value)} rows={6}
           placeholder={'Maria Souza; 21 99999-0001\nJoão, 5521999990002\n21999990003'}
           className={INPUT + ' resize-y font-mono text-xs'} />
         <p className="text-xs text-muted-foreground">
-          Um contato por linha, nome e número em qualquer ordem.{' '}
+          Um contato por linha, nome e número em qualquer ordem. Repetidos entram uma vez.{' '}
           <span className="font-medium text-foreground tabular-nums">{contatos.length}</span> número{contatos.length === 1 ? '' : 's'} válido{contatos.length === 1 ? '' : 's'}
           {invalidas.length > 0 && <> · <span className="tabular-nums">{invalidas.length}</span> linha{invalidas.length === 1 ? '' : 's'} sem número válido (ignorada{invalidas.length === 1 ? '' : 's'})</>}
         </p>
@@ -165,8 +183,8 @@ export function ProgressivoForm({ modelos, onConcluido, onVoltar }: {
         </div>
         {exemplo && (
           <div className="rounded-xl border border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
-            <p>Envios por dia: <span className="font-medium text-foreground tabular-nums">{exemplo}</span>.</p>
-            <p className="mt-1">Cada envio sai num horário aleatório entre {janelaInicio} e {janelaFim}, espaçado dos outros, com 20 segundos de "digitando…" antes.</p>
+            <p>Contatos por dia: <span className="font-medium text-foreground tabular-nums">{exemplo}</span>.</p>
+            <p className="mt-1">Cada contato recebe num horário aleatório entre {janelaInicio} e {janelaFim}, espaçado dos outros.</p>
             {dias > 0 && (
               <p className="mt-1">A lista termina em cerca de <span className="font-medium text-foreground tabular-nums">{dias}</span> dia{dias === 1 ? '' : 's'} com o WhatsApp conectado.</p>
             )}
@@ -174,8 +192,9 @@ export function ProgressivoForm({ modelos, onConcluido, onVoltar }: {
         )}
       </section>
 
-      {/* Registro */}
+      {/* Etiquetas e registro */}
       <section className="space-y-2">
+        <EtiquetasCampo adicionar={etqAdicionar} remover={etqRemover} onAdicionar={setEtqAdd} onRemover={setEtqRem} />
         <Interruptor id="prog-reg" checked={registrar} onChange={setRegistrar}
           titulo="Registrar quem receber"
           descricao="Guarda cada número que recebeu, para os próximos disparos poderem pular." />

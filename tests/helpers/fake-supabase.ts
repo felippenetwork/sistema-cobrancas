@@ -4,7 +4,7 @@
 // injeção de falhas — nada de rede, nada de banco real.
 
 type Linha = Record<string, any>
-type Operacao = 'select' | 'update' | 'insert' | 'upsert'
+type Operacao = 'select' | 'update' | 'insert' | 'upsert' | 'delete'
 type Filtro =
   | { tipo: 'eq' | 'neq' | 'lte' | 'lt' | 'gt' | 'is'; col: string; val: unknown }
   | { tipo: 'in'; col: string; val: unknown[] }
@@ -50,8 +50,22 @@ export class FakeDb {
     return this.consultas.filter(c => c.tabela === tabela && c.operacao === 'update')
   }
 
+  /** URLs assinadas pedidas ao storage (bucket/caminho), na ordem. */
+  readonly urlsAssinadas: string[] = []
+  /** Quando true, createSignedUrl devolve erro (simula storage fora do ar). */
+  storageFalhando = false
+
   cliente() {
     return {
+      storage: {
+        from: (bucket: string) => ({
+          createSignedUrl: async (caminho: string, _expiraEmSeg: number) => {
+            if (this.storageFalhando) return { data: null, error: { message: 'storage indisponível (simulado)' } }
+            this.urlsAssinadas.push(`${bucket}/${caminho}`)
+            return { data: { signedUrl: `https://storage.teste/${bucket}/${caminho}?token=x` }, error: null }
+          },
+        }),
+      },
       from: (tabela: string) => this.construtor(tabela),
       rpc: async (nome: string, args: any): Promise<ResultadoRpc> => {
         this.chamadasRpc.push({ nome, args })
@@ -111,6 +125,9 @@ export class FakeDb {
           this.linhas(tabela).push(criada)
           return criada
         })
+      } else if (consulta.operacao === 'delete') {
+        resultado = this.linhas(tabela).filter(casa)
+        this.tabelas[tabela] = this.linhas(tabela).filter(l => !resultado.includes(l))
       } else if (consulta.operacao === 'update') {
         resultado = this.linhas(tabela).filter(casa)
         resultado.forEach(l => Object.assign(l, consulta.patch))
@@ -164,6 +181,8 @@ export class FakeDb {
       },
       order(col: string, opts?: { ascending?: boolean }) { ordem = { col, asc: opts?.ascending !== false }; return api },
       limit(n: number) { limite = n; return api },
+      range(de: number, ate: number) { if (de !== 0) throw new Error('FakeDb: range só a partir de 0'); limite = ate + 1; return api },
+      delete() { consulta.operacao = 'delete'; return api },
       maybeSingle: () => executar(true),
       single: () => executar(true),
       then: (ok: (v: any) => unknown, err?: (e: unknown) => unknown) => executar(false).then(ok, err),

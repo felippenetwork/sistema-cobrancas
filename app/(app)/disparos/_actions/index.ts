@@ -2,8 +2,13 @@
 
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
+import { randomUUID } from 'node:crypto'
 import { getConta } from '@/lib/conta'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { interpretarLista, minutosDoDia } from '@/lib/disparo/progressivo'
+import { BUCKET_MIDIA, TAMANHO_MAX_MIDIA, TIPOS_MIDIA, pastaDaConta, schemaPassos, type TipoMidia } from '@/lib/disparo/passos'
+import { extrairContatos, paraLinhas, resumirGrupos, type PreferenciaNome, type ResumoGrupo } from '@/lib/disparo/extracao'
+import { listGroups, listLabels, listSavedContacts, UazapiRateLimitError, type UazapiEtiqueta } from '@/lib/uazapi'
 
 type Result = { error: string | null }
 type Supabase = Awaited<ReturnType<typeof getConta>>['supabase']
@@ -28,6 +33,7 @@ export async function criarCampanhaAction(
         conta_id: contaId, nome, modelo_id: modeloId, status: 'rascunho',
         registrar_enviados:  formData.get('registrar_enviados') === 'on',
         excluir_ja_enviados: formData.get('excluir_ja_enviados') === 'on',
+        ...etiquetasDoForm(formData),
       })
       .select('id')
       .single()
@@ -214,10 +220,13 @@ export async function enviarCampanhaAction(campanhaId: string): Promise<{
 
 const hora = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Horário inválido.')
 
+const etiqueta = z.object({ id: z.string().min(1).max(100), nome: z.string().max(100) }).nullable()
+
 const schemaProgressivo = z.object({
   nome:        z.string().trim().min(1, 'Informe o nome do disparo.').max(80),
-  mensagem:    z.string().trim().min(1, 'Escreva a mensagem.').max(4000),
-  variacoes:   z.array(z.string().trim().max(4000)).max(5),
+  passos:      schemaPassos,
+  etiquetaAdicionar: etiqueta,
+  etiquetaRemover:   etiqueta,
   lista:       z.string().max(400_000),
   janelaInicio: hora,
   janelaFim:    hora,
@@ -242,6 +251,10 @@ export async function criarProgressivoAction(input: NovoProgressivo): Promise<{ 
     if (contatos.length > 10_000) return { error: 'A lista pode ter no máximo 10.000 números.' }
 
     const { supabase, contaId } = await getConta()
+    // Mídia só da pasta desta conta: nunca aceitar caminho de arquivo de outra conta.
+    if (d.passos.some(p => p.tipo !== 'texto' && !p.caminho.startsWith(pastaDaConta(contaId)))) {
+      return { error: 'Arquivo de mídia inválido. Envie o arquivo de novo.' }
+    }
     if (!(await whatsappConectado(supabase, contaId))) {
       return { error: 'WhatsApp não está conectado. Conecte em Conexão WA antes de iniciar.' }
     }
@@ -253,8 +266,11 @@ export async function criarProgressivoAction(input: NovoProgressivo): Promise<{ 
         nome: d.nome,
         tipo: 'progressivo',
         status: 'rascunho',
-        mensagem: d.mensagem,
-        variacoes: d.variacoes.filter(Boolean),
+        passos: d.passos.map(p => (p.tipo === 'texto' ? { ...p, variacoes: p.variacoes.filter(Boolean) } : p)),
+        etiqueta_adicionar:      d.etiquetaAdicionar?.id ?? null,
+        etiqueta_adicionar_nome: d.etiquetaAdicionar?.nome ?? null,
+        etiqueta_remover:        d.etiquetaRemover?.id ?? null,
+        etiqueta_remover_nome:   d.etiquetaRemover?.nome ?? null,
         janela_inicio: d.janelaInicio,
         janela_fim: d.janelaFim,
         prog_inicio: d.inicio,
@@ -350,4 +366,123 @@ export async function retomarCampanhaAction(campanhaId: string): Promise<Result>
 
 export async function cancelarCampanhaAction(campanhaId: string): Promise<Result> {
   return mudarStatus(campanhaId, ['rascunho', 'agendada', 'enviando', 'pausada'], 'cancelada')
+}
+
+// ── Etiquetas, grupos e mídia (uazapi / storage) ──────────────────────────────
+
+function etiquetasDoForm(formData: FormData) {
+  const valor = (campo: string) => ((formData.get(campo) as string | null) ?? '').trim().slice(0, 100) || null
+  return {
+    etiqueta_adicionar: valor('etiqueta_adicionar'), etiqueta_adicionar_nome: valor('etiqueta_adicionar_nome'),
+    etiqueta_remover:   valor('etiqueta_remover'),   etiqueta_remover_nome:   valor('etiqueta_remover_nome'),
+  }
+}
+
+/** Token e número da instância da conta — lidos com service role DEPOIS de getConta(). */
+async function instanciaDaConta(): Promise<{ contaId: string; token: string; numero: string | null } | { erro: string }> {
+  const { contaId } = await getConta()
+  const { data, error } = await createAdminClient()
+    .from('conexoes').select('uazapi_instance_token, status, numero_conectado').eq('conta_id', contaId).maybeSingle()
+  if (error) {
+    console.error('[disparos] leitura da conexão falhou', { contaId, error })
+    return { erro: 'Não foi possível ler a conexão do WhatsApp. Tente de novo.' }
+  }
+  if (!data?.uazapi_instance_token || data.status !== 'conectado') return { erro: 'WhatsApp não está conectado. Conecte em Conexão WA.' }
+  return { contaId, token: data.uazapi_instance_token, numero: data.numero_conectado }
+}
+
+function mensagemUazapi(err: unknown, padrao: string): string {
+  if (err instanceof UazapiRateLimitError) return 'O WhatsApp está limitando as consultas agora. Aguarde um minuto e tente de novo.'
+  if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) return 'O WhatsApp demorou demais para responder. Tente de novo.'
+  return padrao
+}
+
+export async function listarEtiquetasAction(): Promise<{ error: string | null; etiquetas?: UazapiEtiqueta[] }> {
+  try {
+    const inst = await instanciaDaConta()
+    if ('erro' in inst) return { error: inst.erro }
+    const etiquetas = await listLabels(inst.token)
+    return { error: null, etiquetas: etiquetas.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')) }
+  } catch (e) {
+    console.error('[disparos] listar etiquetas falhou', e)
+    return { error: mensagemUazapi(e, 'Não foi possível buscar as etiquetas. Elas só existem no WhatsApp Business.') }
+  }
+}
+
+export async function listarGruposAction(): Promise<{ error: string | null; grupos?: ResumoGrupo[] }> {
+  try {
+    const inst = await instanciaDaConta()
+    if ('erro' in inst) return { error: inst.erro }
+    return { error: null, grupos: resumirGrupos(await listGroups(inst.token)) }
+  } catch (e) {
+    console.error('[disparos] listar grupos falhou', e)
+    return { error: mensagemUazapi(e, 'Não foi possível buscar os grupos. Tente de novo.') }
+  }
+}
+
+export async function importarGrupoAction(input: { jid: string; preferencia: PreferenciaNome }): Promise<{
+  error: string | null; linhas?: string; total?: number; semTelefone?: number; semNome?: number; agendaIndisponivel?: boolean
+}> {
+  const parsed = z.object({ jid: z.string().endsWith('@g.us').max(100), preferencia: z.enum(['whatsapp', 'agenda']) }).safeParse(input)
+  if (!parsed.success) return { error: 'Grupo inválido.' }
+  try {
+    const inst = await instanciaDaConta()
+    if ('erro' in inst) return { error: inst.erro }
+
+    const grupos = await listGroups(inst.token)
+    if (!grupos.some(g => g.JID === parsed.data.jid)) return { error: 'Grupo não encontrado neste WhatsApp.' }
+
+    // Agenda é melhor esforço: sem ela, os nomes vêm só do WhatsApp.
+    let agenda = new Map<string, string>()
+    let agendaIndisponivel = false
+    try { agenda = await listSavedContacts(inst.token) } catch (e) {
+      agendaIndisponivel = true
+      console.error('[disparos] leitura da agenda falhou (segue sem)', { contaId: inst.contaId, e })
+    }
+
+    const { contatos, semTelefone } = extrairContatos(grupos, parsed.data.jid, agenda, parsed.data.preferencia, inst.numero)
+    if (!contatos.length) return { error: 'Nenhum membro com número visível neste grupo.' }
+    return {
+      error: null, linhas: paraLinhas(contatos), total: contatos.length, semTelefone,
+      semNome: contatos.filter(c => !c.nome).length, agendaIndisponivel,
+    }
+  } catch (e) {
+    console.error('[disparos] importar grupo falhou', e)
+    return { error: mensagemUazapi(e, 'Não foi possível ler o grupo. Tente de novo.') }
+  }
+}
+
+/**
+ * Autoriza o envio de UM arquivo direto do navegador para o bucket privado: o servidor escolhe
+ * o caminho (sempre dentro de contas/{conta_id}/) e devolve uma URL de upload assinada.
+ */
+export async function prepararUploadMidiaAction(input: { tipo: TipoMidia; mime: string; tamanho: number; nome: string }): Promise<{
+  error: string | null; caminho?: string; token?: string
+}> {
+  const parsed = z.object({
+    tipo: z.enum(['imagem', 'video', 'audio', 'documento']),
+    mime: z.string().max(100),
+    tamanho: z.number().int().positive(),
+    nome: z.string().max(200),
+  }).safeParse(input)
+  if (!parsed.success) return { error: 'Arquivo inválido.' }
+  const { tipo, mime, tamanho, nome } = parsed.data
+
+  const permitidos: readonly string[] = TIPOS_MIDIA[tipo].mimes
+  if (!permitidos.includes(mime)) return { error: `Formato não aceito para ${TIPOS_MIDIA[tipo].rotulo.toLowerCase()}.` }
+  if (tamanho > TAMANHO_MAX_MIDIA) return { error: 'O arquivo passa de 16 MB, o limite do WhatsApp.' }
+
+  try {
+    const { contaId } = await getConta()
+    const extensao = (nome.split('.').pop() ?? '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5) || 'bin'
+    const caminho = `${pastaDaConta(contaId)}${randomUUID()}.${extensao}`
+    const { data, error } = await createAdminClient().storage.from(BUCKET_MIDIA).createSignedUploadUrl(caminho)
+    if (error || !data?.token) {
+      console.error('[disparos] url de upload falhou', { contaId, error })
+      return { error: 'Não foi possível preparar o envio do arquivo. Tente de novo.' }
+    }
+    return { error: null, caminho, token: data.token }
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'Erro desconhecido.' }
+  }
 }

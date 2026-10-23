@@ -1,4 +1,4 @@
-// Espelho do schema em supabase/migrations/*, mantido À MÃO (última sincronização: migration 0038).
+// Espelho do schema em supabase/migrations/*, mantido À MÃO (última sincronização: migration 0039).
 // Toda migration que cria/altera tabela ou coluna atualiza este arquivo na MESMA tarefa — tabela ou
 // coluna faltando aqui vira `as any` no código (foi assim que cobrancas_pix e mensagens_rapidas
 // ficaram sem tipo). Para regenerar do banco real (precisa de SUPABASE_ACCESS_TOKEN):
@@ -677,6 +677,11 @@ export type Database = {
           registrar_enviados: boolean
           excluir_ja_enviados: boolean
           total_pulados: number
+          passos: Json | null
+          etiqueta_adicionar: string | null
+          etiqueta_adicionar_nome: string | null
+          etiqueta_remover: string | null
+          etiqueta_remover_nome: string | null
         }
         Insert: {
           id?: string
@@ -703,6 +708,11 @@ export type Database = {
           registrar_enviados?: boolean
           excluir_ja_enviados?: boolean
           total_pulados?: number
+          passos?: Json | null
+          etiqueta_adicionar?: string | null
+          etiqueta_adicionar_nome?: string | null
+          etiqueta_remover?: string | null
+          etiqueta_remover_nome?: string | null
         }
         Update: {
           id?: string
@@ -729,6 +739,11 @@ export type Database = {
           registrar_enviados?: boolean
           excluir_ja_enviados?: boolean
           total_pulados?: number
+          passos?: Json | null
+          etiqueta_adicionar?: string | null
+          etiqueta_adicionar_nome?: string | null
+          etiqueta_remover?: string | null
+          etiqueta_remover_nome?: string | null
         }
         Relationships: [
           { foreignKeyName: 'campanhas_wa_conta_id_fkey'; columns: ['conta_id']; isOneToOne: false; referencedRelation: 'contas'; referencedColumns: ['id'] },
@@ -750,6 +765,7 @@ export type Database = {
           nome: string | null
           ordem: number | null
           agendado_para: string | null
+          aviso: string | null
         }
         Insert: {
           id?: string
@@ -765,6 +781,7 @@ export type Database = {
           nome?: string | null
           ordem?: number | null
           agendado_para?: string | null
+          aviso?: string | null
         }
         Update: {
           id?: string
@@ -780,6 +797,7 @@ export type Database = {
           nome?: string | null
           ordem?: number | null
           agendado_para?: string | null
+          aviso?: string | null
         }
         Relationships: [
           { foreignKeyName: 'campanha_dest_campanha_id_fkey'; columns: ['campanha_id']; isOneToOne: false; referencedRelation: 'campanhas_wa'; referencedColumns: ['id'] },

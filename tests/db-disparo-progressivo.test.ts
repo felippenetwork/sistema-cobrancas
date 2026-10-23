@@ -49,6 +49,33 @@ describe('campanhas_wa depois da 0038', () => {
   })
 })
 
+describe('0039: sequência de mensagens, etiquetas e bucket de mídia', () => {
+  it('progressivo só com passos (sem mensagem) é aceito', async () => {
+    const r = await inserirCampanha(contaA,
+      ', tipo, passos, janela_inicio, janela_fim, prog_inicio, prog_maximo, etiqueta_adicionar',
+      `, 'progressivo', '[{"tipo":"texto","texto":"Oi","variacoes":[],"digitacao_seg":20}]'::jsonb, '09:00', '18:00', 1, 20, 'L1'`)
+    expect(r.rows).toHaveLength(1)
+  })
+
+  it('o banco recusa passos vazios, que não sejam lista ou com mais de 10 mensagens', async () => {
+    const tentar = (passos: string) => inserirCampanha(contaA, ', passos', `, '${passos}'::jsonb`).then(() => 'aceitou', () => 'recusou')
+    expect(await tentar('[]')).toBe('recusou')
+    expect(await tentar('{"tipo":"texto"}')).toBe('recusou')
+    expect(await tentar(JSON.stringify(Array(11).fill({ tipo: 'texto' })))).toBe('recusou')
+  })
+
+  it('progressivo sem mensagem e sem passos continua recusado', async () => {
+    const r = await inserirCampanha(contaA, ', tipo, janela_inicio, janela_fim, prog_inicio, prog_maximo', `, 'progressivo', '09:00', '18:00', 1, 20`)
+      .then(() => 'aceitou', () => 'recusou')
+    expect(r).toBe('recusou')
+  })
+
+  it('o bucket das mídias existe e é PRIVADO', async () => {
+    const { rows } = await db.sql<{ public: boolean }>(`select public from storage.buckets where id = 'disparo-midia'`)
+    expect(rows).toEqual([{ public: false }])
+  })
+})
+
 describe('contatos_disparados', () => {
   it('o dono vê os números da própria conta', async () => {
     const r = await db.como(donoA).query(`select celular, nome from public.contatos_disparados`)

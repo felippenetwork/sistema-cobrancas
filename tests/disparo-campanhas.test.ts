@@ -5,12 +5,14 @@ import { FakeDb } from './helpers/fake-supabase'
 
 const mocks = vi.hoisted(() => {
   class UazapiRateLimitError extends Error {}
-  return { UazapiRateLimitError, sendText: vi.fn(), sendPresence: vi.fn(), ordem: [] as string[] }
+  return { UazapiRateLimitError, sendText: vi.fn(), sendPresence: vi.fn(), sendMedia: vi.fn(), setChatLabel: vi.fn(), ordem: [] as string[] }
 })
 
 vi.mock('@/lib/uazapi', () => ({
   sendText: mocks.sendText,
   sendPresence: mocks.sendPresence,
+  sendMedia: mocks.sendMedia,
+  setChatLabel: mocks.setChatLabel,
   UazapiRateLimitError: mocks.UazapiRateLimitError,
 }))
 
@@ -59,6 +61,8 @@ beforeEach(() => {
   mocks.ordem.length = 0
   mocks.sendPresence.mockReset().mockImplementation(async () => { mocks.ordem.push('digitando') })
   mocks.sendText.mockReset().mockImplementation(async () => { mocks.ordem.push('enviou') })
+  mocks.sendMedia.mockReset().mockImplementation(async () => { mocks.ordem.push('midia') })
+  mocks.setChatLabel.mockReset().mockResolvedValue(undefined)
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
 afterEach(() => {
@@ -173,7 +177,7 @@ describe('envio no horário sorteado', () => {
     await rodar(db)
 
     expect(mocks.ordem).toEqual(['digitando', 'enviou'])
-    expect(mocks.sendPresence).toHaveBeenCalledWith('tok', '5521999990000', 20_000)
+    expect(mocks.sendPresence).toHaveBeenCalledWith('tok', '5521999990000', 20_000, 'composing')
     expect(mocks.sendText).toHaveBeenCalledWith('tok', '5521999990000', 'Oi Contato 0!')
     expect(db.linhas('campanha_destinatarios')[0].status).toBe('enviado')
     expect(campanha(db).total_enviados).toBe(1)
@@ -279,5 +283,99 @@ describe('registro de quem já recebeu', () => {
     vi.setSystemTime(new Date('2026-10-23T13:00:00Z'))
     await rodar(db)
     expect(mocks.sendText).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('sequência de mensagens (caixinhas)', () => {
+  const agendado = () => [{
+    id: 'd0', campanha_id: CAMP, conta_id: CONTA, celular: '5521999990001', nome: 'Maria', ordem: 0,
+    status: 'pendente', agendado_para: '2026-10-23T12:30:00.000Z', variaveis: null,
+  }]
+  const PASSOS = [
+    { tipo: 'texto', texto: 'Oi {{nome}}!', variacoes: [], digitacao_seg: 20 },
+    { tipo: 'imagem', caminho: `contas/${CONTA}/foto.jpg`, nome_arquivo: 'foto.jpg', legenda: 'Para você, {{nome}}', digitacao_seg: 5 },
+    { tipo: 'audio', caminho: `contas/${CONTA}/audio.ogg`, nome_arquivo: 'audio.ogg', legenda: null, digitacao_seg: 8 },
+  ]
+  const comPassos = (extra: Record<string, unknown> = {}) =>
+    cenario({ campanha: { passos: PASSOS, prog_dia: 1, prog_planejado_em: '2026-10-23', ...extra }, destinatarios: agendado() })
+
+  beforeEach(() => vi.setSystemTime(new Date('2026-10-23T13:00:00Z')))
+
+  it('envia cada caixinha na ordem, com o próprio tempo de digitação antes de cada uma', async () => {
+    const db = comPassos()
+    await rodar(db)
+    expect(mocks.ordem).toEqual(['digitando', 'enviou', 'digitando', 'midia', 'digitando', 'midia'])
+    expect(mocks.sendPresence.mock.calls.map(c => [c[2], c[3]])).toEqual([[20_000, 'composing'], [5_000, 'composing'], [8_000, 'recording']])
+    expect(mocks.sendText).toHaveBeenCalledWith('tok', '5521999990001', 'Oi Maria!')
+  })
+
+  it('mídia vai por link assinado do bucket privado, com {{nome}} na legenda e áudio como voz', async () => {
+    const db = comPassos()
+    await rodar(db)
+    expect(db.urlsAssinadas).toEqual([`disparo-midia/contas/${CONTA}/foto.jpg`, `disparo-midia/contas/${CONTA}/audio.ogg`])
+    expect(mocks.sendMedia).toHaveBeenNthCalledWith(1, 'tok', '5521999990001', 'image', expect.stringContaining('foto.jpg'), { legenda: 'Para você, Maria', nomeArquivo: 'foto.jpg' })
+    expect(mocks.sendMedia).toHaveBeenNthCalledWith(2, 'tok', '5521999990001', 'ptt', expect.stringContaining('audio.ogg'), { legenda: null, nomeArquivo: 'audio.ogg' })
+  })
+
+  it('falha no meio da sequência: não volta para pendente (não reenvia o começo) e registra o aviso', async () => {
+    mocks.sendMedia.mockRejectedValueOnce(new Error('arquivo inválido'))
+    const db = comPassos()
+    await rodar(db)
+    const d = db.linhas('campanha_destinatarios')[0]
+    expect(d.status).toBe('enviado')
+    expect(d.aviso).toContain('Enviou 1 de 3 mensagens')
+    expect(mocks.sendText).toHaveBeenCalledTimes(1)
+  })
+
+  it('storage fora do ar antes de qualquer envio: o contato volta para pendente', async () => {
+    const db = cenario({
+      campanha: { passos: [PASSOS[1]], prog_dia: 1, prog_planejado_em: '2026-10-23' },
+      destinatarios: agendado(),
+    })
+    db.storageFalhando = true
+    await rodar(db)
+    expect(mocks.sendMedia).not.toHaveBeenCalled()
+    expect(db.linhas('campanha_destinatarios')[0]).toMatchObject({ status: 'pendente', enviado_em: null })
+  })
+
+  it('não começa um contato cuja sequência não cabe no tempo que resta da execução', async () => {
+    const db = comPassos()
+    const p = processarCampanhas(db.cliente() as any, CONTA, 'tok', undefined, Date.now(), 20_000) // 20s de orçamento
+    await vi.advanceTimersByTimeAsync(300_000)
+    await p
+    expect(mocks.sendText).not.toHaveBeenCalled()
+    expect(db.linhas('campanha_destinatarios')[0].status).toBe('pendente')
+  })
+})
+
+describe('etiquetas do WhatsApp Business', () => {
+  const agendado = () => [{
+    id: 'd0', campanha_id: CAMP, conta_id: CONTA, celular: '5521999990001', nome: null, ordem: 0,
+    status: 'pendente', agendado_para: '2026-10-23T12:30:00.000Z', variaveis: null,
+  }]
+  beforeEach(() => vi.setSystemTime(new Date('2026-10-23T13:00:00Z')))
+
+  it('depois do envio tira a etiqueta escolhida e põe a nova', async () => {
+    const db = cenario({ campanha: { etiqueta_remover: 'L1', etiqueta_adicionar: 'L2', prog_dia: 1, prog_planejado_em: '2026-10-23' }, destinatarios: agendado() })
+    await rodar(db)
+    expect(mocks.setChatLabel.mock.calls).toEqual([
+      ['tok', '5521999990001', 'remover', 'L1'],
+      ['tok', '5521999990001', 'adicionar', 'L2'],
+    ])
+  })
+
+  it('erro na etiqueta não desfaz o envio: vira aviso', async () => {
+    mocks.setChatLabel.mockRejectedValue(new Error('etiqueta não existe'))
+    const db = cenario({ campanha: { etiqueta_adicionar: 'L2', prog_dia: 1, prog_planejado_em: '2026-10-23' }, destinatarios: agendado() })
+    await rodar(db)
+    const d = db.linhas('campanha_destinatarios')[0]
+    expect(d.status).toBe('enviado')
+    expect(d.aviso).toContain('etiqueta')
+  })
+
+  it('sem etiqueta escolhida não chama a uazapi', async () => {
+    const db = cenario({ campanha: { prog_dia: 1, prog_planejado_em: '2026-10-23' }, destinatarios: agendado() })
+    await rodar(db)
+    expect(mocks.setChatLabel).not.toHaveBeenCalled()
   })
 })

@@ -3,14 +3,20 @@
 //
 // - Normal: drena a lista um por um, com intervalo aleatório (45–80s) + 15–20s de digitação.
 // - Progressivo: uma vez por dia sorteia os horários da cota do dia dentro da janela da campanha
-//   (lib/disparo/progressivo.ts) e, a cada execução, envia só quem já chegou no seu horário, com
-//   20s de digitação. Várias campanhas progressivas podem rodar juntas; a normal é uma por vez.
+//   (lib/disparo/progressivo.ts) e, a cada execução, envia só quem já chegou no seu horário.
+//   Várias campanhas progressivas podem rodar juntas; a normal é uma por vez.
+// - Sequência (campanhas_wa.passos, lib/disparo/passos.ts): cada contato recebe várias mensagens
+//   (texto/mídia), cada uma com o próprio "digitando…"/"gravando…" antes. Sem passos, vale a
+//   mensagem única (20s de digitação no progressivo, 15–20s no normal).
+// - Depois do envio: etiqueta do WhatsApp Business (remover/adicionar) e registro do número —
+//   ambos melhor esforço, viram `aviso` no contato, nunca desfazem o envio.
 //
 // Invariantes (mesmas dos lembretes, skill whatsapp-uazapi): claim atômico pendente → enviado
 // antes de mandar; 429 da uazapi devolve o contato para 'pendente' e para a conta neste tick;
 // depois que a mensagem saiu, nada a devolve para 'pendente'.
 import { createAdminClient } from '@/lib/supabase/admin'
-import { sendPresence, sendText, UazapiRateLimitError } from '@/lib/uazapi'
+import { sendMedia, sendPresence, sendText, setChatLabel, UazapiRateLimitError } from '@/lib/uazapi'
+import { BUCKET_MIDIA, TIPOS_MIDIA, duracaoSequenciaMs, textoDoPasso, type Passo } from './passos'
 import {
   DIGITACAO_PROGRESSIVO_MS,
   dataSP,
@@ -38,6 +44,9 @@ type Campanha = {
   prog_planejado_em: string | null
   registrar_enviados: boolean
   excluir_ja_enviados: boolean
+  passos: Passo[] | null
+  etiqueta_adicionar: string | null
+  etiqueta_remover: string | null
   modelos_wa: { corpo: string } | null
 }
 
@@ -64,6 +73,12 @@ function dentroDaJanela(inicio: string, fim: string, agora = new Date()): boolea
 
 const log = '[disparo/campanhas]'
 
+/** A sequência de um contato cabe no que resta desta execução? Se não, fica para o próximo tick. */
+function cabeNoOrcamento(c: Campanha, digitacaoMs: number, inicioExecucao: number, budgetMs: number): boolean {
+  const precisa = c.passos?.length ? duracaoSequenciaMs(c.passos) : digitacaoMs + 5_000
+  return Date.now() - inicioExecucao + precisa <= budgetMs
+}
+
 // ── Ponto de entrada ──────────────────────────────────────────────────────────
 
 export async function processarCampanhas(
@@ -76,7 +91,7 @@ export async function processarCampanhas(
 ): Promise<number> {
   const { data, error } = await supabase
     .from('campanhas_wa')
-    .select('id, tipo, mensagem, variacoes, janela_inicio, janela_fim, prog_inicio, prog_maximo, prog_dia, prog_planejado_em, registrar_enviados, excluir_ja_enviados, modelos_wa(corpo)')
+    .select('id, tipo, mensagem, variacoes, janela_inicio, janela_fim, prog_inicio, prog_maximo, prog_dia, prog_planejado_em, registrar_enviados, excluir_ja_enviados, passos, etiqueta_adicionar, etiqueta_remover, modelos_wa(corpo)')
     .eq('conta_id', contaId)
     .eq('status', 'enviando')
     .order('iniciado_em', { ascending: true })
@@ -139,6 +154,7 @@ async function processarProgressiva(
       break
     }
 
+    if (!cabeNoOrcamento(c, DIGITACAO_PROGRESSIVO_MS, inicioExecucao, budgetMs)) break
     const r = await enviarDestinatario(supabase, contaId, token, c, dest, DIGITACAO_PROGRESSIVO_MS)
     if (r === 'enviado') enviados++
     if (r === 'parar') return { enviados, pararConta: true }
@@ -322,23 +338,42 @@ async function enviarDestinatario(
   }
   if (!claimed) return 'ocupado'
 
-  const texto = textoDaCampanha(c, dest)
-  try {
-    await sendPresence(token, dest.celular, digitacaoMs)
-    await sleep(digitacaoMs)
-    await sendText(token, dest.celular, texto)
-  } catch (err) {
-    if (err instanceof UazapiRateLimitError) {
-      const { error: revErr } = await supabase.from('campanha_destinatarios')
-        .update({ status: 'pendente', enviado_em: null }).eq('id', dest.id).eq('conta_id', contaId)
-      if (revErr) console.error(`${log} não devolveu o contato para pendente — ficou "enviado" sem envio`, { contaId, destId: dest.id, revErr })
-      return 'parar'
+  // Cada envio: "digitando…"/"gravando…" pelo tempo pedido e, então, a mensagem/mídia.
+  const envios = montarEnvios(supabase, token, c, dest, digitacaoMs)
+  let feitos = 0
+  const avisos: string[] = []
+  let pararDepois = false
+
+  for (const e of envios) {
+    try {
+      if (e.digitacaoMs > 0) {
+        await sendPresence(token, dest.celular, e.digitacaoMs, e.presenca)
+        await sleep(e.digitacaoMs)
+      }
+      await e.enviar()
+      feitos++
+    } catch (err) {
+      if (feitos === 0) {
+        // Nada saiu ainda: rate limit ou falha passageira (ex.: link da mídia) devolvem o
+        // contato para 'pendente'; recusa da uazapi vira 'falhou'.
+        if (err instanceof UazapiRateLimitError || err instanceof ErroTransitorio) {
+          if (err instanceof ErroTransitorio) console.error(`${log} falha passageira antes do envio`, { contaId, destId: dest.id, err })
+          const { error: revErr } = await supabase.from('campanha_destinatarios')
+            .update({ status: 'pendente', enviado_em: null }).eq('id', dest.id).eq('conta_id', contaId)
+          if (revErr) console.error(`${log} não devolveu o contato para pendente — ficou "enviado" sem envio`, { contaId, destId: dest.id, revErr })
+          return 'parar'
+        }
+        const { error: falhaErr } = await supabase.from('campanha_destinatarios')
+          .update({ status: 'falhou', erro: String(err).slice(0, 500) }).eq('id', dest.id).eq('conta_id', contaId)
+        if (falhaErr) console.error(`${log} não marcou o contato como falhou — ficou "enviado" sem envio`, { contaId, destId: dest.id, falhaErr })
+        await atualizarTotais(supabase, contaId, c.id)
+        return 'falhou'
+      }
+      // Parte da sequência já saiu: NUNCA volta para 'pendente' (reenviaria o começo).
+      avisos.push(`Enviou ${feitos} de ${envios.length} mensagens: ${err instanceof Error ? err.message : String(err)}`)
+      pararDepois = err instanceof UazapiRateLimitError
+      break
     }
-    const { error: falhaErr } = await supabase.from('campanha_destinatarios')
-      .update({ status: 'falhou', erro: String(err).slice(0, 500) }).eq('id', dest.id).eq('conta_id', contaId)
-    if (falhaErr) console.error(`${log} não marcou o contato como falhou — ficou "enviado" sem envio`, { contaId, destId: dest.id, falhaErr })
-    await atualizarTotais(supabase, contaId, c.id)
-    return 'falhou'
   }
 
   // ── Mensagem já saiu: daqui para baixo nada a devolve para 'pendente'.
@@ -350,10 +385,57 @@ async function enviarDestinatario(
     )
     if (error) console.error(`${log} registrar contato disparado falhou (mensagem já enviada)`, { contaId, destId: dest.id, error })
   }
+
+  // Etiquetas: melhor esforço — nunca desfazem um envio, só viram aviso.
+  for (const [acao, etiqueta] of [['remover', c.etiqueta_remover], ['adicionar', c.etiqueta_adicionar]] as const) {
+    if (!etiqueta) continue
+    try {
+      await setChatLabel(token, dest.celular, acao, etiqueta)
+    } catch (err) {
+      avisos.push(`Não conseguiu ${acao} a etiqueta: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
+  if (avisos.length) {
+    const { error } = await supabase.from('campanha_destinatarios')
+      .update({ aviso: avisos.join(' · ').slice(0, 500) }).eq('id', dest.id).eq('conta_id', contaId)
+    if (error) console.error(`${log} gravar aviso falhou`, { contaId, destId: dest.id, error })
+  }
   await atualizarTotais(supabase, contaId, c.id)
-  return 'enviado'
+  return pararDepois ? 'parar' : 'enviado'
 }
 
+/** Falha que não é recusa da mensagem (ex.: não conseguiu gerar o link da mídia). */
+class ErroTransitorio extends Error {}
+
+type Envio = { digitacaoMs: number; presenca: 'composing' | 'recording'; enviar: () => Promise<void> }
+
+function montarEnvios(supabase: Supabase, token: string, c: Campanha, dest: Destinatario, digitacaoMs: number): Envio[] {
+  const indice = dest.ordem ?? 0
+  const passos = Array.isArray(c.passos) && c.passos.length ? c.passos : null
+
+  if (!passos) {
+    const texto = textoDaCampanha(c, dest)
+    return [{ digitacaoMs, presenca: 'composing', enviar: () => sendText(token, dest.celular, texto) }]
+  }
+
+  return passos.map((p): Envio => {
+    if (p.tipo === 'texto') {
+      const texto = textoDoPasso(p, indice, dest.nome)
+      return { digitacaoMs: p.digitacao_seg * 1000, presenca: 'composing', enviar: () => sendText(token, dest.celular, texto) }
+    }
+    return {
+      digitacaoMs: p.digitacao_seg * 1000,
+      presenca: p.tipo === 'audio' ? 'recording' : 'composing',
+      enviar: async () => {
+        const { data, error } = await supabase.storage.from(BUCKET_MIDIA).createSignedUrl(p.caminho, 60 * 60)
+        if (error || !data?.signedUrl) throw new ErroTransitorio(`link da mídia: ${error?.message ?? 'sem URL'}`)
+        const legenda = p.legenda ? montarTexto(p.legenda, [], indice, dest.nome) : null
+        await sendMedia(token, dest.celular, TIPOS_MIDIA[p.tipo].uazapi, data.signedUrl, { legenda, nomeArquivo: p.nome_arquivo })
+      },
+    }
+  })
+}
 async function atualizarTotais(supabase: Supabase, contaId: string, campanhaId: string): Promise<void> {
   const contar = (status: 'enviado' | 'falhou' | 'pulado') =>
     supabase.from('campanha_destinatarios').select('id', { count: 'exact', head: true })
