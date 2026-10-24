@@ -76,6 +76,37 @@ describe('0039: sequência de mensagens, etiquetas e bucket de mídia', () => {
   })
 })
 
+describe('0040: modelo com sequência de mensagens', () => {
+  const inserirModelo = (passos: string | null) => db.sql<{ id: string }>(
+    `insert into public.modelos_wa (conta_id, nome, corpo, passos) values ($1, 'M', 'Oi', ${passos === null ? 'null' : `'${passos}'::jsonb`}) returning id`, [contaA])
+
+  it('aceita modelo com sequência e modelo antigo sem ela', async () => {
+    expect((await inserirModelo('[{"tipo":"texto","texto":"Oi","variacoes":[],"digitacao_seg":20}]')).rows).toHaveLength(1)
+    expect((await inserirModelo(null)).rows).toHaveLength(1)
+  })
+
+  it('recusa sequência vazia, que não seja lista ou com mais de 10 mensagens', async () => {
+    const tentar = (p: string) => inserirModelo(p).then(() => 'aceitou', () => 'recusou')
+    expect(await tentar('[]')).toBe('recusou')
+    expect(await tentar('{"tipo":"texto"}')).toBe('recusou')
+    expect(await tentar(JSON.stringify(Array(11).fill({ tipo: 'texto' })))).toBe('recusou')
+  })
+
+  it('excluir o modelo não é barrado pelos disparos que o usaram: eles ficam sem o vínculo', async () => {
+    const { rows: [m] } = await inserirModelo(null)
+    const { rows: [c] } = await inserirCampanha(contaA, ', modelo_id', `, '${m.id}'`)
+    await db.sql(`delete from public.modelos_wa where id = $1`, [m.id])
+    const r = await db.sql(`select modelo_id from public.campanhas_wa where id = $1`, [c.id])
+    expect(r.rows).toEqual([{ modelo_id: null }])
+  })
+
+  it('o dono de outra conta não vê nem altera os modelos', async () => {
+    await inserirModelo(null)
+    expect((await db.como(donoB).query(`select id from public.modelos_wa`)).rows).toHaveLength(0)
+    expect((await db.como(donoB).query(`update public.modelos_wa set nome = 'x' returning id`)).rows).toHaveLength(0)
+  })
+})
+
 describe('contatos_disparados', () => {
   it('o dono vê os números da própria conta', async () => {
     const r = await db.como(donoA).query(`select celular, nome from public.contatos_disparados`)

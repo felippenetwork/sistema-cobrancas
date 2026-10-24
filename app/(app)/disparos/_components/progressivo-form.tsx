@@ -5,11 +5,9 @@ import { Download, Loader2, Upload } from 'lucide-react'
 import { criarProgressivoAction } from '../_actions'
 import { interpretarLista, quotaDoDia } from '@/lib/disparo/progressivo'
 import { contatosDeVcf, linhasDeTabela, tabelaDeCsv, type ResultadoArquivo } from '@/lib/disparo/arquivo-contatos'
-import { PassosEditor, novoPasso, type PassoEditavel } from './passos-editor'
 import { ImportarGrupo } from './importar-grupo'
 import { EtiquetasCampo, type EtiquetaEscolhida } from './etiquetas-campo'
-
-type Modelo = { id: string; nome: string; corpo: string | null }
+import { ModeloEscolha, type ModeloDisparo } from './modelo-escolha'
 
 const INPUT = 'w-full rounded-xl border border-border bg-input px-3 py-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20'
 const LABEL = 'mb-1.5 block text-xs font-medium uppercase tracking-wide text-muted-foreground'
@@ -39,20 +37,13 @@ function Interruptor({ id, checked, onChange, titulo, descricao }: {
   )
 }
 
-/** Passos da tela → formato que o servidor valida (lib/disparo/passos.ts). */
-function paraEnvio(passos: PassoEditavel[]) {
-  return passos.map(p => p.tipo === 'texto'
-    ? { tipo: p.tipo, texto: p.texto, variacoes: p.variacoes, digitacao_seg: p.digitacao_seg }
-    : { tipo: p.tipo, caminho: p.caminho ?? '', nome_arquivo: p.nome_arquivo, legenda: p.legenda.trim() || null, digitacao_seg: p.digitacao_seg })
-}
-
 export function ProgressivoForm({ modelos, onConcluido, onVoltar }: {
-  modelos: Modelo[]
+  modelos: ModeloDisparo[]
   onConcluido: (pulados: number) => void
   onVoltar: () => void
 }) {
   const [nome, setNome]               = useState('')
-  const [passos, setPassos]           = useState<PassoEditavel[]>(() => [novoPasso('texto', 0)])
+  const [modeloId, setModeloId]       = useState(modelos.length === 1 ? modelos[0].id : '')
   const [lista, setLista]             = useState('')
   const [importando, setImportando]   = useState(false)
   const [resumoImport, setResumoImp]  = useState<string | null>(null)
@@ -72,7 +63,6 @@ export function ProgressivoForm({ modelos, onConcluido, onVoltar }: {
 
   const { contatos, invalidas } = useMemo(() => interpretarLista(lista), [lista])
   const dias = diasParaTerminar(contatos.length, inicio, maximo)
-  const segundosPorContato = passos.reduce((s, p) => s + p.digitacao_seg, 0)
   const exemplo = useMemo(() => {
     if (inicio < 1 || maximo < inicio) return ''
     const passosCiclo = Array.from({ length: Math.min(maximo - inicio + 2, 6) }, (_, d) => quotaDoDia(d, inicio, maximo))
@@ -80,8 +70,6 @@ export function ProgressivoForm({ modelos, onConcluido, onVoltar }: {
       ? `${passosCiclo.slice(0, 3).join(', ')} … ${maximo}, e volta para ${inicio}`
       : `${passosCiclo.join(', ')}…`
   }, [inicio, maximo])
-
-  const primeiroTexto = passos.find(p => p.tipo === 'texto')
 
   function acrescentarNaLista(linhas: string, resumo: string) {
     setLista(atual => (atual.trim() ? `${atual.trim()}\n${linhas}` : linhas))
@@ -122,21 +110,13 @@ export function ProgressivoForm({ modelos, onConcluido, onVoltar }: {
     }
   }
 
-  function usarModelo(id: string) {
-    const m = modelos.find(x => x.id === id)
-    if (!m?.corpo) return
-    const i = passos.findIndex(p => p.tipo === 'texto')
-    if (i >= 0) setPassos(passos.map((p, j) => (j === i && p.tipo === 'texto' ? { ...p, texto: m.corpo as string } : p)))
-    else setPassos([{ ...novoPasso('texto', 0), texto: m.corpo } as PassoEditavel, ...passos])
-  }
-
   async function iniciar(e: React.FormEvent) {
     e.preventDefault()
     setErro(null)
-    if (passos.some(p => p.tipo !== 'texto' && !p.caminho)) { setErro('Uma mensagem de mídia ainda está sem arquivo.'); return }
+    if (!modeloId) { setErro('Escolha o modelo com as mensagens do disparo.'); return }
     setSalvando(true)
     const r = await criarProgressivoAction({
-      nome, passos: paraEnvio(passos), lista, janelaInicio, janelaFim, inicio, maximo,
+      nome, modeloId, lista, janelaInicio, janelaFim, inicio, maximo,
       etiquetaAdicionar: etqAdicionar, etiquetaRemover: etqRemover,
       registrarEnviados: registrar, excluirJaEnviados: excluir,
     })
@@ -155,22 +135,8 @@ export function ProgressivoForm({ modelos, onConcluido, onVoltar }: {
 
       {/* Mensagens */}
       <section>
-        <div className="flex items-end justify-between gap-3">
-          <p className={LABEL + ' mb-0'}>Mensagens, na ordem em que chegam</p>
-          {modelos.some(m => m.corpo) && primeiroTexto && (
-            <select aria-label="Usar um modelo no primeiro texto" defaultValue=""
-              onChange={e => { usarModelo(e.target.value); e.target.value = '' }}
-              className="rounded-lg border border-border bg-input px-2 py-1 text-xs text-muted-foreground outline-none focus-visible:border-primary">
-              <option value="" disabled>Usar um modelo…</option>
-              {modelos.filter(m => m.corpo).map(m => <option key={m.id} value={m.id}>{m.nome}</option>)}
-            </select>
-          )}
-        </div>
-        <PassosEditor passos={passos} onChange={setPassos} />
-        <p className="mt-2 text-xs text-muted-foreground">
-          <code className="rounded bg-muted px-1">{'{{nome}}'}</code> vira o nome do contato (some da frase se não houver).
-          Cada contato leva cerca de <span className="tabular-nums">{segundosPorContato}</span> s entre digitação e envios.
-        </p>
+        <label htmlFor="prog-modelo" className={LABEL}>Modelo (as mensagens que cada contato recebe)</label>
+        <ModeloEscolha id="prog-modelo" modelos={modelos} valor={modeloId} onChange={setModeloId} />
       </section>
 
       {/* Lista */}
@@ -263,7 +229,7 @@ export function ProgressivoForm({ modelos, onConcluido, onVoltar }: {
           className="rounded-xl border border-border px-3 py-3 text-sm text-muted-foreground transition hover:bg-accent">
           ← Voltar
         </button>
-        <button type="submit" disabled={salvando || contatos.length === 0}
+        <button type="submit" disabled={salvando || contatos.length === 0 || !modeloId}
           className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-primary px-3 py-3 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50">
           {salvando && <Loader2 className="h-4 w-4 animate-spin" />}
           {salvando ? 'Iniciando…' : `Iniciar disparo para ${contatos.length}`}

@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { ArrowDown, ArrowUp, FileText, Image as ImageIcon, Loader2, Mic, Paperclip, Plus, Trash2, Type, Video } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { BUCKET_MIDIA, MAX_PASSOS, TAMANHO_MAX_MIDIA, TIPOS_MIDIA, digitacaoPadrao, type TipoMidia } from '@/lib/disparo/passos'
+import { BUCKET_MIDIA, MAX_PASSOS, TAMANHO_MAX_MIDIA, TIPOS_MIDIA, digitacaoPadrao, type Passo, type TipoMidia } from '@/lib/disparo/passos'
 import { prepararUploadMidiaAction } from '../_actions'
 
 /** Passo em edição na tela (mídia pode estar sem arquivo ainda). */
@@ -29,6 +29,20 @@ export function novoPasso(tipo: PassoEditavel['tipo'], indice: number): PassoEdi
   return tipo === 'texto'
     ? { chave: novaChave(), tipo, texto: '', variacoes: [], digitacao_seg }
     : { chave: novaChave(), tipo, caminho: null, nome_arquivo: null, tamanho: null, legenda: '', digitacao_seg }
+}
+
+/** Sequência gravada (modelo) → caixinhas editáveis. */
+export function paraEditavel(passos: Passo[]): PassoEditavel[] {
+  return passos.map(p => (p.tipo === 'texto'
+    ? { chave: novaChave(), tipo: p.tipo, texto: p.texto, variacoes: p.variacoes, digitacao_seg: p.digitacao_seg }
+    : { chave: novaChave(), tipo: p.tipo, caminho: p.caminho, nome_arquivo: p.nome_arquivo, tamanho: null, legenda: p.legenda ?? '', digitacao_seg: p.digitacao_seg }))
+}
+
+/** Caixinhas da tela → formato que o servidor valida (schemaPassos). */
+export function paraEnvio(passos: PassoEditavel[]) {
+  return passos.map(p => p.tipo === 'texto'
+    ? { tipo: p.tipo, texto: p.texto, variacoes: p.variacoes, digitacao_seg: p.digitacao_seg }
+    : { tipo: p.tipo, caminho: p.caminho ?? '', nome_arquivo: p.nome_arquivo, legenda: p.legenda.trim() || null, digitacao_seg: p.digitacao_seg })
 }
 
 const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1).replace('.', ',')} MB`

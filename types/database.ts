@@ -1,4 +1,4 @@
-// Espelho do schema em supabase/migrations/*, mantido À MÃO (última sincronização: migration 0039).
+// Espelho do schema em supabase/migrations/*, mantido À MÃO (última sincronização: migration 0040).
 // Toda migration que cria/altera tabela ou coluna atualiza este arquivo na MESMA tarefa — tabela ou
 // coluna faltando aqui vira `as any` no código (foi assim que cobrancas_pix e mensagens_rapidas
 // ficaram sem tipo). Para regenerar do banco real (precisa de SUPABASE_ACCESS_TOKEN):
@@ -616,6 +616,7 @@ export type Database = {
           status: ModeloStatus
           criado_em: string
           atualizado_em: string
+          passos: Json | null
         }
         Insert: {
           id?: string
@@ -631,6 +632,7 @@ export type Database = {
           status?: ModeloStatus
           criado_em?: string
           atualizado_em?: string
+          passos?: Json | null
         }
         Update: {
           id?: string
@@ -646,6 +648,7 @@ export type Database = {
           status?: ModeloStatus
           criado_em?: string
           atualizado_em?: string
+          passos?: Json | null
         }
         Relationships: [
           { foreignKeyName: 'modelos_wa_conta_id_fkey'; columns: ['conta_id']; isOneToOne: false; referencedRelation: 'contas'; referencedColumns: ['id'] },

@@ -5,9 +5,10 @@
 // - Progressivo: uma vez por dia sorteia os horários da cota do dia dentro da janela da campanha
 //   (lib/disparo/progressivo.ts) e, a cada execução, envia só quem já chegou no seu horário.
 //   Várias campanhas progressivas podem rodar juntas; a normal é uma por vez.
-// - Sequência (campanhas_wa.passos, lib/disparo/passos.ts): cada contato recebe várias mensagens
-//   (texto/mídia), cada uma com o próprio "digitando…"/"gravando…" antes. Sem passos, vale a
-//   mensagem única (20s de digitação no progressivo, 15–20s no normal).
+// - Sequência (campanhas_wa.passos, lib/disparo/passos.ts): cópia da sequência do modelo feita
+//   na criação do disparo (normal ou progressivo). Cada contato recebe várias mensagens
+//   (texto/mídia), cada uma com o próprio "digitando…"/"gravando…" antes. Disparo antigo, sem
+//   passos, vale a mensagem única (20s de digitação no progressivo, 15–20s no normal).
 // - Depois do envio: etiqueta do WhatsApp Business (remover/adicionar) e registro do número —
 //   ambos melhor esforço, viram `aviso` no contato, nunca desfazem o envio.
 //
@@ -249,7 +250,7 @@ async function processarNormal(
   const intMin  = cfg?.intervalo_min_seg ?? 45
   const intMax  = cfg?.intervalo_max_seg ?? 80
 
-  if (!c.modelos_wa?.corpo && !c.mensagem) return 0
+  if (!c.passos?.length && !c.modelos_wa?.corpo && !c.mensagem) return 0
 
   let enviados = 0
   while (Date.now() - inicioExecucao < budgetMs) {

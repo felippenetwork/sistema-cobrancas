@@ -52,6 +52,26 @@ export function textoDoPasso(p: Extract<Passo, { tipo: 'texto' }>, indice: numbe
   return montarTexto(p.texto, p.variacoes, indice, nome)
 }
 
+/**
+ * Sequência de um modelo (/wa-templates). Modelo antigo, só com `corpo`, vira um texto único
+ * com os 20s de abertura. Passos gravados que não passam na validação → null (não dispara).
+ */
+export function passosDoModelo(modelo: { passos: unknown; corpo: string | null }): Passo[] | null {
+  if (modelo.passos == null) {
+    const corpo = modelo.corpo?.trim()
+    return corpo ? [{ tipo: 'texto', texto: corpo, variacoes: [], digitacao_seg: digitacaoPadrao(0) }] : null
+  }
+  const r = schemaPassos.safeParse(modelo.passos)
+  return r.success ? r.data : null
+}
+
+/** Texto curto que representa a sequência (vai em modelos_wa.corpo e no card do modelo). */
+export function resumoDosPassos(passos: Passo[]): string {
+  const texto = passos.find(p => p.tipo === 'texto')
+  if (texto?.tipo === 'texto') return texto.texto
+  return passos.map(p => `[${p.tipo === 'texto' ? 'Texto' : TIPOS_MIDIA[p.tipo].rotulo}]`).join(' ')
+}
+
 /** Tempo aproximado (ms) de digitação + envio da sequência para um contato. */
 export function duracaoSequenciaMs(passos: Passo[]): number {
   return passos.reduce((s, p) => s + p.digitacao_seg * 1000 + 5_000, 0)

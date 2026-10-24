@@ -9,8 +9,8 @@ import {
 import { quotaDoDia } from '@/lib/disparo/progressivo'
 import { ProgressivoForm } from './progressivo-form'
 import { EtiquetasCampo, type EtiquetaEscolhida } from './etiquetas-campo'
+import { ModeloEscolha, type ModeloDisparo as Modelo } from './modelo-escolha'
 
-type Modelo  = { id: string; nome: string; status: string; corpo: string | null }
 type Cliente = { id: string; nome: string | null; sobrenome: string | null; celular: string }
 
 type Campanha = {
@@ -99,6 +99,7 @@ function ModalNovaCampanha({
   const [pulados, setPulados]           = useState(0)
   const [etqAdicionar, setEtqAdd]       = useState<EtiquetaEscolhida>(null)
   const [etqRemover, setEtqRem]         = useState<EtiquetaEscolhida>(null)
+  const [modeloId, setModeloId]         = useState(modelos.length === 1 ? modelos[0].id : '')
 
   const clientesFiltrados = clientes.filter(c => {
     const nome = [c.nome, c.sobrenome].filter(Boolean).join(' ').toLowerCase()
@@ -225,22 +226,8 @@ function ModalNovaCampanha({
               />
             </div>
             <div>
-              <label htmlFor="camp-modelo" className="mb-1.5 block text-xs font-medium text-muted-foreground">Modelo de mensagem</label>
-              <select
-                id="camp-modelo"
-                name="modelo_id"
-                required
-                defaultValue=""
-                className="w-full rounded-xl border border-border bg-input px-3 py-3 text-sm text-foreground outline-none focus:border-primary"
-              >
-                <option value="" disabled>Escolha um modelo</option>
-                {modelos.map(m => (
-                  <option key={m.id} value={m.id}>{m.nome}</option>
-                ))}
-              </select>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Crie e edite modelos em Modelos. <code className="rounded bg-muted px-1">{'{{nome}}'}</code> vira o nome do cliente.
-              </p>
+              <label htmlFor="camp-modelo" className="mb-1.5 block text-xs font-medium text-muted-foreground">Modelo (as mensagens que cada cliente recebe)</label>
+              <ModeloEscolha id="camp-modelo" name="modelo_id" modelos={modelos} valor={modeloId} onChange={setModeloId} />
             </div>
             <div className="space-y-2">
               <EtiquetasCampo nomeCampo adicionar={etqAdicionar} remover={etqRemover} onAdicionar={setEtqAdd} onRemover={setEtqRem} />
@@ -262,7 +249,7 @@ function ModalNovaCampanha({
               </button>
               <button
                 type="submit"
-                disabled={criando}
+                disabled={criando || !modeloId}
                 className="flex-1 rounded-xl bg-primary px-3 py-3 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
               >
                 {criando ? 'Criando…' : 'Próximo →'}
@@ -429,13 +416,15 @@ export function DisparosClient({
                           </span>
                         )}
                       </div>
-                      {c.tipo === 'progressivo' ? (
-                        <p className="mt-0.5 text-xs text-muted-foreground tabular-nums">
-                          {resumoProgressivo(c)}
-                          {c.passos && c.passos.length > 1 && ` · ${c.passos.length} mensagens por contato`}
+                      {c.tipo === 'progressivo' && (
+                        <p className="mt-0.5 text-xs text-muted-foreground tabular-nums">{resumoProgressivo(c)}</p>
+                      )}
+                      {(c.modelos_wa || (c.passos && c.passos.length > 1)) && (
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          {c.modelos_wa && `Modelo: ${c.modelos_wa.nome}`}
+                          {c.modelos_wa && c.passos && c.passos.length > 1 && ' · '}
+                          {c.passos && c.passos.length > 1 && `${c.passos.length} mensagens por contato`}
                         </p>
-                      ) : c.modelos_wa && (
-                        <p className="mt-0.5 text-xs text-muted-foreground">Modelo: {c.modelos_wa.nome}</p>
                       )}
                       {(c.etiqueta_adicionar_nome || c.etiqueta_remover_nome) && (
                         <p className="mt-0.5 text-xs text-muted-foreground">

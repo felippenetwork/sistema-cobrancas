@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto'
 import { getConta } from '@/lib/conta'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { interpretarLista, minutosDoDia } from '@/lib/disparo/progressivo'
-import { BUCKET_MIDIA, TAMANHO_MAX_MIDIA, TIPOS_MIDIA, pastaDaConta, schemaPassos, type TipoMidia } from '@/lib/disparo/passos'
+import { BUCKET_MIDIA, TAMANHO_MAX_MIDIA, TIPOS_MIDIA, pastaDaConta, passosDoModelo, type Passo, type TipoMidia } from '@/lib/disparo/passos'
 import { extrairContatos, paraLinhas, resumirGrupos, type PreferenciaNome, type ResumoGrupo } from '@/lib/disparo/extracao'
 import { listGroups, listLabels, listSavedContacts, UazapiRateLimitError, type UazapiEtiqueta } from '@/lib/uazapi'
 
@@ -23,14 +23,16 @@ export async function criarCampanhaAction(
     const { supabase, contaId } = await getConta()
 
     const nome     = (formData.get('nome')      as string)?.trim()
-    const modeloId = (formData.get('modelo_id') as string) || null
+    const modeloId = (formData.get('modelo_id') as string) || ''
 
     if (!nome) return { error: 'Informe o nome da campanha.' }
+    const seq = await sequenciaDoModelo(supabase, contaId, modeloId)
+    if ('erro' in seq) return { error: seq.erro }
 
     const { data, error } = await supabase
       .from('campanhas_wa')
       .insert({
-        conta_id: contaId, nome, modelo_id: modeloId, status: 'rascunho',
+        conta_id: contaId, nome, modelo_id: modeloId, status: 'rascunho', passos: seq.passos,
         registrar_enviados:  formData.get('registrar_enviados') === 'on',
         excluir_ja_enviados: formData.get('excluir_ja_enviados') === 'on',
         ...etiquetasDoForm(formData),
@@ -104,6 +106,28 @@ export async function adicionarDestinatariosAction(
   } catch (e) {
     return { error: e instanceof Error ? e.message : 'Erro desconhecido.' }
   }
+}
+
+/**
+ * Sequência do modelo escolhido, COPIADA para o disparo (editar o modelo depois não muda um
+ * disparo em andamento). Modelo de outra conta responde "não encontrado".
+ */
+async function sequenciaDoModelo(supabase: Supabase, contaId: string, modeloId: string): Promise<{ passos: Passo[] } | { erro: string }> {
+  if (!z.string().uuid().safeParse(modeloId).success) return { erro: 'Escolha um modelo para o disparo.' }
+  const { data, error } = await supabase
+    .from('modelos_wa').select('passos, corpo').eq('id', modeloId).eq('conta_id', contaId).maybeSingle()
+  if (error) {
+    console.error('[disparos] leitura do modelo falhou', { contaId, modeloId, error })
+    return { erro: 'Não foi possível ler o modelo. Tente de novo.' }
+  }
+  if (!data) return { erro: 'Modelo não encontrado.' }
+  const passos = passosDoModelo(data)
+  if (!passos) return { erro: 'Este modelo está sem mensagem. Edite o modelo antes de disparar.' }
+  // Mídia só da pasta desta conta: nunca aceitar caminho de arquivo de outra conta.
+  if (passos.some(p => p.tipo !== 'texto' && !p.caminho.startsWith(pastaDaConta(contaId)))) {
+    return { erro: 'Arquivo de mídia inválido no modelo. Envie o arquivo de novo no modelo.' }
+  }
+  return { passos }
 }
 
 async function whatsappConectado(supabase: Supabase, contaId: string): Promise<boolean> {
@@ -180,7 +204,7 @@ export async function enviarCampanhaAction(campanhaId: string): Promise<{
 
     const { data: campanha } = await supabase
       .from('campanhas_wa')
-      .select('id, status, modelo_id, total_destinatarios, excluir_ja_enviados, modelos_wa(corpo, status)')
+      .select('id, status, total_destinatarios, excluir_ja_enviados, passos, modelos_wa(corpo)')
       .eq('id', campanhaId)
       .eq('conta_id', contaId)
       .maybeSingle()
@@ -190,8 +214,8 @@ export async function enviarCampanhaAction(campanhaId: string): Promise<{
       return { error: 'Campanha já foi enviada ou está em andamento.' }
     }
 
-    const modelo = (campanha as any).modelos_wa
-    if (!modelo?.corpo) return { error: 'Selecione um template antes de enviar.' }
+    const modelo = campanha.modelos_wa as { corpo: string | null } | null
+    if (!campanha.passos && !modelo?.corpo) return { error: 'Escolha um modelo antes de enviar.' }
 
     if (!campanha.total_destinatarios) return { error: 'Nenhum destinatário cadastrado.' }
 
@@ -224,7 +248,7 @@ const etiqueta = z.object({ id: z.string().min(1).max(100), nome: z.string().max
 
 const schemaProgressivo = z.object({
   nome:        z.string().trim().min(1, 'Informe o nome do disparo.').max(80),
-  passos:      schemaPassos,
+  modeloId:    z.string(),
   etiquetaAdicionar: etiqueta,
   etiquetaRemover:   etiqueta,
   lista:       z.string().max(400_000),
@@ -251,10 +275,8 @@ export async function criarProgressivoAction(input: NovoProgressivo): Promise<{ 
     if (contatos.length > 10_000) return { error: 'A lista pode ter no máximo 10.000 números.' }
 
     const { supabase, contaId } = await getConta()
-    // Mídia só da pasta desta conta: nunca aceitar caminho de arquivo de outra conta.
-    if (d.passos.some(p => p.tipo !== 'texto' && !p.caminho.startsWith(pastaDaConta(contaId)))) {
-      return { error: 'Arquivo de mídia inválido. Envie o arquivo de novo.' }
-    }
+    const seq = await sequenciaDoModelo(supabase, contaId, d.modeloId)
+    if ('erro' in seq) return { error: seq.erro }
     if (!(await whatsappConectado(supabase, contaId))) {
       return { error: 'WhatsApp não está conectado. Conecte em Conexão WA antes de iniciar.' }
     }
@@ -266,7 +288,8 @@ export async function criarProgressivoAction(input: NovoProgressivo): Promise<{ 
         nome: d.nome,
         tipo: 'progressivo',
         status: 'rascunho',
-        passos: d.passos.map(p => (p.tipo === 'texto' ? { ...p, variacoes: p.variacoes.filter(Boolean) } : p)),
+        modelo_id: d.modeloId,
+        passos: seq.passos,
         etiqueta_adicionar:      d.etiquetaAdicionar?.id ?? null,
         etiqueta_adicionar_nome: d.etiquetaAdicionar?.nome ?? null,
         etiqueta_remover:        d.etiquetaRemover?.id ?? null,

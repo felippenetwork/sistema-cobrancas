@@ -309,6 +309,16 @@ describe('sequência de mensagens (caixinhas)', () => {
     expect(mocks.sendText).toHaveBeenCalledWith('tok', '5521999990001', 'Oi Maria!')
   })
 
+  it('disparo normal só com a cópia da sequência do modelo (sem texto avulso) também envia', async () => {
+    const db = cenario({
+      campanha: { tipo: 'normal', mensagem: null, variacoes: [], modelos_wa: null, passos: PASSOS },
+      destinatarios: [{ ...agendado()[0], agendado_para: null }],
+    })
+    await rodar(db)
+    expect(mocks.ordem).toEqual(['digitando', 'enviou', 'digitando', 'midia', 'digitando', 'midia'])
+    expect(db.linhas('campanha_destinatarios')[0].status).toBe('enviado')
+  })
+
   it('mídia vai por link assinado do bucket privado, com {{nome}} na legenda e áudio como voz', async () => {
     const db = comPassos()
     await rodar(db)

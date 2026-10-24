@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
+import { passosDoModelo } from '@/lib/disparo/passos'
 import { TemplatesClient } from './_components/templates-client'
 
 export const dynamic = 'force-dynamic'
@@ -15,11 +16,20 @@ export default async function WaTemplatesPage() {
   if (!conta) redirect('/login')
   const contaId = conta.id
 
-  const { data: modelos } = await supabase
+  const { data: modelos, error } = await supabase
     .from('modelos_wa')
-    .select('id, nome, corpo, criado_em')
+    .select('id, nome, corpo, passos, criado_em')
     .eq('conta_id', contaId)
     .order('criado_em', { ascending: false })
+  if (error) {
+    console.error('[modelos] leitura falhou', { contaId, error })
+    throw new Error('Não foi possível carregar os modelos.')
+  }
 
-  return <TemplatesClient modelos={modelos ?? []} />
+  // Modelo antigo (só texto) aparece como uma caixinha de texto.
+  return (
+    <TemplatesClient
+      modelos={(modelos ?? []).map(m => ({ id: m.id, nome: m.nome, criado_em: m.criado_em, passos: passosDoModelo(m) ?? [] }))}
+    />
+  )
 }

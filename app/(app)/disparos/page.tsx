@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
+import { passosDoModelo } from '@/lib/disparo/passos'
 import { DisparosClient } from './_components/disparos-client'
 
 export const dynamic = 'force-dynamic'
@@ -35,9 +36,8 @@ export default async function DisparosPage() {
       .limit(50),
     supabase
       .from('modelos_wa')
-      .select('id, nome, status, corpo')
+      .select('id, nome, corpo, passos')
       .eq('conta_id', contaId)
-      .in('status', ['aprovado', 'rascunho'])
       .order('nome'),
     supabase
       .from('clientes')
@@ -51,7 +51,11 @@ export default async function DisparosPage() {
   return (
     <DisparosClient
       campanhas={(campanhas as any[]) ?? []}
-      modelos={modelos ?? []}
+      modelos={(modelos ?? []).flatMap(m => {
+        // Só modelos com mensagem válida aparecem para escolha.
+        const passos = passosDoModelo(m)
+        return passos ? [{ id: m.id, nome: m.nome, passos }] : []
+      })}
       clientes={clientes ?? []}
     />
   )
