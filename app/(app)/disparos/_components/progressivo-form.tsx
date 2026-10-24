@@ -1,9 +1,10 @@
 'use client'
 
-import { useMemo, useState } from 'react'
-import { Download, Loader2 } from 'lucide-react'
+import { useMemo, useRef, useState } from 'react'
+import { Download, Loader2, Upload } from 'lucide-react'
 import { criarProgressivoAction } from '../_actions'
 import { interpretarLista, quotaDoDia } from '@/lib/disparo/progressivo'
+import { contatosDeVcf, linhasDeTabela, tabelaDeCsv, type ResultadoArquivo } from '@/lib/disparo/arquivo-contatos'
 import { PassosEditor, novoPasso, type PassoEditavel } from './passos-editor'
 import { ImportarGrupo } from './importar-grupo'
 import { EtiquetasCampo, type EtiquetaEscolhida } from './etiquetas-campo'
@@ -12,6 +13,8 @@ type Modelo = { id: string; nome: string; corpo: string | null }
 
 const INPUT = 'w-full rounded-xl border border-border bg-input px-3 py-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20'
 const LABEL = 'mb-1.5 block text-xs font-medium uppercase tracking-wide text-muted-foreground'
+const ACEITA_ARQUIVO = '.xlsx,.csv,.txt,.vcf'
+const TAMANHO_MAX_ARQUIVO = 5 * 1024 * 1024
 
 /** Quantos dias até a lista acabar, seguindo o ciclo inicio → maximo → inicio. */
 function diasParaTerminar(total: number, inicio: number, maximo: number): number {
@@ -53,6 +56,9 @@ export function ProgressivoForm({ modelos, onConcluido, onVoltar }: {
   const [lista, setLista]             = useState('')
   const [importando, setImportando]   = useState(false)
   const [resumoImport, setResumoImp]  = useState<string | null>(null)
+  const [lendoArquivo, setLendoArquivo] = useState(false)
+  const [erroArquivo, setErroArquivo] = useState<string | null>(null)
+  const arquivoRef                    = useRef<HTMLInputElement>(null)
   const [janelaInicio, setJanelaIni]  = useState('09:00')
   const [janelaFim, setJanelaFim]     = useState('18:00')
   const [inicio, setInicio]           = useState(1)
@@ -76,6 +82,45 @@ export function ProgressivoForm({ modelos, onConcluido, onVoltar }: {
   }, [inicio, maximo])
 
   const primeiroTexto = passos.find(p => p.tipo === 'texto')
+
+  function acrescentarNaLista(linhas: string, resumo: string) {
+    setLista(atual => (atual.trim() ? `${atual.trim()}\n${linhas}` : linhas))
+    setResumoImp(resumo)
+  }
+
+  async function lerArquivo(arquivo: File) {
+    setErroArquivo(null)
+    if (arquivo.size > TAMANHO_MAX_ARQUIVO) { setErroArquivo('O arquivo passa de 5 MB. Divida a lista em partes menores.'); return }
+    const extensao = arquivo.name.split('.').pop()?.toLowerCase() ?? ''
+    setLendoArquivo(true)
+    try {
+      let r: ResultadoArquivo
+      if (extensao === 'xlsx') {
+        const { default: readXlsxFile } = await import('read-excel-file')
+        r = linhasDeTabela(await readXlsxFile(arquivo))
+      } else if (extensao === 'vcf') {
+        r = contatosDeVcf(await arquivo.text())
+      } else if (extensao === 'csv') {
+        r = linhasDeTabela(tabelaDeCsv(await arquivo.text()))
+      } else if (extensao === 'txt') {
+        const { contatos, invalidas } = interpretarLista(await arquivo.text())
+        r = { linhas: contatos.map(c => (c.nome ? `${c.nome}; ${c.celular}` : c.celular)), semNumero: invalidas.length }
+      } else {
+        setErroArquivo('Formato não aceito. Use planilha (.xlsx), .csv, .txt ou contatos (.vcf).')
+        return
+      }
+      if (!r.linhas.length) { setErroArquivo(`Nenhum número válido em ${arquivo.name}.`); return }
+      const fora = r.semNumero ? `, ${r.semNumero} linha${r.semNumero === 1 ? '' : 's'} sem número válido ficou de fora` : ''
+      acrescentarNaLista(r.linhas.join('\n'), `${r.linhas.length} contato${r.linhas.length === 1 ? '' : 's'} de ${arquivo.name}${fora}`)
+    } catch (e) {
+      console.error('[disparos] ler arquivo da lista falhou', e)
+      setErroArquivo(extensao === 'xlsx'
+        ? 'Não foi possível ler a planilha. Se ela for .xls antigo, salve como .xlsx ou .csv e tente de novo.'
+        : 'Não foi possível ler o arquivo. Confira se ele não está corrompido e tente de novo.')
+    } finally {
+      setLendoArquivo(false)
+    }
+  }
 
   function usarModelo(id: string) {
     const m = modelos.find(x => x.id === id)
@@ -130,31 +175,39 @@ export function ProgressivoForm({ modelos, onConcluido, onVoltar }: {
 
       {/* Lista */}
       <section className="space-y-2">
-        <div className="flex items-end justify-between gap-3">
+        <div className="flex flex-wrap items-end justify-between gap-x-3 gap-y-1">
           <label htmlFor="prog-lista" className={LABEL + ' mb-0'}>Números e nomes</label>
-          {!importando && (
-            <button type="button" onClick={() => setImportando(true)}
-              className="flex items-center gap-1 text-xs font-medium text-primary hover:underline">
-              <Download className="h-3.5 w-3.5" /> Importar de grupo ou comunidade
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <button type="button" onClick={() => arquivoRef.current?.click()} disabled={lendoArquivo}
+              className="flex items-center gap-1 text-xs font-medium text-primary hover:underline disabled:opacity-50">
+              {lendoArquivo ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />} Subir arquivo
             </button>
-          )}
+            <input ref={arquivoRef} type="file" accept={ACEITA_ARQUIVO} className="hidden" aria-hidden="true" tabIndex={-1}
+              onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void lerArquivo(f) }} />
+            {!importando && (
+              <button type="button" onClick={() => setImportando(true)}
+                className="flex items-center gap-1 text-xs font-medium text-primary hover:underline">
+                <Download className="h-3.5 w-3.5" /> Importar de grupo ou comunidade
+              </button>
+            )}
+          </div>
         </div>
         {importando && (
           <ImportarGrupo
             onFechar={() => setImportando(false)}
             onImportar={(linhas, resumo) => {
-              setLista(atual => (atual.trim() ? `${atual.trim()}\n${linhas}` : linhas))
-              setResumoImp(resumo)
+              acrescentarNaLista(linhas, resumo)
               setImportando(false)
             }}
           />
         )}
         {resumoImport && <p className="text-xs text-muted-foreground">Importado: {resumoImport}.</p>}
+        {erroArquivo && <p role="alert" className="text-xs text-destructive">{erroArquivo}</p>}
         <textarea id="prog-lista" value={lista} onChange={e => setLista(e.target.value)} rows={6}
           placeholder={'Maria Souza; 21 99999-0001\nJoão, 5521999990002\n21999990003'}
           className={INPUT + ' resize-y font-mono text-xs'} />
         <p className="text-xs text-muted-foreground">
-          Um contato por linha, nome e número em qualquer ordem. Repetidos entram uma vez.{' '}
+          Um contato por linha, nome e número em qualquer ordem, ou suba uma planilha, CSV ou os contatos do celular (.vcf). Repetidos entram uma vez.{' '}
           <span className="font-medium text-foreground tabular-nums">{contatos.length}</span> número{contatos.length === 1 ? '' : 's'} válido{contatos.length === 1 ? '' : 's'}
           {invalidas.length > 0 && <> · <span className="tabular-nums">{invalidas.length}</span> linha{invalidas.length === 1 ? '' : 's'} sem número válido (ignorada{invalidas.length === 1 ? '' : 's'})</>}
         </p>
