@@ -1,12 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Send, Plus, XCircle, CheckCircle, Clock, AlertCircle, Users, Loader2, Pause, Play, SkipForward, TrendingUp } from 'lucide-react'
 import {
   criarCampanhaAction, adicionarDestinatariosAction, enviarCampanhaAction,
   cancelarCampanhaAction, pausarCampanhaAction, retomarCampanhaAction,
 } from '../_actions'
-import { quotaDoDia } from '@/lib/disparo/progressivo'
+import { dataSP, quotaDoDia } from '@/lib/disparo/progressivo'
 import { ProgressivoForm } from './progressivo-form'
 import { AcoesEditor } from './acoes-editor'
 import { acoesLegadas, descreverAcao, lerAcoes, type Acao } from '@/lib/disparo/acoes'
@@ -327,14 +328,73 @@ function ModalNovaCampanha({
   )
 }
 
+const horaSP = (iso: string) => new Date(iso).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' })
+
+/** Horários de hoje do progressivo: o que já saiu (com marca) e o que está agendado. */
+function AgendaDoDia({ c, itens }: { c: Campanha; itens: { hora: string; enviado: boolean }[] }) {
+  const ini = c.prog_inicio ?? 1
+  const max = c.prog_maximo ?? ini
+  const planejadoHoje = c.prog_planejado_em === dataSP()
+  const amanha = quotaDoDia(planejadoHoje ? c.prog_dia : Math.max(c.prog_dia, 0), ini, max)
+  const janela = `${hhmm(c.janela_inicio)} e ${hhmm(c.janela_fim)}`
+
+  if (!itens.length) {
+    return (
+      <p className="mt-1 text-xs text-muted-foreground">
+        {planejadoHoje
+          ? <>Os envios de hoje terminaram. Amanhã: <span className="tabular-nums">{amanha}</span> envio{amanha === 1 ? '' : 's'} entre {janela}.</>
+          : <>Os horários de hoje são sorteados quando a janela abrir ({hhmm(c.janela_inicio)}).</>}
+      </p>
+    )
+  }
+  const faltam = itens.filter(i => !i.enviado).length
+  return (
+    <div className="mt-1.5">
+      <p className="text-xs text-muted-foreground">
+        Hoje: <span className="tabular-nums">{itens.length - faltam}</span> enviado{itens.length - faltam === 1 ? '' : 's'}
+        {faltam > 0 && <>, <span className="tabular-nums">{faltam}</span> agendado{faltam === 1 ? '' : 's'}</>}
+      </p>
+      <ul className="mt-1 flex flex-wrap gap-1.5" aria-label="Horários de hoje">
+        {itens.map((i, k) => (
+          <li key={k} className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] tabular-nums ${i.enviado ? 'bg-muted text-muted-foreground' : 'border border-primary/40 text-foreground'}`}
+            title={i.enviado ? 'Já enviado' : 'Agendado'}>
+            {i.enviado ? <CheckCircle className="h-3 w-3" /> : <Clock className="h-3 w-3 text-primary" />}
+            {horaSP(i.hora)}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+/** Enquanto algum disparo está enviando, a página se atualiza sozinha (a cada 20 s, aba visível). */
+function AtualizacaoAutomatica({ ativa }: { ativa: boolean }) {
+  const router = useRouter()
+  const [ultima, setUltima] = useState<Date | null>(null)
+  useEffect(() => {
+    if (!ativa) return
+    const tick = () => { if (document.visibilityState === 'visible') { router.refresh(); setUltima(new Date()) } }
+    const id = setInterval(tick, 20_000)
+    document.addEventListener('visibilitychange', tick)
+    return () => { clearInterval(id); document.removeEventListener('visibilitychange', tick) }
+  }, [ativa, router])
+  if (!ativa) return null
+  return (
+    <p className="text-[11px] text-muted-foreground" aria-live="polite">
+      Atualiza sozinha a cada 20 s{ultima && <> · última às <span className="tabular-nums">{ultima.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span></>}
+    </p>
+  )
+}
 // ── Componente principal ─────────────────────────────────────────────────────
 
 export function DisparosClient({
+  agenda,
   campanhas,
   modelos,
   clientes,
   fluxos,
 }: {
+  agenda: Record<string, { hora: string; enviado: boolean }[]>
   campanhas: Campanha[]
   modelos: Modelo[]
   clientes: Cliente[]
@@ -375,6 +435,7 @@ export function DisparosClient({
             <p className="mt-0.5 text-sm text-muted-foreground">
               Envie mensagens em massa, de uma vez ou aos poucos.
             </p>
+            <AtualizacaoAutomatica ativa={campanhas.some(c => c.status === 'enviando')} />
           </div>
           <button
             onClick={() => setModalNovo(true)}
@@ -430,6 +491,7 @@ export function DisparosClient({
                       {c.tipo === 'progressivo' && (
                         <p className="mt-0.5 text-xs text-muted-foreground tabular-nums">{resumoProgressivo(c)}</p>
                       )}
+                      {c.tipo === 'progressivo' && emAndamento && <AgendaDoDia c={c} itens={agenda[c.id] ?? []} />}
                       {(c.modelos_wa || (c.passos && c.passos.length > 1)) && (
                         <p className="mt-0.5 text-xs text-muted-foreground">
                           {c.modelos_wa && `Modelo: ${c.modelos_wa.nome}`}
