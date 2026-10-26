@@ -1,4 +1,4 @@
-// Espelho do schema em supabase/migrations/*, mantido À MÃO (última sincronização: migration 0041).
+// Espelho do schema em supabase/migrations/*, mantido À MÃO (última sincronização: migration 0042).
 // Toda migration que cria/altera tabela ou coluna atualiza este arquivo na MESMA tarefa — tabela ou
 // coluna faltando aqui vira `as any` no código (foi assim que cobrancas_pix e mensagens_rapidas
 // ficaram sem tipo). Para regenerar do banco real (precisa de SUPABASE_ACCESS_TOKEN):
@@ -863,6 +863,8 @@ export type Database = {
           msg_nao_entendi: string
           msg_humano: string
           aviso_numero: string | null
+          boas_vindas: boolean
+          boas_vindas_clientes: boolean
           criado_em: string
           atualizado_em: string
         }
@@ -881,6 +883,8 @@ export type Database = {
           msg_nao_entendi?: string
           msg_humano?: string
           aviso_numero?: string | null
+          boas_vindas?: boolean
+          boas_vindas_clientes?: boolean
           criado_em?: string
           atualizado_em?: string
         }
@@ -899,6 +903,8 @@ export type Database = {
           msg_nao_entendi?: string
           msg_humano?: string
           aviso_numero?: string | null
+          boas_vindas?: boolean
+          boas_vindas_clientes?: boolean
           criado_em?: string
           atualizado_em?: string
         }
@@ -919,6 +925,7 @@ export type Database = {
           nao_entendi: number
           ocupado_ate: string | null
           versao: number
+          fluxos_recebidos: string[]
           iniciado_em: string
           atualizado_em: string
         }
@@ -934,6 +941,7 @@ export type Database = {
           nao_entendi?: number
           ocupado_ate?: string | null
           versao?: number
+          fluxos_recebidos?: string[]
           iniciado_em?: string
           atualizado_em?: string
         }
@@ -949,6 +957,7 @@ export type Database = {
           nao_entendi?: number
           ocupado_ate?: string | null
           versao?: number
+          fluxos_recebidos?: string[]
           iniciado_em?: string
           atualizado_em?: string
         }

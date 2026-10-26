@@ -84,6 +84,10 @@ export type FluxoAtivo = {
   msg_nao_entendi: string
   msg_humano: string
   aviso_numero: string | null
+  /** Também começa na primeira mensagem de quem ainda não recebeu esta automação (uma vez por pessoa). */
+  boas_vindas: boolean
+  /** Boas-vindas vale também para quem já está em Clientes (false = só para quem não é cliente). */
+  boas_vindas_clientes: boolean
 }
 
 export type EstadoConversa = {
@@ -93,6 +97,8 @@ export type EstadoConversa = {
   variaveis: Record<string, string>
   nao_entendi: number
   atualizado_em: string
+  /** Automações que o contato já recebeu (qualquer jeito de começar). */
+  fluxos_recebidos?: string[]
 }
 
 // ── Texto ─────────────────────────────────────────────────────────────────────
@@ -173,14 +179,18 @@ export type Entrada = {
   fluxoDoDisparo: string | null
   /** Etiquetas do contato; null = não foram buscadas (ver precisaDeEtiquetas). */
   etiquetas: string[] | null
+  /** O número está em Clientes? null = não foi conferido (ver precisaSaberSeECliente). */
+  ehCliente?: boolean | null
 }
+
+export type Gatilho = 'palavra' | 'disparo' | 'etiqueta' | 'boas_vindas'
 
 export type Decisao =
   | { tipo: 'ignorar'; motivo: string }
   | { tipo: 'sair' }
   | { tipo: 'humano'; fluxo: FluxoAtivo; motivo: string }
   | { tipo: 'nao_entendi'; fluxo: FluxoAtivo; tentativas: number }
-  | { tipo: 'iniciar'; fluxo: FluxoAtivo; gatilho: 'palavra' | 'disparo' | 'etiqueta' }
+  | { tipo: 'iniciar'; fluxo: FluxoAtivo; gatilho: Gatilho }
   | { tipo: 'avancar'; fluxo: FluxoAtivo; etapaId: string | null; variaveis: Record<string, string> }
 
 function conversaEmAndamento(e: Entrada): { fluxo: FluxoAtivo; etapa: Etapa } | null {
@@ -215,7 +225,7 @@ function excluido(f: FluxoAtivo, etiquetas: string[] | null): boolean {
  * sem conversa. (A resposta a disparo já vem filtrada: só disparo recebido depois da última
  * conversa conta, ver processar.ts.)
  */
-function gatilho(e: Entrada): { fluxo: FluxoAtivo; gatilho: 'palavra' | 'disparo' | 'etiqueta' } | null {
+function gatilho(e: Entrada): { fluxo: FluxoAtivo; gatilho: Gatilho } | null {
   const validos = e.fluxos.filter(f => f.etapas.length && !excluido(f, e.etiquetas))
   const porPalavra = validos.find(f => ehUmaDas(e.texto, f.gatilho_palavras))
   if (porPalavra) return { fluxo: porPalavra, gatilho: 'palavra' }
@@ -224,7 +234,25 @@ function gatilho(e: Entrada): { fluxo: FluxoAtivo; gatilho: 'palavra' | 'disparo
   const recente = e.conversa && e.agora.getTime() - new Date(e.conversa.atualizado_em).getTime() < EXPIRA_CONVERSA_MS
   const porEtiqueta = recente ? undefined : validos.find(f => temEtiqueta(e.etiquetas ?? [], f.gatilho_etiquetas))
   if (porEtiqueta) return { fluxo: porEtiqueta, gatilho: 'etiqueta' }
+  const porBoasVindas = validos.find(f => boasVindasValem(f, e))
+  if (porBoasVindas) return { fluxo: porBoasVindas, gatilho: 'boas_vindas' }
   return null
+}
+
+/**
+ * Boas-vindas: a pessoa ainda não recebeu esta automação. Se ela não vale para clientes, só
+ * começa para quem COM CERTEZA não está em Clientes (sem conseguir conferir, não começa).
+ */
+function boasVindasValem(f: FluxoAtivo, e: Pick<Entrada, 'conversa' | 'ehCliente'>): boolean {
+  if (!f.boas_vindas || (e.conversa?.fluxos_recebidos ?? []).includes(f.id)) return false
+  return f.boas_vindas_clientes || e.ehCliente === false
+}
+
+/** Só consulta Clientes quando isso pode mudar a decisão (boas-vindas que exclui clientes). */
+export function precisaSaberSeECliente(e: Omit<Entrada, 'etiquetas' | 'ehCliente'>): boolean {
+  if (e.conversa?.status === 'humano') return false
+  if (conversaEmAndamento({ ...e, etiquetas: null })) return false
+  return e.fluxos.some(f => f.boas_vindas && !f.boas_vindas_clientes && !(e.conversa?.fluxos_recebidos ?? []).includes(f.id))
 }
 
 export function decidir(e: Entrada): Decisao {
@@ -322,6 +350,8 @@ export type EstadoFinal = {
   variaveis?: Record<string, string>
   nao_entendi: number
   iniciado_em?: true
+  /** Automação que entra na lista das já recebidas pelo contato. */
+  fluxo_recebido?: string
 }
 
 export type Plano = {
@@ -366,9 +396,9 @@ export function planejar(d: Exclude<Decisao, { tipo: 'ignorar' }>, c: { etapa_id
   const inicio = d.tipo === 'iniciar' ? d.fluxo.etapas[0].id : d.etapaId
   const variaveis = d.tipo === 'iniciar' ? {} : d.variaveis
   const percurso = percorrer(d.fluxo, inicio)
-  const comum = { fluxo_id: d.fluxo.id, variaveis, nao_entendi: 0, ...(d.tipo === 'iniciar' ? { iniciado_em: true as const } : {}) }
+  const comum = { fluxo_id: d.fluxo.id, variaveis, nao_entendi: 0, ...(d.tipo === 'iniciar' ? { iniciado_em: true as const, fluxo_recebido: d.fluxo.id } : {}) }
   const evento = d.tipo === 'iniciar'
-    ? `Entrou na automação "${d.fluxo.nome}" (${d.gatilho === 'palavra' ? 'mandou a palavra' : d.gatilho === 'disparo' ? 'respondeu ao disparo' : 'tem a etiqueta'}).`
+    ? `Entrou na automação "${d.fluxo.nome}" (${{ palavra: 'mandou a palavra', disparo: 'respondeu ao disparo', etiqueta: 'tem a etiqueta', boas_vindas: 'primeira mensagem' }[d.gatilho]}).`
     : null
   const envios = percurso.enviar.map(e => ({ etapaId: e.id, passos: passosDaEtapa(e) }))
   const depois = percurso.depois

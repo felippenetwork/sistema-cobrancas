@@ -18,7 +18,7 @@ export default async function FluxoPage({ params }: { params: Promise<{ id: stri
 
   const { data: f, error } = await supabase
     .from('bot_fluxos')
-    .select('id, nome, ativo, etapas, gatilho_palavras, gatilho_etiquetas, gatilho_etiquetas_nomes, excluir_etiquetas, excluir_etiquetas_nomes, palavras_humano, msg_nao_entendi, msg_humano, aviso_numero')
+    .select('id, nome, ativo, etapas, gatilho_palavras, gatilho_etiquetas, gatilho_etiquetas_nomes, excluir_etiquetas, excluir_etiquetas_nomes, palavras_humano, msg_nao_entendi, msg_humano, aviso_numero, boas_vindas, boas_vindas_clientes')
     .eq('id', id).eq('conta_id', conta.id).maybeSingle()
   if (error) {
     console.error('[chatbot] leitura do fluxo falhou', { contaId: conta.id, id, error })
@@ -35,6 +35,7 @@ export default async function FluxoPage({ params }: { params: Promise<{ id: stri
     excluirEtiquetas: par(f.excluir_etiquetas, f.excluir_etiquetas_nomes),
     palavrasHumano: f.palavras_humano, msgNaoEntendi: f.msg_nao_entendi, msgHumano: f.msg_humano,
     avisoNumero: f.aviso_numero ?? '',
+    boasVindas: f.boas_vindas, boasVindasClientes: f.boas_vindas_clientes,
   }
   return <FluxoEditor fluxoId={f.id} inicial={inicial} />
 }

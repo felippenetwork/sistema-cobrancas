@@ -72,6 +72,15 @@ describe('regras do banco', () => {
     expect((await db.sql(`select fluxo_id from public.campanhas_wa where id = $1`, [cp])).rows).toEqual([{ fluxo_id: null }])
   })
 
+  it('0042: automação existente fica sem boas-vindas; contato começa sem automações recebidas', async () => {
+    const f = await db.sql(`select boas_vindas, boas_vindas_clientes from public.bot_fluxos where id = $1`, [fluxoA])
+    expect(f.rows[0]).toEqual({ boas_vindas: false, boas_vindas_clientes: false })
+    const c = await db.sql(`select fluxos_recebidos from public.bot_conversas where id = $1`, [conversaA])
+    expect(c.rows[0]).toEqual({ fluxos_recebidos: [] })
+    const ok = await db.sql(`update public.bot_conversas set fluxos_recebidos = array[$2::uuid] where id = $1 returning id`, [conversaA, fluxoA])
+    expect(ok.rows).toHaveLength(1)
+  })
+
   it('apagar a conversa leva o histórico junto', async () => {
     const cv = (await db.sql<{ id: string }>(`insert into public.bot_conversas (conta_id, celular) values ($1, '5521999990003') returning id`, [contaA])).rows[0].id
     await db.sql(`insert into public.bot_mensagens (conta_id, conversa_id, direcao, texto) values ($1, $2, 'evento', 'x')`, [contaA, cv])

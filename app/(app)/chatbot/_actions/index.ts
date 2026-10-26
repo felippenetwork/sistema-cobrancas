@@ -31,6 +31,8 @@ const schemaFluxo = z.object({
   msgNaoEntendi:   z.string().trim().min(1, 'Escreva a mensagem de "não entendi".').max(1000),
   msgHumano:       z.string().trim().min(1, 'Escreva a mensagem de quando a pessoa pede atendimento.').max(1000),
   avisoNumero:     z.string().max(30),
+  boasVindas:      z.boolean().default(false),
+  boasVindasClientes: z.boolean().default(false),
 })
 
 export type FluxoEntrada = z.input<typeof schemaFluxo>
@@ -63,6 +65,8 @@ function colunasDoFluxo(input: FluxoEntrada, contaId: string) {
       msg_nao_entendi: d.msgNaoEntendi,
       msg_humano: d.msgHumano,
       aviso_numero: aviso,
+      boas_vindas: d.boasVindas,
+      boas_vindas_clientes: d.boasVindasClientes,
     },
   }
 }

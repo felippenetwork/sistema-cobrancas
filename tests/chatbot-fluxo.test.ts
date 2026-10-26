@@ -2,8 +2,8 @@
 // humano, SAIR e o caminho entre etapas. Sem banco e sem rede.
 import { describe, expect, it } from 'vitest'
 import {
-  aplicarVariaveis, decidir, ehUmaDas, escolherOpcao, MAX_NAO_ENTENDI, normalizar, passosDaEtapa, percorrer,
-  precisaDeEtiquetas, schemaEtapas, temEtiqueta,
+  aplicarVariaveis, decidir, ehUmaDas, escolherOpcao, MAX_NAO_ENTENDI, normalizar, passosDaEtapa, percorrer, planejar,
+  precisaDeEtiquetas, precisaSaberSeECliente, schemaEtapas, temEtiqueta,
   type EstadoConversa, type Etapa, type FluxoAtivo,
 } from '@/lib/chatbot/fluxo'
 
@@ -22,7 +22,8 @@ const etapas: Etapa[] = [
 
 const fluxo = (extra: Partial<FluxoAtivo> = {}): FluxoAtivo => ({
   id: 'f1', nome: 'Vendas', etapas, gatilho_palavras: ['menu', 'quero'], gatilho_etiquetas: [], excluir_etiquetas: [],
-  palavras_humano: ['atendente'], msg_nao_entendi: 'Não entendi.', msg_humano: 'Chamando.', aviso_numero: null, ...extra,
+  palavras_humano: ['atendente'], msg_nao_entendi: 'Não entendi.', msg_humano: 'Chamando.', aviso_numero: null,
+  boas_vindas: false, boas_vindas_clientes: false, ...extra,
 })
 
 const conversa = (extra: Partial<EstadoConversa> = {}): EstadoConversa => ({
@@ -115,6 +116,53 @@ describe('gatilhos (sem conversa)', () => {
     expect(precisaDeEtiquetas(base)).toBe(false)
     expect(precisaDeEtiquetas({ ...base, fluxos: [fluxo({ excluir_etiquetas: ['1'] })] })).toBe(true)
     expect(precisaDeEtiquetas({ ...base, fluxos: [fluxo({ excluir_etiquetas: ['1'] })], conversa: conversa() })).toBe(false)
+  })
+})
+
+describe('boas-vindas (primeira mensagem, uma vez por pessoa)', () => {
+  const bv = (clientes: boolean) => [fluxo({ gatilho_palavras: [], boas_vindas: true, boas_vindas_clientes: clientes })]
+
+  it('primeira mensagem de quem não é cliente: recebe', () => {
+    expect(decidir(entrada('Bom dia', { fluxos: bv(false), ehCliente: false }))).toMatchObject({ tipo: 'iniciar', gatilho: 'boas_vindas' })
+  })
+
+  it('quem já recebeu esta automação não recebe de novo', () => {
+    const ja = conversa({ status: 'encerrada', etapa_id: null, fluxos_recebidos: ['f1'], atualizado_em: '2026-10-20T10:00:00Z' })
+    expect(decidir(entrada('oi de novo', { fluxos: bv(true), conversa: ja }))).toMatchObject({ tipo: 'ignorar' })
+  })
+
+  it('"só quem não é cliente": cliente não recebe; sem conseguir conferir, também não', () => {
+    expect(decidir(entrada('oi', { fluxos: bv(false), ehCliente: true }))).toMatchObject({ tipo: 'ignorar' })
+    expect(decidir(entrada('oi', { fluxos: bv(false), ehCliente: null }))).toMatchObject({ tipo: 'ignorar' })
+  })
+
+  it('"todos, inclusive quem já é cliente": cliente recebe uma vez', () => {
+    expect(decidir(entrada('paguei', { fluxos: bv(true), ehCliente: true }))).toMatchObject({ tipo: 'iniciar', gatilho: 'boas_vindas' })
+  })
+
+  it('não interrompe uma conversa em andamento nem responde quem está com você', () => {
+    const outra = fluxo({ id: 'f2', gatilho_palavras: [] })
+    const andamento = conversa({ fluxo_id: 'f2', etapa_id: 'cidade' })
+    expect(decidir(entrada('Niterói', { fluxos: [...bv(true), outra], conversa: andamento }))).toMatchObject({ tipo: 'avancar', fluxo: { id: 'f2' } })
+    expect(decidir(entrada('oi', { fluxos: bv(true), conversa: conversa({ status: 'humano' }) }))).toMatchObject({ tipo: 'ignorar' })
+  })
+
+  it('palavra-chave continua funcionando para quem já recebeu as boas-vindas', () => {
+    const ja = conversa({ status: 'encerrada', etapa_id: null, fluxos_recebidos: ['f1'] })
+    expect(decidir(entrada('menu', { fluxos: [fluxo({ boas_vindas: true, boas_vindas_clientes: true })], conversa: ja }))).toMatchObject({ tipo: 'iniciar', gatilho: 'palavra' })
+  })
+
+  it('só consulta Clientes quando a boas-vindas exclui clientes e a pessoa ainda não recebeu', () => {
+    const base = { texto: 'oi', agora: AGORA, conversa: null, fluxoDoDisparo: null }
+    expect(precisaSaberSeECliente({ ...base, fluxos: bv(false) })).toBe(true)
+    expect(precisaSaberSeECliente({ ...base, fluxos: bv(true) })).toBe(false)
+    expect(precisaSaberSeECliente({ ...base, fluxos: bv(false), conversa: conversa({ status: 'encerrada', fluxos_recebidos: ['f1'] }) })).toBe(false)
+  })
+
+  it('começar marca a automação como recebida pelo contato', () => {
+    const d = decidir(entrada('oi', { fluxos: bv(true) }))
+    if (d.tipo !== 'iniciar') throw new Error('devia iniciar')
+    expect(planejar(d, { etapa_id: null, variaveis: {} }).final.fluxo_recebido).toBe('f1')
   })
 })
 

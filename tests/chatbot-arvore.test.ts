@@ -78,6 +78,7 @@ describe('simulador (mesmas regras do robô)', () => {
   const fluxo: FluxoAtivo = {
     id: 'f', nome: 'Teste', etapas: arvoreParaEtapas(ARVORE, op), gatilho_palavras: ['menu'], gatilho_etiquetas: [], excluir_etiquetas: [],
     palavras_humano: ['atendente'], msg_nao_entendi: 'Não entendi.', msg_humano: 'Chamando.', aviso_numero: '5521977770000',
+    boas_vindas: false, boas_vindas_clientes: false,
   }
 
   it('começa com a boas-vindas, o nome e as opções listadas', () => {

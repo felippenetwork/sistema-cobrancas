@@ -17,7 +17,7 @@ import { duracaoSequenciaMs, TIPOS_MIDIA, type Passo } from '@/lib/disparo/passo
 import { enviosDosPassos } from '@/lib/disparo/envio-passos'
 import {
   EXPIRA_CONVERSA_MS, PALAVRAS_SAIR,
-  decidir, ehUmaDas, planejar, precisaDeEtiquetas, schemaEtapas, textoAvisoHumano,
+  decidir, ehUmaDas, planejar, precisaDeEtiquetas, precisaSaberSeECliente, schemaEtapas, textoAvisoHumano,
   type Decisao, type EstadoConversa, type FluxoAtivo,
 } from './fluxo'
 import type { MensagemWebhook } from './webhook'
@@ -45,7 +45,7 @@ export type Resultado =
 async function carregarFluxos(supabase: Supabase, contaId: string): Promise<FluxoAtivo[] | null> {
   const { data, error } = await supabase
     .from('bot_fluxos')
-    .select('id, nome, etapas, gatilho_palavras, gatilho_etiquetas, excluir_etiquetas, palavras_humano, msg_nao_entendi, msg_humano, aviso_numero')
+    .select('id, nome, etapas, gatilho_palavras, gatilho_etiquetas, excluir_etiquetas, palavras_humano, msg_nao_entendi, msg_humano, aviso_numero, boas_vindas, boas_vindas_clientes')
     .eq('conta_id', contaId)
     .eq('ativo', true)
   if (error) {
@@ -95,6 +95,17 @@ async function fluxoDoDisparo(supabase: Supabase, contaId: string, celular: stri
   return dests.map(d => porCampanha.get(d.campanha_id)).find(Boolean) ?? null
 }
 
+/** O número está em Clientes (com ou sem o 9)? null = não deu para conferir (a boas-vindas que exclui clientes não começa). */
+async function estaEmClientes(supabase: Supabase, contaId: string, celular: string): Promise<boolean | null> {
+  const { data, error } = await supabase.from('clientes').select('id')
+    .eq('conta_id', contaId).in('celular', celularVariantes(celular)).is('deleted_at', null).limit(1)
+  if (error) {
+    console.error(`${log} conferir se é cliente falhou`, { contaId, error })
+    return null
+  }
+  return (data ?? []).length > 0
+}
+
 // ── Gravações ─────────────────────────────────────────────────────────────────
 
 async function registrar(supabase: Supabase, contaId: string, conversaId: string, direcao: 'recebida' | 'enviada' | 'evento', texto: string, waId: string | null = null) {
@@ -108,7 +119,7 @@ async function garantirConversa(supabase: Supabase, contaId: string, msg: Mensag
   const agora = new Date().toISOString()
   const { error } = await supabase.from('bot_conversas').insert({
     conta_id: contaId, celular: msg.celular, nome: msg.nome, status: 'encerrada',
-    variaveis: {}, nao_entendi: 0, versao: 0, ocupado_ate: null, iniciado_em: agora, atualizado_em: agora,
+    variaveis: {}, nao_entendi: 0, versao: 0, ocupado_ate: null, fluxos_recebidos: [], iniciado_em: agora, atualizado_em: agora,
   })
   if (error && error.code !== '23505') {
     console.error(`${log} criar conversa falhou`, { contaId, error })
@@ -120,7 +131,7 @@ async function garantirConversa(supabase: Supabase, contaId: string, msg: Mensag
 async function lerConversa(supabase: Supabase, contaId: string, celular: string): Promise<Conversa | null> {
   const { data, error } = await supabase
     .from('bot_conversas')
-    .select('id, nome, status, fluxo_id, etapa_id, variaveis, nao_entendi, atualizado_em, iniciado_em, versao, ocupado_ate')
+    .select('id, nome, status, fluxo_id, etapa_id, variaveis, nao_entendi, atualizado_em, iniciado_em, versao, ocupado_ate, fluxos_recebidos')
     .eq('conta_id', contaId).eq('celular', celular).maybeSingle()
   if (error) throw new Error(`leitura da conversa: ${error.message}`)
   return data ? { ...data, variaveis: (data.variaveis ?? {}) as Record<string, string> } as Conversa : null
@@ -214,7 +225,8 @@ export async function processarMensagem(
       console.error(`${log} leitura das etiquetas falhou (fluxos com etiqueta ficam de fora)`, { contaId, err })
     }
   }
-  const decisao = decidir({ ...base, etiquetas })
+  const ehCliente = precisaSaberSeECliente(base) ? await estaEmClientes(supabase, contaId, celular) : null
+  const decisao = decidir({ ...base, etiquetas, ehCliente })
 
   if (decisao.tipo === 'ignorar' && !conversa) return 'ignorada'
 
@@ -261,8 +273,13 @@ async function aplicar(
 ) {
   const { contaId } = conta
   const plano = planejar(decisao, c)
-  const { iniciado_em, ...final } = plano.final
-  const estadoFinal = { ...final, ...(iniciado_em ? { iniciado_em: new Date().toISOString() } : {}) }
+  const { iniciado_em, fluxo_recebido, ...final } = plano.final
+  const recebidos = c.fluxos_recebidos ?? []
+  const estadoFinal = {
+    ...final,
+    ...(iniciado_em ? { iniciado_em: new Date().toISOString() } : {}),
+    ...(fluxo_recebido && !recebidos.includes(fluxo_recebido) ? { fluxos_recebidos: [...recebidos, fluxo_recebido].slice(-100) } : {}),
+  }
 
   // Sair / atendente / não entendi: vale na hora, mesmo se a mensagem não sair.
   if (plano.salvarAntes) await salvar(estadoFinal)

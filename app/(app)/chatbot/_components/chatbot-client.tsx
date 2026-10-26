@@ -8,7 +8,7 @@ import {
   type MensagemHistorico,
 } from '../_actions'
 
-type Fluxo = { id: string; nome: string; ativo: boolean; etapas: number; palavras: string[]; etiquetas: string[]; excluidas: string[] }
+type Fluxo = { id: string; nome: string; ativo: boolean; etapas: number; palavras: string[]; etiquetas: string[]; excluidas: string[]; boasVindas: 'todos' | 'novos' | null }
 type Conversa = {
   id: string; celular: string; nome: string | null; fluxo: string | null
   status: 'ativa' | 'humano' | 'encerrada' | 'descadastrado'; emEtapa: boolean; atualizado_em: string
@@ -115,6 +115,7 @@ export function ChatbotClient({ conectado, recebimentoLigado, fluxos, conversas 
               const gatilhos = [
                 f.palavras.length ? `começa com: ${f.palavras.slice(0, 3).join(', ')}${f.palavras.length > 3 ? '…' : ''}` : null,
                 f.etiquetas.length ? `etiqueta: ${f.etiquetas.join(', ')}` : null,
+                f.boasVindas ? (f.boasVindas === 'todos' ? 'boas-vindas para todos (1 vez)' : 'boas-vindas para quem não é cliente (1 vez)') : null,
               ].filter(Boolean)
               return (
                 <div key={f.id} className="flex items-start justify-between gap-3 rounded-2xl border border-border bg-card p-4">

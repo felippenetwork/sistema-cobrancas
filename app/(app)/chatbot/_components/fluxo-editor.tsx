@@ -25,6 +25,7 @@ export type FluxoInicial = {
   nome: string; ativo: boolean; etapas: Etapa[]
   gatilhoPalavras: string[]; gatilhoEtiquetas: EtiquetaSel[]; excluirEtiquetas: EtiquetaSel[]
   palavrasHumano: string[]; msgNaoEntendi: string; msgHumano: string; avisoNumero: string
+  boasVindas: boolean; boasVindasClientes: boolean
 }
 
 const INPUT = 'w-full rounded-xl border border-border bg-input px-3 py-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20'
@@ -253,6 +254,8 @@ export function FluxoEditor({ fluxoId, inicial }: { fluxoId: string | null; inic
   const [msgNaoEntendi, setNaoEntendi]  = useState(inicial?.msgNaoEntendi ?? 'Não entendi. Responda com o número de uma das opções.')
   const [msgHumano, setMsgHumano]       = useState(inicial?.msgHumano ?? 'Certo! Já chamei alguém da equipe para falar com você.')
   const [avisoNumero, setAvisoNumero]   = useState(inicial?.avisoNumero ?? '')
+  const [boasVindas, setBoasVindas]     = useState(inicial?.boasVindas ?? false)
+  const [bvClientes, setBvClientes]     = useState(inicial?.boasVindasClientes ?? false)
   const [etiquetas, setEtiquetas]       = useState<UazapiEtiqueta[] | null>(null)
   const [erroEtiquetas, setErroEtq]     = useState<string | null>(null)
   const [salvando, setSalvando]         = useState(false)
@@ -280,6 +283,7 @@ export function FluxoEditor({ fluxoId, inicial }: { fluxoId: string | null; inic
     gatilho_palavras: listaDePalavras(palavras), gatilho_etiquetas: [], excluir_etiquetas: [],
     palavras_humano: listaDePalavras(palavrasHumano), msg_nao_entendi: msgNaoEntendi, msg_humano: msgHumano,
     aviso_numero: avisoNumero.replace(/\D/g, '') || null,
+    boas_vindas: boasVindas, boas_vindas_clientes: bvClientes,
   }
 
   async function salvar() {
@@ -291,6 +295,7 @@ export function FluxoEditor({ fluxoId, inicial }: { fluxoId: string | null; inic
       nome, ativo, etapas: etapasSalvar,
       gatilhoPalavras: listaDePalavras(palavras), gatilhoEtiquetas: gatEtiquetas, excluirEtiquetas: excEtiquetas,
       palavrasHumano: listaDePalavras(palavrasHumano), msgNaoEntendi, msgHumano, avisoNumero,
+      boasVindas, boasVindasClientes: bvClientes,
     })
     setSalvando(false)
     if (r.error || !r.id) { setErro(r.error ?? 'Não foi possível salvar.'); return }
@@ -305,7 +310,7 @@ export function FluxoEditor({ fluxoId, inicial }: { fluxoId: string | null; inic
     else void salvar()
   }
 
-  const semComeco = !listaDePalavras(palavras).length && !gatEtiquetas.length
+  const semComeco = !listaDePalavras(palavras).length && !gatEtiquetas.length && !boasVindas
 
   return (
     <div className="mx-auto max-w-6xl p-4 md:p-6">
@@ -366,9 +371,34 @@ export function FluxoEditor({ fluxoId, inicial }: { fluxoId: string | null; inic
                   <EscolhaEtiquetas escolhidas={gatEtiquetas} onChange={setGatEtiquetas} etiquetas={etiquetas} erro={erroEtiquetas} />
                   <p className={AJUDA}>Uma vez por dia no máximo, para o robô não recomeçar a cada &quot;obrigado&quot;.</p>
                 </div>
+                <div className="rounded-xl border border-border p-3">
+                  <label className="flex cursor-pointer items-start gap-3">
+                    <input type="checkbox" checked={boasVindas} onChange={e => setBoasVindas(e.target.checked)} className="mt-0.5 h-4 w-4 accent-primary" />
+                    <span>
+                      <span className="block text-sm font-medium text-foreground">alguém manda a primeira mensagem (boas-vindas)</span>
+                      <span className="block text-xs text-muted-foreground">Cada pessoa recebe esta automação uma vez só. Depois disso, não recebe mais (a não ser que mande uma das palavras acima).</span>
+                    </span>
+                  </label>
+                  {boasVindas && (
+                    <div role="radiogroup" aria-label="Quem recebe as boas-vindas" className="mt-3 space-y-2 pl-7">
+                      {([
+                        [false, 'Só quem ainda não é cliente', 'Quem já está cadastrado em Clientes não recebe.'],
+                        [true, 'Todos, inclusive quem já é cliente', 'Quem já é cliente também recebe uma vez, na próxima mensagem que mandar.'],
+                      ] as const).map(([valor, titulo, ajuda]) => (
+                        <label key={titulo} className="flex cursor-pointer items-start gap-2">
+                          <input type="radio" name="bv-quem" checked={bvClientes === valor} onChange={() => setBvClientes(valor)} className="mt-0.5 h-4 w-4 accent-primary" />
+                          <span>
+                            <span className="block text-sm text-foreground">{titulo}</span>
+                            <span className="block text-xs text-muted-foreground">{ajuda}</span>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <p className="rounded-xl bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
                   <span className="font-medium text-foreground">alguém responde a um disparo seu:</span> ao criar o disparo, escolha esta automação em &quot;Quando responderem&quot;.
-                  {semComeco && ' Sem palavra e sem etiqueta, esta automação só começa assim.'}
+                  {semComeco && ' Sem nenhuma das opções acima, esta automação só começa assim.'}
                 </p>
               </section>
               <section className="space-y-3 rounded-2xl border border-border bg-card p-4 md:p-5">

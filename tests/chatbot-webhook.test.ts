@@ -241,6 +241,27 @@ describe('conversa com o robô', () => {
     expect(mocks.sendText).not.toHaveBeenCalled()
   })
 
+  it('boas-vindas: a primeira mensagem recebe, as seguintes (depois do fim) não', async () => {
+    cenario({ fluxo: { gatilho_palavras: [], boas_vindas: true, boas_vindas_clientes: true } })
+    expect((await chamar(payload('Bom dia'))).body.resultado).toBe('iniciar')
+    await chamar(payload('1'))
+    await chamar(payload('Niterói')) // fim da conversa
+    expect(conversaDe()).toMatchObject({ status: 'encerrada', fluxos_recebidos: ['f1'] })
+    mocks.sendText.mockClear()
+    expect((await chamar(payload('Bom dia de novo'))).body.resultado).toBe('ignorada')
+    expect(mocks.sendText).not.toHaveBeenCalled()
+  })
+
+  it('boas-vindas "só quem não é cliente": quem está em Clientes não recebe; outra conta não conta', async () => {
+    cenario({ fluxo: { gatilho_palavras: [], boas_vindas: true, boas_vindas_clientes: false } })
+    db.linhas('clientes').push({ id: 'cl1', conta_id: CONTA, celular: '552199990001', deleted_at: null })
+    expect((await chamar(payload('oi'))).body.resultado).toBe('ignorada')
+
+    cenario({ fluxo: { gatilho_palavras: [], boas_vindas: true, boas_vindas_clientes: false } })
+    db.linhas('clientes').push({ id: 'cl2', conta_id: '22222222-2222-4222-8222-222222222222', celular: CLIENTE, deleted_at: null })
+    expect((await chamar(payload('oi'))).body.resultado).toBe('iniciar')
+  })
+
   it('fluxo de OUTRA conta nunca responde aqui', async () => {
     db.linhas('bot_fluxos')[0].conta_id = '22222222-2222-4222-8222-222222222222'
     expect((await chamar(payload('menu'))).body.resultado).toBe('sem_fluxo')

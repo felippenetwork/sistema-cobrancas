@@ -15,7 +15,7 @@ export default async function ChatbotPage() {
 
   const [fluxos, conversas, conexao] = await Promise.all([
     supabase.from('bot_fluxos')
-      .select('id, nome, ativo, etapas, gatilho_palavras, gatilho_etiquetas_nomes, excluir_etiquetas_nomes, atualizado_em')
+      .select('id, nome, ativo, etapas, gatilho_palavras, gatilho_etiquetas_nomes, excluir_etiquetas_nomes, boas_vindas, boas_vindas_clientes, atualizado_em')
       .eq('conta_id', contaId).order('criado_em', { ascending: true }),
     supabase.from('bot_conversas')
       .select('id, celular, nome, status, etapa_id, atualizado_em, bot_fluxos(nome)')
@@ -36,6 +36,7 @@ export default async function ChatbotPage() {
         id: f.id, nome: f.nome, ativo: f.ativo,
         etapas: Array.isArray(f.etapas) ? f.etapas.length : 0,
         palavras: f.gatilho_palavras, etiquetas: f.gatilho_etiquetas_nomes, excluidas: f.excluir_etiquetas_nomes,
+        boasVindas: f.boas_vindas ? (f.boas_vindas_clientes ? 'todos' as const : 'novos' as const) : null,
       }))}
       conversas={(conversas.data ?? []).map(c => ({
         id: c.id, celular: c.celular, nome: c.nome, status: c.status, atualizado_em: c.atualizado_em,
