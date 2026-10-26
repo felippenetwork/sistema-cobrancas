@@ -21,7 +21,7 @@ const etiqueta = z.object({ id: z.string().min(1).max(100), nome: z.string().max
 const palavras = z.array(z.string().trim().min(1).max(40)).max(20)
 
 const schemaFluxo = z.object({
-  nome:            z.string().trim().min(1, 'Informe o nome do fluxo.').max(80),
+  nome:            z.string().trim().min(1, 'Dê um nome para a automação.').max(80),
   ativo:           z.boolean(),
   etapas:          schemaEtapas,
   gatilhoPalavras: palavras,
@@ -68,7 +68,7 @@ function colunasDoFluxo(input: FluxoEntrada, contaId: string) {
 }
 
 export async function salvarFluxoAction(fluxoId: string | null, input: FluxoEntrada): Promise<Result> {
-  if (fluxoId !== null && !uuid.safeParse(fluxoId).success) return { error: 'Fluxo inválido.' }
+  if (fluxoId !== null && !uuid.safeParse(fluxoId).success) return { error: 'Automação inválida.' }
   try {
     const { supabase, contaId } = await getConta()
     const r = colunasDoFluxo(input, contaId)
@@ -78,7 +78,7 @@ export async function salvarFluxoAction(fluxoId: string | null, input: FluxoEntr
       const { data, error } = await supabase.from('bot_fluxos').insert({ conta_id: contaId, ...r.colunas }).select('id').single()
       if (error) {
         console.error('[chatbot] criar fluxo falhou', { contaId, error })
-        return { error: 'Não foi possível criar o fluxo. Tente de novo.' }
+        return { error: 'Não foi possível criar a automação. Tente de novo.' }
       }
       revalidatePath('/chatbot')
       return { error: null, id: data.id }
@@ -90,9 +90,9 @@ export async function salvarFluxoAction(fluxoId: string | null, input: FluxoEntr
       .select('id').maybeSingle()
     if (error) {
       console.error('[chatbot] salvar fluxo falhou', { contaId, fluxoId, error })
-      return { error: 'Não foi possível salvar o fluxo. Tente de novo.' }
+      return { error: 'Não foi possível salvar a automação. Tente de novo.' }
     }
-    if (!data) return { error: 'Fluxo não encontrado.' }
+    if (!data) return { error: 'Automação não encontrada.' }
     revalidatePath('/chatbot')
     revalidatePath(`/chatbot/${fluxoId}`)
     return { error: null, id: fluxoId }
@@ -102,7 +102,7 @@ export async function salvarFluxoAction(fluxoId: string | null, input: FluxoEntr
 }
 
 export async function alternarFluxoAction(fluxoId: string, ativo: boolean): Promise<Result> {
-  if (!uuid.safeParse(fluxoId).success) return { error: 'Fluxo inválido.' }
+  if (!uuid.safeParse(fluxoId).success) return { error: 'Automação inválida.' }
   try {
     const { supabase, contaId } = await getConta()
     const { data, error } = await supabase.from('bot_fluxos')
@@ -110,9 +110,9 @@ export async function alternarFluxoAction(fluxoId: string, ativo: boolean): Prom
       .eq('id', fluxoId).eq('conta_id', contaId).select('id').maybeSingle()
     if (error) {
       console.error('[chatbot] ligar/desligar fluxo falhou', { contaId, fluxoId, error })
-      return { error: 'Não foi possível atualizar o fluxo. Tente de novo.' }
+      return { error: 'Não foi possível atualizar a automação. Tente de novo.' }
     }
-    if (!data) return { error: 'Fluxo não encontrado.' }
+    if (!data) return { error: 'Automação não encontrada.' }
     revalidatePath('/chatbot')
     return { error: null }
   } catch (e) {
@@ -121,13 +121,13 @@ export async function alternarFluxoAction(fluxoId: string, ativo: boolean): Prom
 }
 
 export async function excluirFluxoAction(fluxoId: string): Promise<Result> {
-  if (!uuid.safeParse(fluxoId).success) return { error: 'Fluxo inválido.' }
+  if (!uuid.safeParse(fluxoId).success) return { error: 'Automação inválida.' }
   try {
     const { supabase, contaId } = await getConta()
     const { error } = await supabase.from('bot_fluxos').delete().eq('id', fluxoId).eq('conta_id', contaId)
     if (error) {
       console.error('[chatbot] excluir fluxo falhou', { contaId, fluxoId, error })
-      return { error: 'Não foi possível excluir o fluxo. Tente de novo.' }
+      return { error: 'Não foi possível excluir a automação. Tente de novo.' }
     }
     revalidatePath('/chatbot')
     return { error: null }

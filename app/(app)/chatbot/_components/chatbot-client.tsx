@@ -55,12 +55,12 @@ export function ChatbotClient({ conectado, recebimentoLigado, fluxos, conversas 
             <h1 className="text-lg font-semibold text-foreground">Chatbot</h1>
           </div>
           <p className="mt-0.5 text-sm text-muted-foreground">
-            Responde sozinho quem manda uma palavra-chave, tem uma etiqueta ou responde a um disparo.
+            Responde sozinho no WhatsApp: quem manda uma palavra, tem uma etiqueta ou responde a um disparo.
           </p>
         </div>
         <Link href="/chatbot/novo"
           className="flex shrink-0 items-center gap-1.5 rounded-xl bg-primary px-3 py-2.5 text-sm font-medium text-primary-foreground transition hover:opacity-90">
-          <Plus className="h-4 w-4" /> <span className="hidden sm:inline">Novo fluxo</span><span className="sm:hidden">Novo</span>
+          <Plus className="h-4 w-4" /> <span className="hidden sm:inline">Nova automação</span><span className="sm:hidden">Novo</span>
         </Link>
       </div>
 
@@ -93,7 +93,7 @@ export function ChatbotClient({ conectado, recebimentoLigado, fluxos, conversas 
         {(['fluxos', 'contatos'] as const).map(a => (
           <button key={a} role="tab" aria-selected={aba === a} onClick={() => setAba(a)}
             className={`-mb-px border-b-2 px-3 py-2 text-sm transition ${aba === a ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
-            {a === 'fluxos' ? `Fluxos (${fluxos.length})` : `Contatos (${conversas.length})`}
+            {a === 'fluxos' ? `Automações (${fluxos.length})` : `Contatos (${conversas.length})`}
             {a === 'contatos' && aguardando > 0 && (
               <span className="ml-1.5 rounded-full bg-primary px-1.5 text-[10px] font-semibold text-primary-foreground tabular-nums">{aguardando}</span>
             )}
@@ -104,16 +104,16 @@ export function ChatbotClient({ conectado, recebimentoLigado, fluxos, conversas 
       {aba === 'fluxos' ? (
         fluxos.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-border p-10 text-center">
-            <p className="text-sm text-muted-foreground">Nenhum fluxo ainda. Crie o primeiro: mensagem de boas-vindas, menu de opções e o que acontece em cada uma.</p>
+            <p className="text-sm text-muted-foreground">Nenhuma automação ainda. Em 4 passos você monta a mensagem de boas-vindas, as opções e o que o robô responde em cada uma.</p>
             <Link href="/chatbot/novo" className="mt-4 inline-block rounded-xl bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition hover:opacity-90">
-              Criar primeiro fluxo
+              Criar primeira automação
             </Link>
           </div>
         ) : (
           <div className="space-y-3">
             {fluxos.map(f => {
               const gatilhos = [
-                f.palavras.length ? `palavra: ${f.palavras.slice(0, 3).join(', ')}${f.palavras.length > 3 ? '…' : ''}` : null,
+                f.palavras.length ? `começa com: ${f.palavras.slice(0, 3).join(', ')}${f.palavras.length > 3 ? '…' : ''}` : null,
                 f.etiquetas.length ? `etiqueta: ${f.etiquetas.join(', ')}` : null,
               ].filter(Boolean)
               return (
@@ -126,7 +126,7 @@ export function ChatbotClient({ conectado, recebimentoLigado, fluxos, conversas 
                       </span>
                     </div>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      <span className="tabular-nums">{f.etapas}</span> etapa{f.etapas === 1 ? '' : 's'} · {gatilhos.length ? gatilhos.join(' · ') : 'só por resposta a disparo'}
+                      <span className="tabular-nums">{f.etapas}</span> mensage{f.etapas === 1 ? 'm' : 'ns'} · {gatilhos.length ? gatilhos.join(' · ') : 'começa só por resposta a disparo'}
                       {f.excluidas.length > 0 && ` · fora: ${f.excluidas.join(', ')}`}
                     </p>
                   </Link>
@@ -136,7 +136,7 @@ export function ChatbotClient({ conectado, recebimentoLigado, fluxos, conversas 
                       className="rounded-xl border border-border px-3 py-2 text-xs text-muted-foreground transition hover:text-foreground disabled:opacity-50">
                       {f.ativo ? 'Desligar' : 'Ligar'}
                     </button>
-                    <button onClick={() => confirm(`Excluir o fluxo "${f.nome}"? Quem está nele sai da conversa.`) && executar(f.id, () => excluirFluxoAction(f.id))}
+                    <button onClick={() => confirm(`Excluir a automação "${f.nome}"? Quem está nela sai da conversa.`) && executar(f.id, () => excluirFluxoAction(f.id))}
                       disabled={ocupado === f.id} aria-label={`Excluir ${f.nome}`}
                       className="rounded-xl border border-border p-2 text-muted-foreground transition hover:border-destructive hover:text-destructive disabled:opacity-50">
                       <Trash2 className="h-3.5 w-3.5" />
@@ -149,7 +149,7 @@ export function ChatbotClient({ conectado, recebimentoLigado, fluxos, conversas 
         )
       ) : conversas.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">
-          Ninguém falou com o robô ainda. Os contatos aparecem aqui quando entram num fluxo.
+          Ninguém falou com o robô ainda. Os contatos aparecem aqui quando entram numa automação.
         </div>
       ) : (
         <div className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
@@ -168,7 +168,7 @@ export function ChatbotClient({ conectado, recebimentoLigado, fluxos, conversas 
                     <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${s.cls}`}>{s.rotulo}</span>
                   </div>
                   <p className="mt-0.5 text-xs text-muted-foreground tabular-nums">
-                    {c.nome && `${telefone(c.celular)} · `}{c.fluxo ?? 'sem fluxo'} · {quando(c.atualizado_em)}
+                    {c.nome && `${telefone(c.celular)} · `}{c.fluxo ?? 'sem automação'} · {quando(c.atualizado_em)}
                   </p>
                 </button>
                 {acoes.length > 0 && (

@@ -16,8 +16,8 @@ import { primeiroNome } from '@/lib/disparo/extracao'
 import { duracaoSequenciaMs, TIPOS_MIDIA, type Passo } from '@/lib/disparo/passos'
 import { enviosDosPassos } from '@/lib/disparo/envio-passos'
 import {
-  EXPIRA_CONVERSA_MS, MSG_SAIR, PALAVRAS_SAIR,
-  decidir, ehUmaDas, passosDaEtapa, percorrer, precisaDeEtiquetas, schemaEtapas, textoAvisoHumano, textoDoMenu,
+  EXPIRA_CONVERSA_MS, PALAVRAS_SAIR,
+  decidir, ehUmaDas, planejar, precisaDeEtiquetas, schemaEtapas, textoAvisoHumano,
   type Decisao, type EstadoConversa, type FluxoAtivo,
 } from './fluxo'
 import type { MensagemWebhook } from './webhook'
@@ -29,8 +29,6 @@ const log = '[chatbot]'
 const TRAVA_MS = 4 * 60_000
 /** Resposta a disparo ligado a fluxo só conta se o disparo saiu nos últimos 7 dias. */
 const DISPARO_RECENTE_MS = 7 * 24 * 60 * 60_000
-/** "Digitando…" das mensagens curtas do sistema (não entendi, humano, sair). */
-const DIGITACAO_CURTA_MS = 3_000
 
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms))
 
@@ -155,8 +153,6 @@ async function enviarPassos(supabase: Supabase, conta: ContaWebhook, conversa: C
   return true
 }
 
-const textoCurto = (texto: string): Passo[] => [{ tipo: 'texto', texto, variacoes: [], digitacao_seg: DIGITACAO_CURTA_MS / 1000 }]
-
 async function avisarDono(conta: ContaWebhook, fluxo: FluxoAtivo, conversa: Conversa, celular: string, variaveis: Record<string, string>, motivo: string) {
   if (!fluxo.aviso_numero) return
   try {
@@ -264,66 +260,34 @@ async function aplicar(
   salvar: (patch: Record<string, unknown>) => Promise<void>,
 ) {
   const { contaId } = conta
+  const plano = planejar(decisao, c)
+  const { iniciado_em, ...final } = plano.final
+  const estadoFinal = { ...final, ...(iniciado_em ? { iniciado_em: new Date().toISOString() } : {}) }
 
-  if (decisao.tipo === 'sair') {
-    await salvar({ status: 'descadastrado', fluxo_id: null, etapa_id: null, nao_entendi: 0 })
-    await registrar(supabase, contaId, c.id, 'evento', 'Pediu para sair: não recebe mais o robô nem disparos.')
-    await enviarPassos(supabase, conta, c, celular, textoCurto(MSG_SAIR), {})
-    return
-  }
-
-  if (decisao.tipo === 'humano') {
-    await salvar({ status: 'humano', nao_entendi: 0 })
-    await registrar(supabase, contaId, c.id, 'evento', `Robô pausado: ${decisao.motivo}.`)
-    await enviarPassos(supabase, conta, c, celular, textoCurto(decisao.fluxo.msg_humano), c.variaveis)
-    await avisarDono(conta, decisao.fluxo, c, celular, c.variaveis, decisao.motivo)
-    return
-  }
-
-  if (decisao.tipo === 'nao_entendi') {
-    const etapa = decisao.fluxo.etapas.find(e => e.id === c.etapa_id)
-    const menu = etapa?.resposta.tipo === 'menu' ? `\n\n${textoDoMenu(etapa.resposta.opcoes)}` : ''
-    await salvar({ nao_entendi: decisao.tentativas })
-    await enviarPassos(supabase, conta, c, celular, textoCurto(decisao.fluxo.msg_nao_entendi + menu), c.variaveis)
-    return
-  }
-
-  // iniciar / avancar: manda as etapas até a próxima que espera resposta.
-  const fluxo = decisao.fluxo
-  const inicio = decisao.tipo === 'iniciar' ? fluxo.etapas[0].id : decisao.etapaId
-  const variaveis = decisao.tipo === 'iniciar' ? {} : decisao.variaveis
-  const percurso = percorrer(fluxo, inicio)
-  if (decisao.tipo === 'iniciar') {
-    await registrar(supabase, contaId, c.id, 'evento', `Entrou no fluxo "${fluxo.nome}" (${decisao.gatilho === 'palavra' ? 'palavra-chave' : decisao.gatilho === 'disparo' ? 'respondeu ao disparo' : 'etiqueta'}).`)
-  }
+  // Sair / atendente / não entendi: vale na hora, mesmo se a mensagem não sair.
+  if (plano.salvarAntes) await salvar(estadoFinal)
+  if (plano.evento) await registrar(supabase, contaId, c.id, 'evento', plano.evento)
 
   let completas = 0
   let parouEm: string | null = null // etapa que começou a sair e falhou no meio
-  for (const etapa of percurso.enviar) {
-    const passos = passosDaEtapa(etapa)
-    if (Date.now() - orcamento.inicio + duracaoSequenciaMs(passos) > orcamento.budgetMs) {
-      console.error(`${log} sem tempo para enviar a etapa nesta execução`, { contaId, conversaId: c.id, etapa: etapa.id })
+  for (const envio of plano.envios) {
+    if (Date.now() - orcamento.inicio + duracaoSequenciaMs(envio.passos) > orcamento.budgetMs) {
+      console.error(`${log} sem tempo para enviar nesta execução`, { contaId, conversaId: c.id, etapa: envio.etapaId })
       break
     }
-    if (!(await enviarPassos(supabase, conta, c, celular, passos, variaveis))) { parouEm = etapa.id; break }
+    if (!(await enviarPassos(supabase, conta, c, celular, envio.passos, plano.variaveis))) { parouEm = envio.etapaId; break }
     completas++
   }
 
-  const comum = {
-    fluxo_id: fluxo.id, variaveis, nao_entendi: 0,
-    ...(decisao.tipo === 'iniciar' ? { iniciado_em: new Date().toISOString() } : {}),
+  if (!plano.salvarAntes) {
+    if (completas < plano.envios.length) {
+      // Parou no meio: fica na última etapa que saiu (ou encerra, se nada saiu).
+      const ultima = parouEm ?? plano.envios[completas - 1]?.etapaId ?? null
+      await salvar({ ...estadoFinal, status: ultima ? 'ativa' : 'encerrada', etapa_id: ultima })
+      return
+    }
+    await salvar(estadoFinal)
   }
-  if (completas < percurso.enviar.length) {
-    // Parou no meio: fica na última etapa que saiu (ou encerra, se nada saiu).
-    const ultima = parouEm ?? percurso.enviar[completas - 1]?.id ?? null
-    await salvar({ ...comum, status: ultima ? 'ativa' : 'encerrada', etapa_id: ultima })
-  } else if (percurso.depois.tipo === 'aguardar') {
-    await salvar({ ...comum, status: 'ativa', etapa_id: percurso.depois.etapaId })
-  } else if (percurso.depois.tipo === 'humano') {
-    await salvar({ ...comum, status: 'humano', etapa_id: null })
-    await registrar(supabase, contaId, c.id, 'evento', 'Robô pausado: o fluxo passou para atendimento humano.')
-    await avisarDono(conta, fluxo, c, celular, variaveis, 'chegou na etapa de atendimento humano')
-  } else {
-    await salvar({ ...comum, status: 'encerrada', etapa_id: null })
-  }
+  if (plano.eventoDepois) await registrar(supabase, contaId, c.id, 'evento', plano.eventoDepois)
+  if (plano.avisarDono && decisao.tipo !== 'sair') await avisarDono(conta, decisao.fluxo, c, celular, plano.variaveis, plano.avisarDono)
 }

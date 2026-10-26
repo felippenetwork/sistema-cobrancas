@@ -5,7 +5,7 @@ import { Bot } from 'lucide-react'
 
 export type FluxoDisparo = { id: string; nome: string; ativo: boolean }
 
-/** Fluxo do chatbot em que entra quem responder ao disparo (opcional). */
+/** Automação do chatbot em que entra quem responder ao disparo (opcional). */
 export function FluxoEscolha({ id, fluxos, valor, onChange, name }: {
   id: string
   fluxos: FluxoDisparo[]
@@ -24,15 +24,15 @@ export function FluxoEscolha({ id, fluxos, valor, onChange, name }: {
         <select id={id} name={name} value={valor} onChange={e => onChange(e.target.value)}
           className="w-full rounded-xl border border-border bg-input px-3 py-2.5 text-sm text-foreground outline-none focus-visible:border-primary">
           <option value="">Nada (o robô não responde)</option>
-          {fluxos.map(f => <option key={f.id} value={f.id}>Entrar no fluxo: {f.nome}{f.ativo ? '' : ' (desligado)'}</option>)}
+          {fluxos.map(f => <option key={f.id} value={f.id}>Entrar na automação: {f.nome}{f.ativo ? '' : ' (desligada)'}</option>)}
         </select>
       ) : (
         <p className="text-xs text-muted-foreground">
-          Crie um fluxo em <Link href="/chatbot" className="font-medium text-primary hover:underline">Chatbot</Link> para responder sozinho quem responder ao disparo.
+          Crie uma automação em <Link href="/chatbot" className="font-medium text-primary hover:underline">Chatbot</Link> para responder sozinho quem responder ao disparo.
         </p>
       )}
       {escolhido && !escolhido.ativo && (
-        <p className="text-xs text-muted-foreground">Este fluxo está desligado: ligue em Chatbot para o robô responder.</p>
+        <p className="text-xs text-muted-foreground">Esta automação está desligada: ligue em Chatbot para o robô responder.</p>
       )}
       {escolhido && <p className="text-xs text-muted-foreground">Vale para respostas em até 7 dias depois do envio.</p>}
     </div>

@@ -32,15 +32,15 @@ const schemaResposta = z.discriminatedUnion('tipo', [
   z.object({
     tipo: z.literal('menu'),
     opcoes: z.array(z.object({
-      rotulo: z.string().trim().min(1, 'Uma opção do menu está sem texto.').max(60, 'Texto de opção muito longo (máximo 60).'),
+      rotulo: z.string().trim().min(1, 'Uma opção está sem texto.').max(60, 'Texto de opção muito longo (máximo 60).'),
       proxima,
-    })).min(1, 'O menu precisa de pelo menos uma opção.').max(MAX_OPCOES, `No máximo ${MAX_OPCOES} opções por menu.`),
+    })).min(1, 'Coloque pelo menos uma opção.').max(MAX_OPCOES, `No máximo ${MAX_OPCOES} opções.`),
     /** Junta "1. Opção…" na última mensagem de texto da etapa (desligue se o texto já lista). */
     mostrar_opcoes: z.boolean().default(true),
   }),
   z.object({
     tipo: z.literal('texto'),
-    variavel: z.string().regex(/^[a-z][a-z0-9_]{0,29}$/, 'Nome de variável: só letras minúsculas, números e _ (ex.: cidade).'),
+    variavel: z.string().regex(/^[a-z][a-z0-9_]{0,29}$/, 'O nome da resposta guardada: só letras minúsculas, números e _ (ex.: cidade).'),
     proxima,
   }),
   z.object({ tipo: z.literal('seguir'), proxima }),
@@ -50,22 +50,22 @@ const schemaResposta = z.discriminatedUnion('tipo', [
 
 export const schemaEtapa = z.object({
   id: idEtapa,
-  nome: z.string().trim().min(1, 'Dê um nome para cada etapa.').max(60),
+  nome: z.string().trim().min(1, 'Uma mensagem ficou sem nome.').max(60),
   passos: schemaPassos,
   resposta: schemaResposta,
 })
 
 export const schemaEtapas = z.array(schemaEtapa)
-  .min(1, 'O fluxo precisa de pelo menos uma etapa.')
-  .max(MAX_ETAPAS, `No máximo ${MAX_ETAPAS} etapas por fluxo.`)
+  .min(1, 'A automação precisa de pelo menos uma mensagem.')
+  .max(MAX_ETAPAS, `No máximo ${MAX_ETAPAS} mensagens por automação.`)
   .superRefine((etapas, ctx) => {
     const ids = new Set(etapas.map(e => e.id))
-    if (ids.size !== etapas.length) ctx.addIssue({ code: 'custom', message: 'Há duas etapas com o mesmo identificador.' })
+    if (ids.size !== etapas.length) ctx.addIssue({ code: 'custom', message: 'Há duas mensagens com o mesmo identificador. Recarregue a página e tente de novo.' })
     for (const e of etapas) {
       const destinos = e.resposta.tipo === 'menu' ? e.resposta.opcoes.map(o => o.proxima)
         : 'proxima' in e.resposta ? [e.resposta.proxima] : []
       if (destinos.some(d => d !== null && !ids.has(d))) {
-        ctx.addIssue({ code: 'custom', message: `A etapa "${e.nome}" aponta para uma etapa que não existe mais.` })
+        ctx.addIssue({ code: 'custom', message: `A mensagem "${e.nome}" leva para uma resposta que não existe mais.` })
       }
     }
   })
@@ -256,7 +256,7 @@ export function decidir(e: Entrada): Decisao {
       if (i < 0) {
         const tentativas = (e.conversa?.nao_entendi ?? 0) + 1
         return tentativas >= MAX_NAO_ENTENDI
-          ? { tipo: 'humano', fluxo, motivo: `não entendeu o menu ${MAX_NAO_ENTENDI} vezes` }
+          ? { tipo: 'humano', fluxo, motivo: `não entendeu as opções ${MAX_NAO_ENTENDI} vezes` }
           : { tipo: 'nao_entendi', fluxo, tentativas }
       }
       return { tipo: 'avancar', fluxo, etapaId: etapa.resposta.opcoes[i].proxima, variaveis }
@@ -305,10 +305,89 @@ export function percorrer(fluxo: FluxoAtivo, inicio: string | null): Percurso {
   return { enviar, depois: { tipo: 'fim' } }
 }
 
+// ── Plano de uma resposta ─────────────────────────────────────────────────────
+// O que o robô manda e como a conversa fica, para cada decisão. Usado pelo robô de verdade
+// (processar.ts, que cuida de banco, trava e falha de envio) e pelo simulador da tela
+// (simulador.ts) — os dois seguem exatamente as mesmas regras.
+
+/** "Digitando…" das mensagens curtas do sistema (não entendi, atendente, sair). */
+export const DIGITACAO_CURTA_SEG = 3
+
+export const textoCurto = (texto: string): Passo[] => [{ tipo: 'texto', texto, variacoes: [], digitacao_seg: DIGITACAO_CURTA_SEG }]
+
+export type EstadoFinal = {
+  status: EstadoConversa['status']
+  fluxo_id?: string | null
+  etapa_id?: string | null
+  variaveis?: Record<string, string>
+  nao_entendi: number
+  iniciado_em?: true
+}
+
+export type Plano = {
+  /** Grupos de mensagens, na ordem (cada etapa é um grupo; etapaId null = mensagem do sistema). */
+  envios: { etapaId: string | null; passos: Passo[] }[]
+  /** Variáveis para montar os textos ({{nome}} entra à parte). */
+  variaveis: Record<string, string>
+  final: EstadoFinal
+  /** Gravar o estado ANTES de enviar (pausa/saída valem na hora, mesmo se o envio falhar). */
+  salvarAntes: boolean
+  /** Histórico: antes de enviar / depois de enviar tudo. */
+  evento: string | null
+  eventoDepois: string | null
+  /** Motivo para avisar o dono (null = sem aviso). */
+  avisarDono: string | null
+}
+
+export function planejar(d: Exclude<Decisao, { tipo: 'ignorar' }>, c: { etapa_id: string | null; variaveis: Record<string, string> }): Plano {
+  const sem = { evento: null, eventoDepois: null, avisarDono: null }
+  if (d.tipo === 'sair') {
+    return {
+      ...sem, envios: [{ etapaId: null, passos: textoCurto(MSG_SAIR) }], variaveis: {}, salvarAntes: true,
+      final: { status: 'descadastrado', fluxo_id: null, etapa_id: null, nao_entendi: 0 },
+      evento: 'Pediu para sair: não recebe mais o robô nem disparos.',
+    }
+  }
+  if (d.tipo === 'humano') {
+    return {
+      ...sem, envios: [{ etapaId: null, passos: textoCurto(d.fluxo.msg_humano) }], variaveis: c.variaveis, salvarAntes: true,
+      final: { status: 'humano', nao_entendi: 0 }, evento: `Robô pausado: ${d.motivo}.`, avisarDono: d.motivo,
+    }
+  }
+  if (d.tipo === 'nao_entendi') {
+    const etapa = d.fluxo.etapas.find(e => e.id === c.etapa_id)
+    const menu = etapa?.resposta.tipo === 'menu' ? `\n\n${textoDoMenu(etapa.resposta.opcoes)}` : ''
+    return {
+      ...sem, envios: [{ etapaId: null, passos: textoCurto(d.fluxo.msg_nao_entendi + menu) }], variaveis: c.variaveis, salvarAntes: true,
+      final: { status: 'ativa', nao_entendi: d.tentativas },
+    }
+  }
+
+  const inicio = d.tipo === 'iniciar' ? d.fluxo.etapas[0].id : d.etapaId
+  const variaveis = d.tipo === 'iniciar' ? {} : d.variaveis
+  const percurso = percorrer(d.fluxo, inicio)
+  const comum = { fluxo_id: d.fluxo.id, variaveis, nao_entendi: 0, ...(d.tipo === 'iniciar' ? { iniciado_em: true as const } : {}) }
+  const evento = d.tipo === 'iniciar'
+    ? `Entrou na automação "${d.fluxo.nome}" (${d.gatilho === 'palavra' ? 'mandou a palavra' : d.gatilho === 'disparo' ? 'respondeu ao disparo' : 'tem a etiqueta'}).`
+    : null
+  const envios = percurso.enviar.map(e => ({ etapaId: e.id, passos: passosDaEtapa(e) }))
+  const depois = percurso.depois
+  if (depois.tipo === 'aguardar') {
+    return { ...sem, envios, variaveis, salvarAntes: false, evento, final: { ...comum, status: 'ativa', etapa_id: depois.etapaId } }
+  }
+  if (depois.tipo === 'humano') {
+    return {
+      ...sem, envios, variaveis, salvarAntes: false, evento, final: { ...comum, status: 'humano', etapa_id: null },
+      eventoDepois: 'Robô pausado: a conversa chegou na parte de chamar o atendente.', avisarDono: 'chegou na parte de chamar o atendente',
+    }
+  }
+  return { ...sem, envios, variaveis, salvarAntes: false, evento, final: { ...comum, status: 'encerrada', etapa_id: null } }
+}
+
 /** Texto do aviso ao dono quando o contato pede (ou precisa de) uma pessoa. */
 export function textoAvisoHumano(fluxo: { nome: string }, contato: { nome: string | null; celular: string }, variaveis: Record<string, string>, motivo: string): string {
   const linhas = [
-    `Atendimento pedido no robô "${fluxo.nome}"`,
+    `Atendimento pedido na automação "${fluxo.nome}"`,
     `Contato: ${contato.nome ? `${contato.nome} · ` : ''}+${contato.celular}`,
     `Motivo: ${motivo}`,
   ]
