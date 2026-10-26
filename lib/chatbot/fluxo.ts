@@ -12,6 +12,7 @@
 // A primeira etapa da lista é a de entrada.
 import { z } from 'zod'
 import { schemaPassos, type Passo } from '@/lib/disparo/passos'
+import { schemaAcoes, type Acao } from '@/lib/disparo/acoes'
 
 export const MAX_ETAPAS = 30
 export const MAX_OPCOES = 10
@@ -56,6 +57,8 @@ export const schemaEtapa = z.object({
   nome: z.string().trim().min(1, 'Uma mensagem ficou sem nome.').max(60),
   passos: schemaPassos,
   resposta: schemaResposta,
+  /** O que fazer na conversa logo depois que as mensagens desta etapa saem (etiquetas, arquivar…). */
+  acoes: schemaAcoes.optional(),
 })
 
 export const schemaEtapas = z.array(schemaEtapa)
@@ -222,6 +225,19 @@ function excluido(f: FluxoAtivo, etiquetas: string[] | null): boolean {
 }
 
 /**
+ * A etiqueta marcada em "Quem tem a etiqueta" é CONDIÇÃO (pedido do Felippe, 2026-10-26, depois
+ * de o robô responder gente sem a etiqueta): com etiquetas marcadas, a automação só começa para
+ * quem tem uma delas, seja qual for o jeito de começar. Sem conseguir ler as etiquetas, não começa.
+ */
+function temEtiquetaExigida(f: FluxoAtivo, etiquetas: string[] | null): boolean {
+  if (!f.gatilho_etiquetas.length) return true
+  return etiquetas !== null && temEtiqueta(etiquetas, f.gatilho_etiquetas)
+}
+
+/** A automação tem algum jeito de começar além da etiqueta? */
+const temOutroComeco = (f: FluxoAtivo) => f.gatilho_palavras.length > 0 || f.boas_vindas
+
+/**
  * Fluxo que esta mensagem dispara: palavra-chave > resposta a disparo > etiqueta, sem os
  * excluídos. A etiqueta continua no contato depois que o fluxo termina: sem uma pausa, cada
  * "obrigado" recomeçaria o fluxo — então ela só dispara de novo depois de EXPIRA_CONVERSA_MS
@@ -229,13 +245,15 @@ function excluido(f: FluxoAtivo, etiquetas: string[] | null): boolean {
  * conversa conta, ver processar.ts.)
  */
 function gatilho(e: Entrada): { fluxo: FluxoAtivo; gatilho: Gatilho } | null {
-  const validos = e.fluxos.filter(f => f.etapas.length && !excluido(f, e.etiquetas))
+  const validos = e.fluxos.filter(f => f.etapas.length && !excluido(f, e.etiquetas) && temEtiquetaExigida(f, e.etiquetas))
   const porPalavra = validos.find(f => ehUmaDas(e.texto, f.gatilho_palavras.filter(p => p !== QUALQUER_MENSAGEM)))
   if (porPalavra) return { fluxo: porPalavra, gatilho: 'palavra' }
   const porDisparo = validos.find(f => f.id === e.fluxoDoDisparo)
   if (porDisparo) return { fluxo: porDisparo, gatilho: 'disparo' }
   const recente = e.conversa && e.agora.getTime() - new Date(e.conversa.atualizado_em).getTime() < EXPIRA_CONVERSA_MS
-  const porEtiqueta = recente ? undefined : validos.find(f => temEtiqueta(e.etiquetas ?? [], f.gatilho_etiquetas))
+  // Automação só com etiqueta (sem palavra, sem "qualquer mensagem", sem boas-vindas): começa com
+  // qualquer mensagem de quem tem a etiqueta — o jeito antigo de usar a etiqueta.
+  const porEtiqueta = recente ? undefined : validos.find(f => f.gatilho_etiquetas.length > 0 && !temOutroComeco(f))
   if (porEtiqueta) return { fluxo: porEtiqueta, gatilho: 'etiqueta' }
   const porBoasVindas = validos.find(f => boasVindasValem(f, e))
   if (porBoasVindas) return { fluxo: porBoasVindas, gatilho: 'boas_vindas' }
@@ -362,7 +380,7 @@ export type EstadoFinal = {
 
 export type Plano = {
   /** Grupos de mensagens, na ordem (cada etapa é um grupo; etapaId null = mensagem do sistema). */
-  envios: { etapaId: string | null; passos: Passo[] }[]
+  envios: { etapaId: string | null; passos: Passo[]; acoes: Acao[] }[]
   /** Variáveis para montar os textos ({{nome}} entra à parte). */
   variaveis: Record<string, string>
   final: EstadoFinal
@@ -379,14 +397,14 @@ export function planejar(d: Exclude<Decisao, { tipo: 'ignorar' }>, c: { etapa_id
   const sem = { evento: null, eventoDepois: null, avisarDono: null }
   if (d.tipo === 'sair') {
     return {
-      ...sem, envios: [{ etapaId: null, passos: textoCurto(MSG_SAIR) }], variaveis: {}, salvarAntes: true,
+      ...sem, envios: [{ etapaId: null, passos: textoCurto(MSG_SAIR), acoes: [] }], variaveis: {}, salvarAntes: true,
       final: { status: 'descadastrado', fluxo_id: null, etapa_id: null, nao_entendi: 0 },
       evento: 'Pediu para sair: não recebe mais o robô nem disparos.',
     }
   }
   if (d.tipo === 'humano') {
     return {
-      ...sem, envios: [{ etapaId: null, passos: textoCurto(d.fluxo.msg_humano) }], variaveis: c.variaveis, salvarAntes: true,
+      ...sem, envios: [{ etapaId: null, passos: textoCurto(d.fluxo.msg_humano), acoes: [] }], variaveis: c.variaveis, salvarAntes: true,
       final: { status: 'humano', nao_entendi: 0 }, evento: `Robô pausado: ${d.motivo}.`, avisarDono: d.motivo,
     }
   }
@@ -394,7 +412,7 @@ export function planejar(d: Exclude<Decisao, { tipo: 'ignorar' }>, c: { etapa_id
     const etapa = d.fluxo.etapas.find(e => e.id === c.etapa_id)
     const menu = etapa?.resposta.tipo === 'menu' ? `\n\n${textoDoMenu(etapa.resposta.opcoes)}` : ''
     return {
-      ...sem, envios: [{ etapaId: null, passos: textoCurto(d.fluxo.msg_nao_entendi + menu) }], variaveis: c.variaveis, salvarAntes: true,
+      ...sem, envios: [{ etapaId: null, passos: textoCurto(d.fluxo.msg_nao_entendi + menu), acoes: [] }], variaveis: c.variaveis, salvarAntes: true,
       final: { status: 'ativa', nao_entendi: d.tentativas },
     }
   }
@@ -406,7 +424,7 @@ export function planejar(d: Exclude<Decisao, { tipo: 'ignorar' }>, c: { etapa_id
   const evento = d.tipo === 'iniciar'
     ? `Entrou na automação "${d.fluxo.nome}" (${{ palavra: 'mandou a palavra', disparo: 'respondeu ao disparo', etiqueta: 'tem a etiqueta', boas_vindas: 'primeira mensagem', qualquer: 'mandou mensagem' }[d.gatilho]}).`
     : null
-  const envios = percurso.enviar.map(e => ({ etapaId: e.id, passos: passosDaEtapa(e) }))
+  const envios = percurso.enviar.map(e => ({ etapaId: e.id, passos: passosDaEtapa(e), acoes: e.acoes ?? [] }))
   const depois = percurso.depois
   if (depois.tipo === 'aguardar') {
     return { ...sem, envios, variaveis, salvarAntes: false, evento, final: { ...comum, status: 'ativa', etapa_id: depois.etapaId } }

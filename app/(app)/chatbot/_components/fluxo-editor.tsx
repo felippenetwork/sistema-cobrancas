@@ -396,9 +396,9 @@ export function FluxoEditor({ fluxoId, inicial }: { fluxoId: string | null; inic
                   )}
                 </div>
                 <div>
-                  <p className="mb-1 flex items-center gap-1.5 text-sm font-medium text-foreground"><Tag className="h-3.5 w-3.5 text-muted-foreground" /> alguém com a etiqueta manda mensagem</p>
+                  <p className="mb-1 flex items-center gap-1.5 text-sm font-medium text-foreground"><Tag className="h-3.5 w-3.5 text-muted-foreground" /> só para quem tem a etiqueta (opcional)</p>
                   <EscolhaEtiquetas escolhidas={gatEtiquetas} onChange={setGatEtiquetas} etiquetas={etiquetas} erro={erroEtiquetas} />
-                  <p className={AJUDA}>Uma vez por dia no máximo, para o robô não recomeçar a cada &quot;obrigado&quot;.</p>
+                  <p className={AJUDA}>Com uma etiqueta marcada, o robô <strong className="font-medium text-foreground">só responde quem tem uma delas</strong>, em qualquer um dos jeitos de começar. Quem não tem a etiqueta não recebe nada.</p>
                 </div>
                 <div className="rounded-xl border border-border p-3">
                   <label className="flex cursor-pointer items-start gap-3">

@@ -81,13 +81,13 @@ describe('gatilhos (sem conversa)', () => {
   })
 
   it('etiqueta inicia; sem a etiqueta, não', () => {
-    const fluxos = [fluxo({ gatilho_etiquetas: ['7'] })]
+    const fluxos = [fluxo({ gatilho_palavras: [], gatilho_etiquetas: ['7'] })]
     expect(decidir(entrada('oi', { fluxos, etiquetas: ['55:7'] }))).toMatchObject({ tipo: 'iniciar', gatilho: 'etiqueta' })
     expect(decidir(entrada('oi', { fluxos, etiquetas: ['55:8'] }))).toMatchObject({ tipo: 'ignorar' })
   })
 
   it('etiqueta não recomeça o fluxo logo depois que ele terminou (só depois de 24h)', () => {
-    const fluxos = [fluxo({ gatilho_etiquetas: ['7'] })]
+    const fluxos = [fluxo({ gatilho_palavras: [], gatilho_etiquetas: ['7'] })]
     const recem = conversa({ status: 'encerrada', etapa_id: null, atualizado_em: '2026-10-26T14:00:00Z' })
     expect(decidir(entrada('obrigado', { fluxos, etiquetas: ['55:7'], conversa: recem }))).toMatchObject({ tipo: 'ignorar' })
     const antiga = conversa({ status: 'encerrada', etapa_id: null, atualizado_em: '2026-10-25T14:00:00Z' })
@@ -116,6 +116,38 @@ describe('gatilhos (sem conversa)', () => {
     expect(precisaDeEtiquetas(base)).toBe(false)
     expect(precisaDeEtiquetas({ ...base, fluxos: [fluxo({ excluir_etiquetas: ['1'] })] })).toBe(true)
     expect(precisaDeEtiquetas({ ...base, fluxos: [fluxo({ excluir_etiquetas: ['1'] })], conversa: conversa() })).toBe(false)
+  })
+})
+
+describe('etiqueta marcada é condição: só responde quem tem a etiqueta', () => {
+  // Caso real (2026-10-26): "Qualquer mensagem" + etiqueta AGUARDANDO_RESPOSTA respondia todo mundo.
+  const soComEtiqueta = (extra: Partial<FluxoAtivo> = {}) => [fluxo({ gatilho_palavras: [QUALQUER_MENSAGEM], gatilho_etiquetas: ['7'], ...extra })]
+
+  it('"qualquer mensagem" + etiqueta: sem etiqueta ou com outra etiqueta, NÃO responde', () => {
+    expect(decidir(entrada('oi', { fluxos: soComEtiqueta(), etiquetas: [] }))).toMatchObject({ tipo: 'ignorar' })
+    expect(decidir(entrada('oi', { fluxos: soComEtiqueta(), etiquetas: ['5521:3'] }))).toMatchObject({ tipo: 'ignorar' })
+  })
+
+  it('"qualquer mensagem" + etiqueta: com a etiqueta, responde', () => {
+    expect(decidir(entrada('oi', { fluxos: soComEtiqueta(), etiquetas: ['5521:3', '5521:7'] }))).toMatchObject({ tipo: 'iniciar' })
+  })
+
+  it('vale também para palavra-chave, boas-vindas e resposta a disparo', () => {
+    const fluxos = [fluxo({ gatilho_etiquetas: ['7'], boas_vindas: true, boas_vindas_clientes: true })]
+    expect(decidir(entrada('menu', { fluxos, etiquetas: [] }))).toMatchObject({ tipo: 'ignorar' })
+    expect(decidir(entrada('bom dia', { fluxos, etiquetas: [] }))).toMatchObject({ tipo: 'ignorar' })
+    expect(decidir(entrada('oi', { fluxos, etiquetas: [], fluxoDoDisparo: 'f1' }))).toMatchObject({ tipo: 'ignorar' })
+    expect(decidir(entrada('menu', { fluxos, etiquetas: ['5521:7'] }))).toMatchObject({ tipo: 'iniciar', gatilho: 'palavra' })
+  })
+
+  it('sem conseguir ler as etiquetas, não responde', () => {
+    expect(decidir(entrada('oi', { fluxos: soComEtiqueta(), etiquetas: null }))).toMatchObject({ tipo: 'ignorar' })
+  })
+
+  it('automação só com etiqueta (sem outro jeito de começar) continua começando com qualquer mensagem de quem tem a etiqueta', () => {
+    const fluxos = [fluxo({ gatilho_palavras: [], gatilho_etiquetas: ['7'] })]
+    expect(decidir(entrada('oi', { fluxos, etiquetas: ['5521:7'] }))).toMatchObject({ tipo: 'iniciar', gatilho: 'etiqueta' })
+    expect(decidir(entrada('oi', { fluxos, etiquetas: [] }))).toMatchObject({ tipo: 'ignorar' })
   })
 })
 
