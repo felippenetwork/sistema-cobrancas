@@ -3,8 +3,9 @@
 import Link from 'next/link'
 import { FileText, Image as ImageIcon, Mic, Type, Video } from 'lucide-react'
 import { TIPOS_MIDIA, type Passo } from '@/lib/disparo/passos'
+import type { Acao } from '@/lib/disparo/acoes'
 
-export type ModeloDisparo = { id: string; nome: string; passos: Passo[] }
+export type ModeloDisparo = { id: string; nome: string; passos: Passo[]; acoes: Acao[] }
 
 const ICONE: Record<Passo['tipo'], React.ReactNode> = {
   texto:     <Type className="h-3.5 w-3.5" />,

@@ -158,7 +158,7 @@ export async function sendText(
   instanceToken: string,
   number: string,
   text: string,
-): Promise<void> {
+): Promise<string | null> {
   const res = await fetch(`${UAZAPI_URL}/send/text`, {
     method:  'POST',
     headers: { token: instanceToken, 'Content-Type': 'application/json' },
@@ -169,6 +169,7 @@ export async function sendText(
     const err = await res.json().catch(() => ({} as { error?: string }))
     throw new Error((err as { error?: string }).error || `uazapi sendText HTTP ${res.status}`)
   }
+  return idDaMensagem(res)
 }
 
 // Simula "digitando…"/"gravando áudio…" antes de mandar a mensagem de verdade —
@@ -185,6 +186,16 @@ export async function sendPresence(
     headers: { token: instanceToken, 'Content-Type': 'application/json' },
     body:    JSON.stringify({ number: formatPhoneNumber(number), presence, delay: delayMs }),
   }).catch(() => {})
+}
+
+/**
+ * ID da mensagem enviada (para fixar a mensagem depois). O envio devolve "id" no formato
+ * "<número>:<id curto>" (confirmado no ERP-Rifas); /message/pin aceita esse formato.
+ */
+async function idDaMensagem(res: Response): Promise<string | null> {
+  const corpo = await res.json().catch(() => null) as { id?: unknown; messageid?: unknown } | null
+  const id = corpo?.id ?? corpo?.messageid
+  return typeof id === 'string' && id ? id : null
 }
 
 async function erroUazapi(res: Response, rotulo: string): Promise<Error> {
@@ -204,7 +215,7 @@ export async function sendMedia(
   tipo: TipoMidia,
   url: string,
   opts: { legenda?: string | null; nomeArquivo?: string | null } = {},
-): Promise<void> {
+): Promise<string | null> {
   const res = await fetch(`${UAZAPI_URL}/send/media`, {
     method:  'POST',
     headers: { token: instanceToken, 'Content-Type': 'application/json' },
@@ -217,6 +228,7 @@ export async function sendMedia(
     }),
   })
   if (!res.ok) throw await erroUazapi(res, 'sendMedia')
+  return idDaMensagem(res)
 }
 
 // ─── Grupos, contatos e etiquetas (leitura confirmada contra a API real em 2026-10-23) ──
@@ -319,3 +331,29 @@ export async function labelsDoChat(instanceToken: string, number: string): Promi
   const rotulos = data.chats?.[0]?.wa_label
   return Array.isArray(rotulos) ? rotulos.map(String) : []
 }
+
+// ── Ações na conversa depois do envio (lib/disparo/acoes.ts) ──────────────────
+// Campos conforme o contrato OpenAPI oficial (docs.uazapi.com/openapi-bundled.json, 2026-10-26).
+// /chat/mute, /chat/read e /chat/notes/edit pedem o JID ("<número>@s.whatsapp.net"); os demais, o número.
+
+const jid = (number: string) => `${formatPhoneNumber(number)}@s.whatsapp.net`
+
+async function acaoNaConversa(instanceToken: string, rota: string, corpo: Record<string, unknown>): Promise<void> {
+  const res = await fetch(`${UAZAPI_URL}${rota}`, {
+    method:  'POST',
+    headers: { token: instanceToken, 'Content-Type': 'application/json' },
+    body:    JSON.stringify(corpo),
+    signal:  AbortSignal.timeout(15_000),
+  })
+  if (!res.ok) throw await erroUazapi(res, rota)
+}
+
+export const archiveChat = (t: string, number: string, archive: boolean) => acaoNaConversa(t, '/chat/archive', { number: formatPhoneNumber(number), archive })
+export const pinChat     = (t: string, number: string, pin: boolean) => acaoNaConversa(t, '/chat/pin', { number: formatPhoneNumber(number), pin })
+/** muteEndTime: 0 tira o silêncio; 8 h; 168 h (1 semana); -1 para sempre. */
+export const muteChat    = (t: string, number: string, muteEndTime: 0 | 8 | 168 | -1) => acaoNaConversa(t, '/chat/mute', { number: jid(number), muteEndTime })
+export const readChat    = (t: string, number: string, read: boolean) => acaoNaConversa(t, '/chat/read', { number: jid(number), read })
+export const addContact  = (t: string, number: string, name: string) => acaoNaConversa(t, '/contact/add', { number: formatPhoneNumber(number), name })
+export const editNotes   = (t: string, number: string, notes: string) => acaoNaConversa(t, '/chat/notes/edit', { number: jid(number), notes })
+/** duration em dias: 1, 7 ou 30. */
+export const pinMessage  = (t: string, id: string, duration: 1 | 7 | 30) => acaoNaConversa(t, '/message/pin', { id, pin: true, duration })

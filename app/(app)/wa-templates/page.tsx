@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { passosDoModelo } from '@/lib/disparo/passos'
+import { lerAcoes } from '@/lib/disparo/acoes'
 import { TemplatesClient } from './_components/templates-client'
 
 export const dynamic = 'force-dynamic'
@@ -18,7 +19,7 @@ export default async function WaTemplatesPage() {
 
   const { data: modelos, error } = await supabase
     .from('modelos_wa')
-    .select('id, nome, corpo, passos, criado_em')
+    .select('id, nome, corpo, passos, criado_em, acoes')
     .eq('conta_id', contaId)
     .order('criado_em', { ascending: false })
   if (error) {
@@ -29,7 +30,10 @@ export default async function WaTemplatesPage() {
   // Modelo antigo (só texto) aparece como uma caixinha de texto.
   return (
     <TemplatesClient
-      modelos={(modelos ?? []).map(m => ({ id: m.id, nome: m.nome, criado_em: m.criado_em, passos: passosDoModelo(m) ?? [] }))}
+      modelos={(modelos ?? []).map(m => ({
+        id: m.id, nome: m.nome, criado_em: m.criado_em, passos: passosDoModelo(m) ?? [],
+        acoes: lerAcoes(m.acoes),
+      }))}
     />
   )
 }

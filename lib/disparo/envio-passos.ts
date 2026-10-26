@@ -12,7 +12,8 @@ type Supabase = ReturnType<typeof createAdminClient>
 /** Falha que não é recusa da mensagem (ex.: não conseguiu gerar o link da mídia). */
 export class ErroTransitorio extends Error {}
 
-export type Envio = { digitacaoMs: number; presenca: 'composing' | 'recording'; enviar: () => Promise<void> }
+/** enviar devolve o ID da mensagem enviada quando a uazapi informa (para fixar a mensagem depois). */
+export type Envio = { digitacaoMs: number; presenca: 'composing' | 'recording'; enviar: () => Promise<string | null> }
 
 export function enviosDosPassos(
   supabase: Supabase,
@@ -34,7 +35,7 @@ export function enviosDosPassos(
         const { data, error } = await supabase.storage.from(BUCKET_MIDIA).createSignedUrl(p.caminho, 60 * 60)
         if (error || !data?.signedUrl) throw new ErroTransitorio(`link da mídia: ${error?.message ?? 'sem URL'}`)
         const legenda = p.legenda ? comVariaveis(montarTexto(p.legenda, [], ctx.indice, ctx.nome)) : null
-        await sendMedia(token, celular, TIPOS_MIDIA[p.tipo].uazapi, data.signedUrl, { legenda, nomeArquivo: p.nome_arquivo })
+        return sendMedia(token, celular, TIPOS_MIDIA[p.tipo].uazapi, data.signedUrl, { legenda, nomeArquivo: p.nome_arquivo })
       },
     }
   })

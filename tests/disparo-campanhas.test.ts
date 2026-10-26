@@ -5,7 +5,11 @@ import { FakeDb } from './helpers/fake-supabase'
 
 const mocks = vi.hoisted(() => {
   class UazapiRateLimitError extends Error {}
-  return { UazapiRateLimitError, sendText: vi.fn(), sendPresence: vi.fn(), sendMedia: vi.fn(), setChatLabel: vi.fn(), ordem: [] as string[] }
+  return {
+    UazapiRateLimitError, sendText: vi.fn(), sendPresence: vi.fn(), sendMedia: vi.fn(), setChatLabel: vi.fn(),
+    archiveChat: vi.fn(), pinChat: vi.fn(), pinMessage: vi.fn(), labelsDoChat: vi.fn(), muteChat: vi.fn(),
+    readChat: vi.fn(), addContact: vi.fn(), editNotes: vi.fn(), ordem: [] as string[],
+  }
 })
 
 vi.mock('@/lib/uazapi', () => ({
@@ -13,6 +17,8 @@ vi.mock('@/lib/uazapi', () => ({
   sendPresence: mocks.sendPresence,
   sendMedia: mocks.sendMedia,
   setChatLabel: mocks.setChatLabel,
+  archiveChat: mocks.archiveChat, pinChat: mocks.pinChat, pinMessage: mocks.pinMessage, labelsDoChat: mocks.labelsDoChat,
+  muteChat: mocks.muteChat, readChat: mocks.readChat, addContact: mocks.addContact, editNotes: mocks.editNotes,
   UazapiRateLimitError: mocks.UazapiRateLimitError,
 }))
 
@@ -62,7 +68,9 @@ beforeEach(() => {
   mocks.sendPresence.mockReset().mockImplementation(async () => { mocks.ordem.push('digitando') })
   mocks.sendText.mockReset().mockImplementation(async () => { mocks.ordem.push('enviou') })
   mocks.sendMedia.mockReset().mockImplementation(async () => { mocks.ordem.push('midia') })
-  mocks.setChatLabel.mockReset().mockResolvedValue(undefined)
+  mocks.setChatLabel.mockReset().mockImplementation(async (_t: string, _n: string, acao: string, id: string) => { mocks.ordem.push(`etiqueta ${acao} ${id}`) })
+  for (const fn of [mocks.archiveChat, mocks.pinChat, mocks.pinMessage, mocks.muteChat, mocks.readChat, mocks.addContact, mocks.editNotes]) fn.mockReset().mockResolvedValue(undefined)
+  mocks.labelsDoChat.mockReset().mockResolvedValue([])
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
 afterEach(() => {
@@ -404,5 +412,50 @@ describe('etiquetas do WhatsApp Business', () => {
     const db = cenario({ campanha: { prog_dia: 1, prog_planejado_em: '2026-10-23' }, destinatarios: agendado() })
     await rodar(db)
     expect(mocks.setChatLabel).not.toHaveBeenCalled()
+  })
+})
+
+describe('ações depois do envio (lista ordenada)', () => {
+  const agendado = () => [{
+    id: 'd0', campanha_id: CAMP, conta_id: CONTA, celular: '5521999990001', nome: 'Maria', ordem: 0,
+    status: 'pendente', agendado_para: '2026-10-23T12:30:00.000Z', variaveis: null,
+  }]
+  const comAcoes = (acoes: unknown[], extra: Record<string, unknown> = {}) =>
+    cenario({ campanha: { acoes, prog_dia: 1, prog_planejado_em: '2026-10-23', ...extra }, destinatarios: agendado() })
+  beforeEach(() => vi.setSystemTime(new Date('2026-10-23T13:00:00Z')))
+
+  it('executa na ordem escolhida, depois da mensagem', async () => {
+    mocks.archiveChat.mockImplementation(async () => { mocks.ordem.push('arquivou') })
+    mocks.labelsDoChat.mockResolvedValue(['5521:3', '5521:7'])
+    await rodar(comAcoes([{ tipo: 'etiquetas_tirar_todas' }, { tipo: 'etiqueta_por', id: 'L9', nome: 'Novo' }, { tipo: 'arquivar' }]))
+    expect(mocks.ordem.slice(mocks.ordem.indexOf('enviou'))).toEqual(['enviou', 'etiqueta remover 3', 'etiqueta remover 7', 'etiqueta adicionar L9', 'arquivou'])
+  })
+
+  it('fixa a mensagem que acabou de sair (id devolvido pelo envio)', async () => {
+    mocks.sendText.mockResolvedValue('5521:ABC123')
+    await rodar(comAcoes([{ tipo: 'fixar_mensagem', dias: 7 }]))
+    expect(mocks.pinMessage).toHaveBeenCalledWith('tok', '5521:ABC123', 7)
+  })
+
+  it('uma ação que falha vira aviso e as seguintes continuam; o envio vale', async () => {
+    mocks.pinChat.mockRejectedValue(new Error('não deu'))
+    const db = comAcoes([{ tipo: 'fixar_conversa' }, { tipo: 'silenciar', horas: 168 }, { tipo: 'salvar_contato' }])
+    await rodar(db)
+    expect(mocks.muteChat).toHaveBeenCalledWith('tok', '5521999990001', 168)
+    expect(mocks.addContact).toHaveBeenCalledWith('tok', '5521999990001', 'Maria')
+    const d = db.linhas('campanha_destinatarios')[0]
+    expect(d.status).toBe('enviado')
+    expect(d.aviso).toContain('fixa a conversa')
+  })
+
+  it('com a lista preenchida, as etiquetas antigas do disparo não são usadas', async () => {
+    await rodar(comAcoes([{ tipo: 'marcar_lida' }], { etiqueta_adicionar: 'VELHA' }))
+    expect(mocks.readChat).toHaveBeenCalledWith('tok', '5521999990001', true)
+    expect(mocks.setChatLabel).not.toHaveBeenCalled()
+  })
+
+  it('nota usa {{nome}} do contato', async () => {
+    await rodar(comAcoes([{ tipo: 'nota', texto: 'Recebeu campanha, {{nome}}' }]))
+    expect(mocks.editNotes).toHaveBeenCalledWith('tok', '5521999990001', 'Recebeu campanha, Maria')
   })
 })

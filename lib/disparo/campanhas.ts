@@ -9,14 +9,17 @@
 //   na criação do disparo (normal ou progressivo). Cada contato recebe várias mensagens
 //   (texto/mídia), cada uma com o próprio "digitando…"/"gravando…" antes. Disparo antigo, sem
 //   passos, vale a mensagem única (20s de digitação no progressivo, 15–20s no normal).
-// - Depois do envio: etiqueta do WhatsApp Business (remover/adicionar) e registro do número —
+// - Depois do envio: as ações escolhidas, na ordem (lib/disparo/acoes.ts: etiquetas, arquivar,
+//   fixar, silenciar…) e o registro do número —
 //   ambos melhor esforço, viram `aviso` no contato, nunca desfazem o envio.
 //
 // Invariantes (mesmas dos lembretes, skill whatsapp-uazapi): claim atômico pendente → enviado
 // antes de mandar; 429 da uazapi devolve o contato para 'pendente' e para a conta neste tick;
 // depois que a mensagem saiu, nada a devolve para 'pendente'.
 import { createAdminClient } from '@/lib/supabase/admin'
-import { sendPresence, sendText, setChatLabel, UazapiRateLimitError } from '@/lib/uazapi'
+import { sendPresence, sendText, UazapiRateLimitError } from '@/lib/uazapi'
+import { acoesLegadas, lerAcoes } from './acoes'
+import { executarAcoes } from './executar-acoes'
 import { celularVariantes } from '@/lib/utils/celular'
 import { duracaoSequenciaMs, type Passo } from './passos'
 import { enviosDosPassos, ErroTransitorio, type Envio } from './envio-passos'
@@ -50,6 +53,7 @@ type Campanha = {
   passos: Passo[] | null
   etiqueta_adicionar: string | null
   etiqueta_remover: string | null
+  acoes: unknown
   modelos_wa: { corpo: string } | null
 }
 
@@ -94,7 +98,7 @@ export async function processarCampanhas(
 ): Promise<number> {
   const { data, error } = await supabase
     .from('campanhas_wa')
-    .select('id, tipo, mensagem, variacoes, janela_inicio, janela_fim, prog_inicio, prog_maximo, prog_dia, prog_planejado_em, registrar_enviados, excluir_ja_enviados, passos, etiqueta_adicionar, etiqueta_remover, modelos_wa(corpo)')
+    .select('id, tipo, mensagem, variacoes, janela_inicio, janela_fim, prog_inicio, prog_maximo, prog_dia, prog_planejado_em, registrar_enviados, excluir_ja_enviados, passos, etiqueta_adicionar, etiqueta_remover, acoes, modelos_wa(corpo)')
     .eq('conta_id', contaId)
     .eq('status', 'enviando')
     .order('iniciado_em', { ascending: true })
@@ -361,6 +365,7 @@ async function enviarDestinatario(
   // Cada envio: "digitando…"/"gravando…" pelo tempo pedido e, então, a mensagem/mídia.
   const envios = montarEnvios(supabase, token, c, dest, digitacaoMs)
   let feitos = 0
+  let ultimaMensagem: string | null = null
   const avisos: string[] = []
   let pararDepois = false
 
@@ -370,7 +375,7 @@ async function enviarDestinatario(
         await sendPresence(token, dest.celular, e.digitacaoMs, e.presenca)
         await sleep(e.digitacaoMs)
       }
-      await e.enviar()
+      ultimaMensagem = (await e.enviar()) ?? ultimaMensagem
       feitos++
     } catch (err) {
       if (feitos === 0) {
@@ -406,15 +411,12 @@ async function enviarDestinatario(
     if (error) console.error(`${log} registrar contato disparado falhou (mensagem já enviada)`, { contaId, destId: dest.id, error })
   }
 
-  // Etiquetas: melhor esforço — nunca desfazem um envio, só viram aviso.
-  for (const [acao, etiqueta] of [['remover', c.etiqueta_remover], ['adicionar', c.etiqueta_adicionar]] as const) {
-    if (!etiqueta) continue
-    try {
-      await setChatLabel(token, dest.celular, acao, etiqueta)
-    } catch (err) {
-      avisos.push(`Não conseguiu ${acao} a etiqueta: ${err instanceof Error ? err.message : String(err)}`)
-    }
-  }
+  // Ações depois do envio (etiquetas, arquivar, fixar…), na ordem escolhida: melhor esforço —
+  // nunca desfazem um envio, só viram aviso. Disparo antigo: só as etiquetas (tira, depois põe).
+  const acoes = lerAcoes(c.acoes)
+  avisos.push(...await executarAcoes(token, dest.celular, acoes.length ? acoes : acoesLegadas(c), {
+    nome: dest.nome, indice: dest.ordem ?? 0, ultimaMensagem,
+  }))
 
   if (avisos.length) {
     const { error } = await supabase.from('campanha_destinatarios')

@@ -7,6 +7,8 @@ import { montarTexto } from './progressivo'
 export const BUCKET_MIDIA = 'disparo-midia'
 export const TAMANHO_MAX_MIDIA = 16 * 1024 * 1024 // limite do WhatsApp para mídia
 export const MAX_PASSOS = 10
+/** Variações por mensagem de texto (o rodízio alterna entre elas a cada contato). */
+export const MAX_VARIACOES = 20
 
 export const TIPOS_MIDIA = {
   imagem:    { rotulo: 'Imagem',    mimes: ['image/jpeg', 'image/png', 'image/webp'], uazapi: 'image' },
@@ -25,7 +27,7 @@ const digitacao = z.number().int().min(0).max(120)
 const passoTexto = z.object({
   tipo: z.literal('texto'),
   texto: z.string().trim().min(1, 'Uma caixinha de texto está vazia.').max(4000),
-  variacoes: z.array(z.string().trim().max(4000)).max(5).default([]),
+  variacoes: z.array(z.string().trim().max(4000)).max(MAX_VARIACOES, `No máximo ${MAX_VARIACOES} variações por mensagem.`).default([]),
   digitacao_seg: digitacao,
 })
 

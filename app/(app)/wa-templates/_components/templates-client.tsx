@@ -5,8 +5,10 @@ import { FileText, Image as ImageIcon, Loader2, Mic, Pencil, Plus, Trash2, Type,
 import { criarModeloAction, atualizarModeloAction, excluirModeloAction } from '../_actions'
 import { TIPOS_MIDIA, type Passo } from '@/lib/disparo/passos'
 import { PassosEditor, novoPasso, paraEditavel, paraEnvio, type PassoEditavel } from '../../disparos/_components/passos-editor'
+import { AcoesEditor, acaoIncompleta } from '../../disparos/_components/acoes-editor'
+import { descreverAcao, type Acao } from '@/lib/disparo/acoes'
 
-type Modelo = { id: string; nome: string; passos: Passo[]; criado_em: string }
+type Modelo = { id: string; nome: string; passos: Passo[]; criado_em: string; acoes: Acao[] }
 
 const INPUT = 'w-full rounded-xl border border-border bg-input px-3 py-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20'
 const LABEL = 'mb-1.5 block text-xs font-medium uppercase tracking-wide text-muted-foreground'
@@ -94,6 +96,9 @@ export function TemplatesClient({ modelos: modelosIniciais }: { modelos: Modelo[
                   ))}
                   <span className="tabular-nums">· {segundos} s de digitação</span>
                 </div>
+                {m.acoes.length > 0 && (
+                  <p className="text-[11px] text-muted-foreground">Depois de enviar: {m.acoes.map(descreverAcao).join(' → ')}</p>
+                )}
               </div>
             )
           })}
@@ -137,6 +142,7 @@ function ModeloSheet({ modelo, onClose, onSalvo }: {
 }) {
   const [nome, setNome]         = useState(modelo?.nome ?? '')
   const [passos, setPassos]     = useState<PassoEditavel[]>(() => (modelo?.passos.length ? paraEditavel(modelo.passos) : [novoPasso('texto', 0)]))
+  const [acoes, setAcoes]       = useState<Acao[]>(modelo?.acoes ?? [])
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro]         = useState<string | null>(null)
 
@@ -144,14 +150,16 @@ function ModeloSheet({ modelo, onClose, onSalvo }: {
     e.preventDefault()
     setErro(null)
     if (passos.some(p => p.tipo !== 'texto' && !p.caminho)) { setErro('Uma mensagem de mídia ainda está sem arquivo.'); return }
+    if (acoes.some(acaoIncompleta)) { setErro('Uma ação depois do envio está incompleta (escolha a etiqueta ou escreva a nota).'); return }
     setSalvando(true)
-    const entrada = { nome, passos: paraEnvio(passos) }
+    const entrada = { nome, passos: paraEnvio(passos), acoes }
     const r = modelo ? await atualizarModeloAction(modelo.id, entrada) : await criarModeloAction(entrada)
     setSalvando(false)
     if (r.error || !r.id) { setErro(r.error ?? 'Não foi possível salvar o modelo.'); return }
     onSalvo({
       id: r.id, nome: nome.trim(), criado_em: modelo?.criado_em ?? new Date().toISOString(),
       passos: entrada.passos.map(p => (p.tipo === 'texto' ? { ...p, variacoes: p.variacoes.filter(Boolean) } : p)) as Passo[],
+      acoes,
     })
   }
 
@@ -183,6 +191,8 @@ function ModeloSheet({ modelo, onClose, onSalvo }: {
               Cada contato leva cerca de <span className="tabular-nums">{segundos}</span> s entre digitação e envios.
             </p>
           </section>
+          <AcoesEditor acoes={acoes} onChange={setAcoes}
+            ajuda="O que fazer na conversa de cada contato depois que as mensagens saem, nesta ordem. Vem preenchido em todo disparo com este modelo (lá dá para mudar)." />
           {erro && <p role="alert" className="rounded-xl bg-destructive/10 px-3 py-2 text-xs text-destructive">{erro}</p>}
         </div>
 

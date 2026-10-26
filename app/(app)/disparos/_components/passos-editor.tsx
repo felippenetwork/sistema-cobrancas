@@ -3,7 +3,7 @@
 import { useRef, useState } from 'react'
 import { ArrowDown, ArrowUp, FileText, Image as ImageIcon, Loader2, Mic, Paperclip, Plus, Trash2, Type, Video } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { BUCKET_MIDIA, MAX_PASSOS, TAMANHO_MAX_MIDIA, TIPOS_MIDIA, digitacaoPadrao, type Passo, type TipoMidia } from '@/lib/disparo/passos'
+import { BUCKET_MIDIA, MAX_PASSOS, MAX_VARIACOES, TAMANHO_MAX_MIDIA, TIPOS_MIDIA, digitacaoPadrao, type Passo, type TipoMidia } from '@/lib/disparo/passos'
 import { prepararUploadMidiaAction } from '../_actions'
 
 /** Passo em edição na tela (mídia pode estar sem arquivo ainda). */
@@ -219,10 +219,10 @@ export function PassosEditor({ passos, onChange, variaveis = [] }: {
                     </button>
                   </div>
                 ))}
-                {p.variacoes.length < 5 && (
+                {p.variacoes.length < MAX_VARIACOES && (
                   <button type="button" onClick={() => atualizar(i, { variacoes: [...p.variacoes, ''] })}
                     className="flex items-center gap-1 text-xs font-medium text-primary hover:underline">
-                    <Plus className="h-3.5 w-3.5" /> Variação (alterna a cada contato)
+                    <Plus className="h-3.5 w-3.5" /> Variação (alterna a cada contato){p.variacoes.length > 0 && <span className="text-muted-foreground tabular-nums">&nbsp;· {p.variacoes.length + 1} jeitos de dizer</span>}
                   </button>
                 )}
               </>

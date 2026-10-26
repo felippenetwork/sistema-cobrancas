@@ -20,7 +20,7 @@ import { atualizarModeloAction, criarModeloAction, excluirModeloAction } from '@
 
 const base = {
   nome: 'Teste', modeloId: MODELO, lista: 'Maria; 21999990001\n21999990002', janelaInicio: '09:00', janelaFim: '18:00',
-  inicio: 1, maximo: 20, etiquetaAdicionar: null, etiquetaRemover: null, registrarEnviados: true, excluirJaEnviados: false,
+  inicio: 1, maximo: 20, registrarEnviados: true, excluirJaEnviados: false,
 }
 const texto = { tipo: 'texto' as const, texto: 'Oi {{nome}}', variacoes: [], digitacao_seg: 20 }
 const imagem = (conta: string) => ({ tipo: 'imagem' as const, caminho: `contas/${conta}/a.jpg`, nome_arquivo: 'a.jpg', legenda: null, digitacao_seg: 5 })
@@ -41,10 +41,11 @@ beforeEach(() => {
 
 describe('disparo progressivo a partir do modelo', () => {
   it('copia a sequência do modelo, grava a lista na ordem e já fica "enviando"', async () => {
-    const r = await criarProgressivoAction({ ...base, etiquetaAdicionar: { id: 'L2', nome: 'Lead' } })
+    const r = await criarProgressivoAction({ ...base, acoes: [{ tipo: 'etiquetas_tirar_todas' }, { tipo: 'etiqueta_por', id: 'L2', nome: 'Lead' }, { tipo: 'arquivar' }] })
     expect(r.error).toBeNull()
     const c = db.linhas('campanhas_wa')[0]
-    expect(c).toMatchObject({ tipo: 'progressivo', status: 'enviando', modelo_id: MODELO, etiqueta_adicionar: 'L2', total_destinatarios: 2 })
+    expect(c).toMatchObject({ tipo: 'progressivo', status: 'enviando', modelo_id: MODELO, total_destinatarios: 2 })
+    expect(c.acoes).toEqual([{ tipo: 'etiquetas_tirar_todas' }, { tipo: 'etiqueta_por', id: 'L2', nome: 'Lead' }, { tipo: 'arquivar' }])
     expect(c.passos).toEqual([texto, imagem(CONTA)])
     expect(db.linhas('campanha_destinatarios').map(d => [d.ordem, d.celular, d.nome])).toEqual([
       [0, '5521999990001', 'Maria'], [1, '5521999990002', null],
@@ -95,6 +96,20 @@ describe('disparo normal a partir do modelo', () => {
     return fd
   }
 
+  it('sem a lista "Depois de enviar" no formulário, valem as ações do modelo; a lista do disparo ganha', async () => {
+    db.linhas('modelos_wa')[0].acoes = [{ tipo: 'etiqueta_por', id: 'L1', nome: 'Lead' }, { tipo: 'fixar_conversa' }]
+    await criarCampanhaAction({ error: null }, form({ nome: 'A', modelo_id: MODELO }))
+    expect(db.linhas('campanhas_wa')[0].acoes).toEqual([{ tipo: 'etiqueta_por', id: 'L1', nome: 'Lead' }, { tipo: 'fixar_conversa' }])
+    await criarCampanhaAction({ error: null }, form({ nome: 'B', modelo_id: MODELO, acoes: JSON.stringify([{ tipo: 'silenciar', horas: 8 }]) }))
+    expect(db.linhas('campanhas_wa')[1].acoes).toEqual([{ tipo: 'silenciar', horas: 8 }])
+  })
+
+  it('recusa ação inválida e lista acima do limite', async () => {
+    expect((await criarCampanhaAction({ error: null }, form({ nome: 'C', modelo_id: MODELO, acoes: JSON.stringify([{ tipo: 'silenciar', horas: 3 }]) }))).error).not.toBeNull()
+    expect((await criarCampanhaAction({ error: null }, form({ nome: 'D', modelo_id: MODELO, acoes: JSON.stringify(Array(16).fill({ tipo: 'arquivar' })) }))).error).toMatch(/15/)
+    expect((await criarCampanhaAction({ error: null }, form({ nome: 'E', modelo_id: MODELO, acoes: 'não é json' }))).error).toMatch(/inválidas/)
+    expect(db.linhas('campanhas_wa')).toEqual([])
+  })
   it('copia a sequência do modelo para o disparo', async () => {
     const r = await criarCampanhaAction({ error: null }, form({ nome: 'Julho', modelo_id: MODELO }))
     expect(r.error).toBeNull()

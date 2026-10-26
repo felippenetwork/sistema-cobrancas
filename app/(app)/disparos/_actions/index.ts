@@ -7,6 +7,7 @@ import { getConta } from '@/lib/conta'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { interpretarLista, minutosDoDia } from '@/lib/disparo/progressivo'
 import { BUCKET_MIDIA, TAMANHO_MAX_MIDIA, TIPOS_MIDIA, pastaDaConta, passosDoModelo, type Passo, type TipoMidia } from '@/lib/disparo/passos'
+import { lerAcoes, schemaAcoes, type Acao } from '@/lib/disparo/acoes'
 import { extrairContatos, paraLinhas, resumirGrupos, type PreferenciaNome, type ResumoGrupo } from '@/lib/disparo/extracao'
 import { listGroups, listLabels, listSavedContacts, UazapiRateLimitError, type UazapiEtiqueta } from '@/lib/uazapi'
 
@@ -30,6 +31,8 @@ export async function criarCampanhaAction(
     if ('erro' in seq) return { error: seq.erro }
     const fluxo = await fluxoDaConta(supabase, contaId, (formData.get('fluxo_id') as string) || null)
     if (typeof fluxo === 'object' && fluxo !== null) return { error: fluxo.erro }
+    const acoesDoForm = lerAcoesDoForm(formData)
+    if ('erro' in acoesDoForm) return { error: acoesDoForm.erro }
 
     const { data, error } = await supabase
       .from('campanhas_wa')
@@ -37,7 +40,7 @@ export async function criarCampanhaAction(
         conta_id: contaId, nome, modelo_id: modeloId, status: 'rascunho', passos: seq.passos, fluxo_id: fluxo,
         registrar_enviados:  formData.get('registrar_enviados') === 'on',
         excluir_ja_enviados: formData.get('excluir_ja_enviados') === 'on',
-        ...etiquetasDoForm(formData),
+        acoes: acoesDoForm.acoes ?? seq.acoes,
       })
       .select('id')
       .single()
@@ -114,10 +117,10 @@ export async function adicionarDestinatariosAction(
  * Sequência do modelo escolhido, COPIADA para o disparo (editar o modelo depois não muda um
  * disparo em andamento). Modelo de outra conta responde "não encontrado".
  */
-async function sequenciaDoModelo(supabase: Supabase, contaId: string, modeloId: string): Promise<{ passos: Passo[] } | { erro: string }> {
+async function sequenciaDoModelo(supabase: Supabase, contaId: string, modeloId: string): Promise<{ passos: Passo[]; acoes: Acao[] } | { erro: string }> {
   if (!z.string().uuid().safeParse(modeloId).success) return { erro: 'Escolha um modelo para o disparo.' }
   const { data, error } = await supabase
-    .from('modelos_wa').select('passos, corpo').eq('id', modeloId).eq('conta_id', contaId).maybeSingle()
+    .from('modelos_wa').select('passos, corpo, acoes').eq('id', modeloId).eq('conta_id', contaId).maybeSingle()
   if (error) {
     console.error('[disparos] leitura do modelo falhou', { contaId, modeloId, error })
     return { erro: 'Não foi possível ler o modelo. Tente de novo.' }
@@ -129,7 +132,10 @@ async function sequenciaDoModelo(supabase: Supabase, contaId: string, modeloId: 
   if (passos.some(p => p.tipo !== 'texto' && !p.caminho.startsWith(pastaDaConta(contaId)))) {
     return { erro: 'Arquivo de mídia inválido no modelo. Envie o arquivo de novo no modelo.' }
   }
-  return { passos }
+  return {
+    passos,
+    acoes: lerAcoes(data.acoes),
+  }
 }
 
 /** Fluxo do chatbot escolhido para quem responder (opcional): tem de ser desta conta. */
@@ -258,14 +264,13 @@ export async function enviarCampanhaAction(campanhaId: string): Promise<{
 
 const hora = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Horário inválido.')
 
-const etiqueta = z.object({ id: z.string().min(1).max(100), nome: z.string().max(100) }).nullable()
 
 const schemaProgressivo = z.object({
   nome:        z.string().trim().min(1, 'Informe o nome do disparo.').max(80),
   modeloId:    z.string(),
   fluxoId:     z.string().nullable().default(null),
-  etiquetaAdicionar: etiqueta,
-  etiquetaRemover:   etiqueta,
+  /** Ações depois do envio; sem a lista, valem as do modelo. */
+  acoes:       schemaAcoes.optional(),
   lista:       z.string().max(400_000),
   janelaInicio: hora,
   janelaFim:    hora,
@@ -308,10 +313,8 @@ export async function criarProgressivoAction(input: NovoProgressivo): Promise<{ 
         modelo_id: d.modeloId,
         passos: seq.passos,
         fluxo_id: fluxo,
-        etiqueta_adicionar:      d.etiquetaAdicionar?.id ?? null,
-        etiqueta_adicionar_nome: d.etiquetaAdicionar?.nome ?? null,
-        etiqueta_remover:        d.etiquetaRemover?.id ?? null,
-        etiqueta_remover_nome:   d.etiquetaRemover?.nome ?? null,
+        acoes: d.acoes ?? seq.acoes,
+
         janela_inicio: d.janelaInicio,
         janela_fim: d.janelaFim,
         prog_inicio: d.inicio,
@@ -411,12 +414,14 @@ export async function cancelarCampanhaAction(campanhaId: string): Promise<Result
 
 // ── Etiquetas, grupos e mídia (uazapi / storage) ──────────────────────────────
 
-function etiquetasDoForm(formData: FormData) {
-  const valor = (campo: string) => ((formData.get(campo) as string | null) ?? '').trim().slice(0, 100) || null
-  return {
-    etiqueta_adicionar: valor('etiqueta_adicionar'), etiqueta_adicionar_nome: valor('etiqueta_adicionar_nome'),
-    etiqueta_remover:   valor('etiqueta_remover'),   etiqueta_remover_nome:   valor('etiqueta_remover_nome'),
-  }
+/** Lista "Depois de enviar" do formulário (campo escondido "acoes", em JSON). Sem o campo, null. */
+function lerAcoesDoForm(formData: FormData): { acoes: Acao[] | null } | { erro: string } {
+  const bruto = formData.get('acoes')
+  if (typeof bruto !== 'string' || !bruto) return { acoes: null }
+  let json: unknown
+  try { json = JSON.parse(bruto) } catch { return { erro: 'Ações depois do envio inválidas.' } }
+  const r = schemaAcoes.safeParse(json)
+  return r.success ? { acoes: r.data } : { erro: r.error.issues[0]?.message ?? 'Ações depois do envio inválidas.' }
 }
 
 /** Token e número da instância da conta — lidos com service role DEPOIS de getConta(). */

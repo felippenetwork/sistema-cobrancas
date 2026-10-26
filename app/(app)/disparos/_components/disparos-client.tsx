@@ -8,7 +8,8 @@ import {
 } from '../_actions'
 import { quotaDoDia } from '@/lib/disparo/progressivo'
 import { ProgressivoForm } from './progressivo-form'
-import { EtiquetasCampo, type EtiquetaEscolhida } from './etiquetas-campo'
+import { AcoesEditor } from './acoes-editor'
+import { acoesLegadas, descreverAcao, lerAcoes, type Acao } from '@/lib/disparo/acoes'
 import { ModeloEscolha, type ModeloDisparo as Modelo } from './modelo-escolha'
 import { FluxoEscolha, type FluxoDisparo } from './fluxo-escolha'
 
@@ -38,6 +39,7 @@ type Campanha = {
   passos: unknown[] | null
   etiqueta_adicionar_nome: string | null
   etiqueta_remover_nome: string | null
+  acoes: unknown
   modelos_wa: { nome: string; status: string } | null
 }
 
@@ -100,9 +102,9 @@ function ModalNovaCampanha({
   const [enviando, setEnviando]         = useState(false)
   const [enviada, setEnviada]           = useState(false)
   const [pulados, setPulados]           = useState(0)
-  const [etqAdicionar, setEtqAdd]       = useState<EtiquetaEscolhida>(null)
-  const [etqRemover, setEtqRem]         = useState<EtiquetaEscolhida>(null)
-  const [modeloId, setModeloId]         = useState(modelos.length === 1 ? modelos[0].id : '')
+  const [acoes, setAcoes]               = useState<Acao[]>(modelos.length === 1 ? modelos[0].acoes : [])
+  const [modeloId, setModeloIdBruto]    = useState(modelos.length === 1 ? modelos[0].id : '')
+  const setModeloId = (id: string) => { setModeloIdBruto(id); setAcoes(modelos.find(m => m.id === id)?.acoes ?? []) }
   const [fluxoId, setFluxoId]           = useState('')
 
   const clientesFiltrados = clientes.filter(c => {
@@ -236,7 +238,7 @@ function ModalNovaCampanha({
             </div>
             <div className="space-y-2">
               <FluxoEscolha id="camp-fluxo" name="fluxo_id" fluxos={fluxos} valor={fluxoId} onChange={setFluxoId} />
-              <EtiquetasCampo nomeCampo adicionar={etqAdicionar} remover={etqRemover} onAdicionar={setEtqAdd} onRemover={setEtqRem} />
+              <AcoesEditor name="acoes" acoes={acoes} onChange={setAcoes} ajuda="O que fazer na conversa de cada cliente depois que as mensagens saem, nesta ordem. Vem do modelo; mudar aqui vale só para este disparo." />
               <OpcaoRegistro name="registrar_enviados" defaultChecked titulo="Registrar quem receber"
                 descricao="Guarda cada número que recebeu, para os próximos disparos poderem pular." />
               <OpcaoRegistro name="excluir_ja_enviados" titulo="Não enviar para quem já recebeu"
@@ -435,13 +437,13 @@ export function DisparosClient({
                           {c.passos && c.passos.length > 1 && `${c.passos.length} mensagens por contato`}
                         </p>
                       )}
-                      {(c.etiqueta_adicionar_nome || c.etiqueta_remover_nome) && (
-                        <p className="mt-0.5 text-xs text-muted-foreground">
-                          Etiqueta:{c.etiqueta_adicionar_nome && ` põe "${c.etiqueta_adicionar_nome}"`}
-                          {c.etiqueta_adicionar_nome && c.etiqueta_remover_nome && ' ·'}
-                          {c.etiqueta_remover_nome && ` tira "${c.etiqueta_remover_nome}"`}
-                        </p>
-                      )}
+                      {(() => {
+                        const lista = lerAcoes(c.acoes)
+                        const acoesCard = lista.length ? lista : acoesLegadas({ etiqueta_adicionar: c.etiqueta_adicionar_nome, etiqueta_remover: c.etiqueta_remover_nome })
+                        return acoesCard.length > 0 && (
+                          <p className="mt-0.5 text-xs text-muted-foreground">Depois de enviar: {acoesCard.map(descreverAcao).join(' → ')}</p>
+                        )
+                      })()}
 
                       {/* Estatísticas */}
                       <div className="mt-2 flex flex-wrap items-center gap-4 text-xs text-muted-foreground">

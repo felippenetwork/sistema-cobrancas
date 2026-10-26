@@ -8,12 +8,14 @@ import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { getConta } from '@/lib/conta'
 import { pastaDaConta, resumoDosPassos, schemaPassos } from '@/lib/disparo/passos'
+import { schemaAcoes } from '@/lib/disparo/acoes'
 
 type Result = { error: string | null; id?: string }
 
 const schemaModelo = z.object({
   nome:   z.string().trim().min(1, 'Informe o nome do modelo.').max(80, 'Nome muito longo (máximo 80 caracteres).'),
   passos: schemaPassos,
+  acoes:  schemaAcoes.default([]),
 })
 
 export type ModeloEntrada = z.input<typeof schemaModelo>
@@ -26,7 +28,7 @@ function colunasDoModelo(input: ModeloEntrada, contaId: string) {
   if (passos.some(p => p.tipo !== 'texto' && !p.caminho.startsWith(pastaDaConta(contaId)))) {
     return { erro: 'Arquivo de mídia inválido. Envie o arquivo de novo.' }
   }
-  return { colunas: { nome: parsed.data.nome, passos, corpo: resumoDosPassos(passos) } }
+  return { colunas: { nome: parsed.data.nome, passos, corpo: resumoDosPassos(passos), acoes: parsed.data.acoes } }
 }
 
 export async function criarModeloAction(input: ModeloEntrada): Promise<Result> {

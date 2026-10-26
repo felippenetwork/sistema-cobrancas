@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { passosDoModelo } from '@/lib/disparo/passos'
+import { lerAcoes } from '@/lib/disparo/acoes'
 import { DisparosClient } from './_components/disparos-client'
 
 export const dynamic = 'force-dynamic'
@@ -28,7 +29,7 @@ export default async function DisparosPage() {
         id, nome, status, tipo, total_destinatarios, total_enviados, total_falhas, total_pulados,
         agendado_para, iniciado_em, concluido_em, criado_em,
         janela_inicio, janela_fim, prog_inicio, prog_maximo, prog_dia, prog_planejado_em,
-        registrar_enviados, excluir_ja_enviados, passos, etiqueta_adicionar_nome, etiqueta_remover_nome,
+        registrar_enviados, excluir_ja_enviados, passos, etiqueta_adicionar_nome, etiqueta_remover_nome, acoes,
         modelos_wa(nome, status)
       `)
       .eq('conta_id', contaId)
@@ -36,7 +37,7 @@ export default async function DisparosPage() {
       .limit(50),
     supabase
       .from('modelos_wa')
-      .select('id, nome, corpo, passos')
+      .select('id, nome, corpo, passos, acoes')
       .eq('conta_id', contaId)
       .order('nome'),
     supabase
@@ -59,7 +60,7 @@ export default async function DisparosPage() {
       modelos={(modelos ?? []).flatMap(m => {
         // Só modelos com mensagem válida aparecem para escolha.
         const passos = passosDoModelo(m)
-        return passos ? [{ id: m.id, nome: m.nome, passos }] : []
+        return passos ? [{ id: m.id, nome: m.nome, passos, acoes: lerAcoes(m.acoes) }] : []
       })}
       clientes={clientes ?? []}
       fluxos={fluxos ?? []}

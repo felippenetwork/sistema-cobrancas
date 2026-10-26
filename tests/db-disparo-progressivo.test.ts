@@ -107,6 +107,19 @@ describe('0040: modelo com sequência de mensagens', () => {
   })
 })
 
+describe('0043: ações depois do envio', () => {
+  it('modelo e disparo nascem sem ações; aceita a lista e recusa mais de 15', async () => {
+    const m = await db.sql<{ id: string; acoes: unknown }>(`insert into public.modelos_wa (conta_id, nome, corpo) values ($1, 'M', 'oi') returning id, acoes`, [contaA])
+    expect(m.rows[0].acoes).toEqual([])
+    const c = await inserirCampanha(contaA, ', acoes', `, '[{"tipo":"arquivar"},{"tipo":"etiquetas_tirar_todas"}]'::jsonb`)
+    expect(c.rows).toHaveLength(1)
+    const demais = await inserirCampanha(contaA, ', acoes', `, '${JSON.stringify(Array(16).fill({ tipo: 'arquivar' }))}'::jsonb`).then(() => 'aceitou', () => 'recusou')
+    expect(demais).toBe('recusou')
+    const naoLista = await db.sql(`update public.modelos_wa set acoes = '{}'::jsonb where id = $1`, [m.rows[0].id]).then(() => 'aceitou', () => 'recusou')
+    expect(naoLista).toBe('recusou')
+  })
+})
+
 describe('contatos_disparados', () => {
   it('o dono vê os números da própria conta', async () => {
     const r = await db.como(donoA).query(`select celular, nome from public.contatos_disparados`)
