@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { ArrowDown, ArrowUp, FileText, Image as ImageIcon, Loader2, Mic, Paperclip, Plus, Trash2, Type, Video } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { BUCKET_MIDIA, MAX_PASSOS, TAMANHO_MAX_MIDIA, TIPOS_MIDIA, digitacaoPadrao, type Passo, type TipoMidia } from '@/lib/disparo/passos'
@@ -67,9 +67,65 @@ function Digitacao({ passo, primeiro, onChange }: { passo: PassoEditavel; primei
   )
 }
 
-function CampoMidia({ passo, onChange }: {
+type Variavel = { token: string; rotulo: string }
+
+/** Botões que põem a variável onde está o cursor (pedido do Felippe, 2026-10-26). */
+const VARIAVEIS_FIXAS: Variavel[] = [
+  { token: '{{nome}}', rotulo: 'Nome' },
+  { token: '{{periododia}}', rotulo: 'Bom dia/tarde/noite' },
+]
+
+/**
+ * Campo de texto com os botões de variável embaixo. O clique insere no ponto do cursor (ou no
+ * fim, se o campo ainda não foi clicado), com espaço antes quando a palavra anterior está colada.
+ */
+function CampoComVariaveis({ valor, onChange, multilinha, extras, ...campo }: {
+  valor: string
+  onChange: (v: string) => void
+  multilinha: boolean
+  extras: string[]
+  rows?: number
+  maxLength: number
+  placeholder: string
+  'aria-label': string
+}) {
+  const ref = useRef<HTMLTextAreaElement & HTMLInputElement>(null)
+  const variaveis = [...VARIAVEIS_FIXAS, ...extras.map(v => ({ token: `{{${v}}}`, rotulo: v }))]
+
+  function inserir(token: string) {
+    const el = ref.current
+    const inicio = el?.selectionStart ?? valor.length
+    const fim = el?.selectionEnd ?? inicio
+    const antes = valor.slice(0, inicio)
+    const texto = (antes && !/\s$/.test(antes) ? ' ' : '') + token
+    const novo = (antes + texto + valor.slice(fim)).slice(0, campo.maxLength)
+    onChange(novo)
+    const cursor = Math.min(antes.length + texto.length, novo.length)
+    requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(cursor, cursor) })
+  }
+
+  const props = { ...campo, ref, value: valor, onChange: (e: React.ChangeEvent<HTMLTextAreaElement | HTMLInputElement>) => onChange(e.target.value) }
+  return (
+    <div className="space-y-1.5">
+      {multilinha ? <textarea {...props} className={INPUT + ' resize-y'} /> : <input {...props} className={INPUT} />}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="text-[11px] text-muted-foreground">Inserir:</span>
+        {variaveis.map(v => (
+          <button key={v.token} type="button" onMouseDown={e => e.preventDefault()} onClick={() => inserir(v.token)}
+            aria-label={`Inserir ${v.rotulo} no texto`}
+            className="flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground transition hover:border-primary hover:text-foreground">
+            <Plus className="h-3 w-3" /> {v.rotulo}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function CampoMidia({ passo, onChange, extras }: {
   passo: Extract<PassoEditavel, { caminho: string | null }>
   onChange: (p: Partial<Extract<PassoEditavel, { caminho: string | null }>>) => void
+  extras: string[]
 }) {
   const [enviando, setEnviando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
@@ -104,14 +160,19 @@ function CampoMidia({ passo, onChange }: {
       </label>
       {erro && <p role="alert" className="text-xs text-destructive">{erro}</p>}
       {passo.tipo !== 'audio' && (
-        <input value={passo.legenda} onChange={e => onChange({ legenda: e.target.value })} maxLength={1024}
-          placeholder="Legenda (opcional) — aceita {{nome}} e {{periododia}}" aria-label="Legenda" className={INPUT} />
+        <CampoComVariaveis multilinha={false} extras={extras} valor={passo.legenda} onChange={v => onChange({ legenda: v })} maxLength={1024}
+          placeholder="Legenda (opcional)" aria-label="Legenda" />
       )}
     </div>
   )
 }
 
-export function PassosEditor({ passos, onChange }: { passos: PassoEditavel[]; onChange: (p: PassoEditavel[]) => void }) {
+export function PassosEditor({ passos, onChange, variaveis = [] }: {
+  passos: PassoEditavel[]
+  onChange: (p: PassoEditavel[]) => void
+  /** Respostas guardadas (chatbot) que também viram botão de inserir. */
+  variaveis?: string[]
+}) {
   const atualizar = (i: number, patch: Partial<PassoEditavel>) =>
     onChange(passos.map((p, j) => (j === i ? ({ ...p, ...patch } as PassoEditavel) : p)))
   const mover = (i: number, d: -1 | 1) => {
@@ -143,13 +204,15 @@ export function PassosEditor({ passos, onChange }: { passos: PassoEditavel[]; on
 
             {p.tipo === 'texto' ? (
               <>
-                <textarea value={p.texto} onChange={e => atualizar(i, { texto: e.target.value })} rows={3} maxLength={4000}
-                  aria-label={`Texto da mensagem ${i + 1}`} placeholder="{{periododia}}, {{nome}}! Tudo bem? …" className={INPUT + ' resize-y'} />
+                <CampoComVariaveis multilinha rows={3} maxLength={4000} extras={variaveis} valor={p.texto} onChange={v => atualizar(i, { texto: v })}
+                  aria-label={`Texto da mensagem ${i + 1}`} placeholder="{{periododia}}, {{nome}}! Tudo bem? …" />
                 {p.variacoes.map((v, k) => (
                   <div key={k} className="flex gap-2">
-                    <textarea value={v} rows={2} maxLength={4000} aria-label={`Variação ${k + 1} da mensagem ${i + 1}`}
-                      onChange={e => atualizar(i, { variacoes: p.variacoes.map((x, j) => (j === k ? e.target.value : x)) })}
-                      placeholder={`Variação ${k + 1} — outro jeito de dizer o mesmo`} className={INPUT + ' resize-y'} />
+                    <div className="min-w-0 flex-1">
+                      <CampoComVariaveis multilinha rows={2} maxLength={4000} extras={variaveis} valor={v} aria-label={`Variação ${k + 1} da mensagem ${i + 1}`}
+                        onChange={nv => atualizar(i, { variacoes: p.variacoes.map((x, j) => (j === k ? nv : x)) })}
+                        placeholder={`Variação ${k + 1} — outro jeito de dizer o mesmo`} />
+                    </div>
                     <button type="button" onClick={() => atualizar(i, { variacoes: p.variacoes.filter((_, j) => j !== k) })}
                       aria-label={`Remover variação ${k + 1}`} className="h-10 shrink-0 rounded-lg px-2 text-muted-foreground hover:bg-accent hover:text-foreground">
                       <Trash2 className="h-4 w-4" />
@@ -164,7 +227,7 @@ export function PassosEditor({ passos, onChange }: { passos: PassoEditavel[]; on
                 )}
               </>
             ) : (
-              <CampoMidia passo={p} onChange={patch => atualizar(i, patch)} />
+              <CampoMidia passo={p} extras={variaveis} onChange={patch => atualizar(i, patch)} />
             )}
           </div>
         </div>

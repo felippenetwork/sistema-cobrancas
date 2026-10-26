@@ -5,7 +5,7 @@
 // opção, a resposta dela — e convertida para as etapas do robô só na hora de salvar
 // (lib/chatbot/arvore.ts). Ao lado, o simulador mostra a conversa com as regras do robô de verdade.
 
-import { useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ArrowLeft, Check, Flag, List, Loader2, MessageCircleQuestion, MessageSquare, Plus, RotateCcw, Tag, Trash2, UserRound, X } from 'lucide-react'
@@ -66,6 +66,14 @@ const nomeDoNo = (n: NoTela) => {
   const p = n.passos[0]
   if (!p) return 'Mensagem'
   return p.tipo === 'texto' ? (p.texto.trim().split('\n')[0] || 'Mensagem').slice(0, 50) : p.nome_arquivo ?? 'Mídia'
+}
+
+/** Respostas guardadas nas perguntas da automação: viram botão de inserir em todas as mensagens. */
+const VariaveisDaAutomacao = createContext<string[]>([])
+
+function respostasGuardadas(no: NoTela): string[] {
+  const filhos = [...no.opcoes.map(o => o.cont), no.aposPergunta].flatMap(c => (c.resposta ? respostasGuardadas(c.resposta) : []))
+  return [...new Set([...(no.depois === 'pergunta' && no.guardarComo ? [no.guardarComo] : []), ...filhos])]
 }
 
 const listaDePalavras = (texto: string) => texto.split(/[,\n]/).map(p => p.trim()).filter(Boolean)
@@ -216,13 +224,14 @@ function ContinuacoesDe({ no, onChange, nivel }: { no: NoTela; onChange: (n: NoT
 function NoEditor({ no, onChange, nivel, raiz = false, semRespostas = false }: {
   no: NoTela; onChange: (n: NoTela) => void; nivel: number; raiz?: boolean; semRespostas?: boolean
 }) {
+  const variaveis = useContext(VariaveisDaAutomacao)
   const mudarDepois = (depois: Depois) => onChange({
     ...no, depois,
     opcoes: depois === 'menu' && !no.opcoes.length ? [{ rotulo: '', cont: continuacaoFim() }, { rotulo: '', cont: continuacaoFim() }] : no.opcoes,
   })
   return (
     <div className="space-y-4">
-      <PassosEditor passos={no.passos} onChange={p => onChange({ ...no, passos: p })} />
+      <PassosEditor passos={no.passos} onChange={p => onChange({ ...no, passos: p })} variaveis={variaveis} />
       <div className="space-y-2">
         <p className={LABEL}>Depois dessa mensagem</p>
         <Escolha rotulo="Depois dessa mensagem" valor={no.depois} opcoes={raiz ? DEPOIS.filter(d => d.valor !== 'inicio') : DEPOIS} onChange={mudarDepois} />
@@ -348,6 +357,7 @@ export function FluxoEditor({ fluxoId, inicial }: { fluxoId: string | null; inic
       )}
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+        <VariaveisDaAutomacao.Provider value={respostasGuardadas(raiz)}>
         <form onSubmit={avancar} className="min-w-0 space-y-5">
           {passo === 0 && (
             <>
@@ -520,6 +530,7 @@ export function FluxoEditor({ fluxoId, inicial }: { fluxoId: string | null; inic
             </button>
           </div>
         </form>
+        </VariaveisDaAutomacao.Provider>
 
         {/* Simulador: ao lado no computador, em painel no celular */}
         <aside className="hidden lg:block">
