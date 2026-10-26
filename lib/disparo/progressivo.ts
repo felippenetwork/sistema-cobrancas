@@ -105,16 +105,32 @@ export function periodoDoDia(agora: Date = new Date()): string {
 }
 
 /**
+ * Jeitos de escrever cada saudação (pedido do Felippe, 2026-10-26): cada contato recebe um, em
+ * rodízio pela posição — assim a mesma mensagem não sai idêntica para todo mundo.
+ */
+export const VARIACOES_PERIODO: Record<string, string[]> = {
+  'Bom dia':   ['Bom dia', 'Bom diaa', 'Boom dia', 'Bom diaaa', 'Boom diaa'],
+  'Boa tarde': ['Boa tarde', 'Boa tardee', 'Boaa tarde', 'Boa tardeee', 'Boaa tardee'],
+  'Boa noite': ['Boa noite', 'Boa noitee', 'Boaa noite', 'Boa noiteee', 'Boaa noitee'],
+}
+
+/** Saudação do período para o contato de posição `indice` (uma das variações, em rodízio). */
+export function saudacaoDoPeriodo(agora: Date, indice: number): string {
+  const opcoes = VARIACOES_PERIODO[periodoDoDia(agora)]
+  return opcoes[Math.abs(indice) % opcoes.length]
+}
+
+/**
  * Texto do contato de posição `indice`: alterna entre a mensagem e as variações (rodízio, para
  * não repetir o mesmo texto em sequência) e troca {{nome}} pelo nome do contato — some com ele
  * (e com o espaço que sobrar antes da pontuação) quando o contato não tem nome. {{periododia}}
- * vira a saudação da hora do ENVIO; maiúscula no começo da frase, minúscula no meio
- * ("Bom dia, Maria!" / "Oi Maria, bom dia!").
+ * vira a saudação da hora do ENVIO, numa das grafias de VARIACOES_PERIODO; maiúscula no começo
+ * da frase, minúscula no meio ("Bom diaa, Maria!" / "Oi Maria, boom dia!").
  */
 export function montarTexto(mensagem: string, variacoes: string[], indice: number, nome: string | null, agora: Date = new Date()): string {
   const textos = [mensagem, ...variacoes].filter(t => t.trim())
   const base = textos.length ? textos[Math.abs(indice) % textos.length] : ''
-  const saudacao = periodoDoDia(agora)
+  const saudacao = saudacaoDoPeriodo(agora, indice)
   return base
     .replace(/(^|[.!?\n]\s*)?\{\{\s*periododia\s*\}\}/gi, (_, inicio: string | undefined, pos: number) =>
       inicio !== undefined || pos === 0 ? `${inicio ?? ''}${saudacao}` : saudacao.toLowerCase())
