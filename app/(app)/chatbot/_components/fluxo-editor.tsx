@@ -11,7 +11,7 @@ import { useRouter } from 'next/navigation'
 import { ArrowLeft, Check, Flag, List, Loader2, MessageCircleQuestion, MessageSquare, Plus, RotateCcw, Tag, Trash2, UserRound, X } from 'lucide-react'
 import type { UazapiEtiqueta } from '@/lib/uazapi'
 import type { Etapa } from '@/lib/chatbot/fluxo'
-import { MAX_OPCOES } from '@/lib/chatbot/fluxo'
+import { MAX_OPCOES, QUALQUER_MENSAGEM } from '@/lib/chatbot/fluxo'
 import { arvoreParaEtapas, continuacaoFim, etapasParaArvore, mapearArvore, type Acao, type Continuacao, type Depois, type No } from '@/lib/chatbot/arvore'
 import { listarEtiquetasAction } from '../../disparos/_actions'
 import { PassosEditor, novoPasso, paraEditavel, paraEnvio, type PassoEditavel } from '../../disparos/_components/passos-editor'
@@ -247,7 +247,9 @@ export function FluxoEditor({ fluxoId, inicial }: { fluxoId: string | null; inic
   const [nome, setNome]                 = useState(inicial?.nome ?? '')
   const [ativo, setAtivo]               = useState(inicial?.ativo ?? true)
   const [raiz, setRaiz]                 = useState<NoTela>(raizInicial)
-  const [palavras, setPalavras]         = useState((inicial?.gatilhoPalavras ?? ['menu']).join(', '))
+  const [palavras, setPalavras]         = useState((inicial?.gatilhoPalavras ?? ['menu']).filter(p => p !== QUALQUER_MENSAGEM).join(', '))
+  const [qualquer, setQualquer]         = useState(inicial?.gatilhoPalavras.includes(QUALQUER_MENSAGEM) ?? false)
+  const palavrasGatilho = qualquer ? [QUALQUER_MENSAGEM] : listaDePalavras(palavras)
   const [gatEtiquetas, setGatEtiquetas] = useState<EtiquetaSel[]>(inicial?.gatilhoEtiquetas ?? [])
   const [excEtiquetas, setExcEtiquetas] = useState<EtiquetaSel[]>(inicial?.excluirEtiquetas ?? [])
   const [palavrasHumano, setPalHumano]  = useState((inicial?.palavrasHumano ?? ['atendente', 'humano']).join(', '))
@@ -280,7 +282,7 @@ export function FluxoEditor({ fluxoId, inicial }: { fluxoId: string | null; inic
   const etapasSalvar = etapas.map(e => ({ ...e, passos: paraEnvio(e.passos) }))
   const fluxoSimulado = {
     id: fluxoId ?? 'novo', nome: nome || 'Automação', etapas: etapasSalvar as Etapa[],
-    gatilho_palavras: listaDePalavras(palavras), gatilho_etiquetas: [], excluir_etiquetas: [],
+    gatilho_palavras: palavrasGatilho, gatilho_etiquetas: [], excluir_etiquetas: [],
     palavras_humano: listaDePalavras(palavrasHumano), msg_nao_entendi: msgNaoEntendi, msg_humano: msgHumano,
     aviso_numero: avisoNumero.replace(/\D/g, '') || null,
     boas_vindas: boasVindas, boas_vindas_clientes: bvClientes,
@@ -293,7 +295,7 @@ export function FluxoEditor({ fluxoId, inicial }: { fluxoId: string | null; inic
     setSalvando(true)
     const r = await salvarFluxoAction(fluxoId, {
       nome, ativo, etapas: etapasSalvar,
-      gatilhoPalavras: listaDePalavras(palavras), gatilhoEtiquetas: gatEtiquetas, excluirEtiquetas: excEtiquetas,
+      gatilhoPalavras: palavrasGatilho, gatilhoEtiquetas: gatEtiquetas, excluirEtiquetas: excEtiquetas,
       palavrasHumano: listaDePalavras(palavrasHumano), msgNaoEntendi, msgHumano, avisoNumero,
       boasVindas, boasVindasClientes: bvClientes,
     })
@@ -310,7 +312,7 @@ export function FluxoEditor({ fluxoId, inicial }: { fluxoId: string | null; inic
     else void salvar()
   }
 
-  const semComeco = !listaDePalavras(palavras).length && !gatEtiquetas.length && !boasVindas
+  const semComeco = !palavrasGatilho.length && !gatEtiquetas.length && !boasVindas
 
   return (
     <div className="mx-auto max-w-6xl p-4 md:p-6">
@@ -362,9 +364,26 @@ export function FluxoEditor({ fluxoId, inicial }: { fluxoId: string | null; inic
                   <p className={AJUDA}>Pode usar um ou mais jeitos. Fora disso, o robô não responde ninguém.</p>
                 </div>
                 <div>
-                  <label htmlFor="auto-palavras" className="mb-1 block text-sm font-medium text-foreground">alguém manda a palavra</label>
-                  <input id="auto-palavras" value={palavras} onChange={e => setPalavras(e.target.value)} placeholder="menu, quero, oi" className={INPUT} />
-                  <p className={AJUDA}>Separe por vírgula. A mensagem precisa ser só a palavra (&quot;Menu&quot;, &quot;menu!&quot; valem; &quot;quero ver o menu&quot; não).</p>
+                  <p className="mb-2 text-sm font-medium text-foreground">alguém manda uma mensagem</p>
+                  <div role="radiogroup" aria-label="Que mensagem começa a automação" className="mb-2 flex flex-wrap gap-2">
+                    {([[false, 'Só estas palavras'], [true, 'Qualquer mensagem']] as const).map(([valor, rotulo]) => (
+                      <button key={rotulo} type="button" role="radio" aria-checked={qualquer === valor} onClick={() => setQualquer(valor)}
+                        className={`rounded-xl border px-3 py-2 text-sm transition ${qualquer === valor ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+                        {rotulo}
+                      </button>
+                    ))}
+                  </div>
+                  {qualquer ? (
+                    <p className={AJUDA}>
+                      Qualquer coisa que a pessoa mandar começa a conversa, inclusive quem é cliente respondendo uma cobrança.
+                      Depois que a conversa termina, o robô espera 24h para começar de novo com a mesma pessoa.
+                    </p>
+                  ) : (
+                    <>
+                      <input id="auto-palavras" aria-label="Palavras que começam a automação" value={palavras} onChange={e => setPalavras(e.target.value)} placeholder="menu, quero, oi" className={INPUT} />
+                      <p className={AJUDA}>Separe por vírgula. A mensagem precisa ser só a palavra (&quot;Menu&quot;, &quot;menu!&quot; valem; &quot;quero ver o menu&quot; não).</p>
+                    </>
+                  )}
                 </div>
                 <div>
                   <p className="mb-1 flex items-center gap-1.5 text-sm font-medium text-foreground"><Tag className="h-3.5 w-3.5 text-muted-foreground" /> alguém com a etiqueta manda mensagem</p>

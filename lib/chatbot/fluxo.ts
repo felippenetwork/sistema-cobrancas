@@ -22,6 +22,9 @@ export const MAX_NAO_ENTENDI = 3
 /** Quantas etapas "seguir" podem ser encadeadas numa mesma resposta (evita laço infinito). */
 export const MAX_ENCADEADAS = 10
 
+/** Na lista de palavras, esta marca quer dizer "qualquer mensagem" começa a automação. */
+export const QUALQUER_MENSAGEM = '*'
+
 export const PALAVRAS_SAIR = ['sair', 'parar', 'pare', 'stop', 'descadastrar']
 export const MSG_SAIR = 'Pronto, você não vai mais receber nossas mensagens. Se mudar de ideia, é só nos chamar.'
 
@@ -183,7 +186,7 @@ export type Entrada = {
   ehCliente?: boolean | null
 }
 
-export type Gatilho = 'palavra' | 'disparo' | 'etiqueta' | 'boas_vindas'
+export type Gatilho = 'palavra' | 'disparo' | 'etiqueta' | 'boas_vindas' | 'qualquer'
 
 export type Decisao =
   | { tipo: 'ignorar'; motivo: string }
@@ -227,7 +230,7 @@ function excluido(f: FluxoAtivo, etiquetas: string[] | null): boolean {
  */
 function gatilho(e: Entrada): { fluxo: FluxoAtivo; gatilho: Gatilho } | null {
   const validos = e.fluxos.filter(f => f.etapas.length && !excluido(f, e.etiquetas))
-  const porPalavra = validos.find(f => ehUmaDas(e.texto, f.gatilho_palavras))
+  const porPalavra = validos.find(f => ehUmaDas(e.texto, f.gatilho_palavras.filter(p => p !== QUALQUER_MENSAGEM)))
   if (porPalavra) return { fluxo: porPalavra, gatilho: 'palavra' }
   const porDisparo = validos.find(f => f.id === e.fluxoDoDisparo)
   if (porDisparo) return { fluxo: porDisparo, gatilho: 'disparo' }
@@ -236,6 +239,9 @@ function gatilho(e: Entrada): { fluxo: FluxoAtivo; gatilho: Gatilho } | null {
   if (porEtiqueta) return { fluxo: porEtiqueta, gatilho: 'etiqueta' }
   const porBoasVindas = validos.find(f => boasVindasValem(f, e))
   if (porBoasVindas) return { fluxo: porBoasVindas, gatilho: 'boas_vindas' }
+  // "Qualquer mensagem": a mesma pausa de 24h da etiqueta, senão o "obrigado" do fim recomeça tudo.
+  const porQualquer = recente ? undefined : validos.find(f => f.gatilho_palavras.includes(QUALQUER_MENSAGEM))
+  if (porQualquer) return { fluxo: porQualquer, gatilho: 'qualquer' }
   return null
 }
 
@@ -398,7 +404,7 @@ export function planejar(d: Exclude<Decisao, { tipo: 'ignorar' }>, c: { etapa_id
   const percurso = percorrer(d.fluxo, inicio)
   const comum = { fluxo_id: d.fluxo.id, variaveis, nao_entendi: 0, ...(d.tipo === 'iniciar' ? { iniciado_em: true as const, fluxo_recebido: d.fluxo.id } : {}) }
   const evento = d.tipo === 'iniciar'
-    ? `Entrou na automação "${d.fluxo.nome}" (${{ palavra: 'mandou a palavra', disparo: 'respondeu ao disparo', etiqueta: 'tem a etiqueta', boas_vindas: 'primeira mensagem' }[d.gatilho]}).`
+    ? `Entrou na automação "${d.fluxo.nome}" (${{ palavra: 'mandou a palavra', disparo: 'respondeu ao disparo', etiqueta: 'tem a etiqueta', boas_vindas: 'primeira mensagem', qualquer: 'mandou mensagem' }[d.gatilho]}).`
     : null
   const envios = percurso.enviar.map(e => ({ etapaId: e.id, passos: passosDaEtapa(e) }))
   const depois = percurso.depois

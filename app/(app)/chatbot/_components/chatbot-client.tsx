@@ -113,7 +113,8 @@ export function ChatbotClient({ conectado, recebimentoLigado, fluxos, conversas 
           <div className="space-y-3">
             {fluxos.map(f => {
               const gatilhos = [
-                f.palavras.length ? `começa com: ${f.palavras.slice(0, 3).join(', ')}${f.palavras.length > 3 ? '…' : ''}` : null,
+                f.palavras.includes('*') ? 'começa com qualquer mensagem'
+                  : f.palavras.length ? `começa com: ${f.palavras.slice(0, 3).join(', ')}${f.palavras.length > 3 ? '…' : ''}` : null,
                 f.etiquetas.length ? `etiqueta: ${f.etiquetas.join(', ')}` : null,
                 f.boasVindas ? (f.boasVindas === 'todos' ? 'boas-vindas para todos (1 vez)' : 'boas-vindas para quem não é cliente (1 vez)') : null,
               ].filter(Boolean)

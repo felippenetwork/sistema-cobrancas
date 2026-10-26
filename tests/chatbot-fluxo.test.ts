@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   aplicarVariaveis, decidir, ehUmaDas, escolherOpcao, MAX_NAO_ENTENDI, normalizar, passosDaEtapa, percorrer, planejar,
-  precisaDeEtiquetas, precisaSaberSeECliente, schemaEtapas, temEtiqueta,
+  precisaDeEtiquetas, precisaSaberSeECliente, QUALQUER_MENSAGEM, schemaEtapas, temEtiqueta,
   type EstadoConversa, type Etapa, type FluxoAtivo,
 } from '@/lib/chatbot/fluxo'
 
@@ -116,6 +116,33 @@ describe('gatilhos (sem conversa)', () => {
     expect(precisaDeEtiquetas(base)).toBe(false)
     expect(precisaDeEtiquetas({ ...base, fluxos: [fluxo({ excluir_etiquetas: ['1'] })] })).toBe(true)
     expect(precisaDeEtiquetas({ ...base, fluxos: [fluxo({ excluir_etiquetas: ['1'] })], conversa: conversa() })).toBe(false)
+  })
+})
+
+describe('"qualquer mensagem" começa a automação', () => {
+  const qualquer = [fluxo({ gatilho_palavras: [QUALQUER_MENSAGEM] })]
+
+  it('qualquer coisa que a pessoa mandar começa, sem conversa antes', () => {
+    expect(decidir(entrada('Boa tarde, tudo bem?', { fluxos: qualquer }))).toMatchObject({ tipo: 'iniciar', gatilho: 'qualquer' })
+  })
+
+  it('não atropela a conversa em andamento: a resposta vale para o menu', () => {
+    expect(decidir(entrada('1', { fluxos: qualquer, conversa: conversa() }))).toMatchObject({ tipo: 'avancar', etapaId: 'planos' })
+  })
+
+  it('depois que a conversa termina, espera 24h para começar de novo', () => {
+    const recem = conversa({ status: 'encerrada', etapa_id: null, atualizado_em: '2026-10-26T14:00:00Z' })
+    expect(decidir(entrada('obrigado', { fluxos: qualquer, conversa: recem }))).toMatchObject({ tipo: 'ignorar' })
+    const antiga = conversa({ status: 'encerrada', etapa_id: null, atualizado_em: '2026-10-25T14:00:00Z' })
+    expect(decidir(entrada('oi', { fluxos: qualquer, conversa: antiga }))).toMatchObject({ tipo: 'iniciar', gatilho: 'qualquer' })
+  })
+
+  it('mandar "*" não vira palavra-chave que recomeça no meio da conversa', () => {
+    expect(decidir(entrada('*', { fluxos: qualquer, conversa: conversa({ etapa_id: 'cidade' }) }))).toMatchObject({ tipo: 'avancar' })
+  })
+
+  it('palavra-chave de outra automação ganha de "qualquer mensagem"', () => {
+    expect(decidir(entrada('menu', { fluxos: [...qualquer.map(f => ({ ...f, id: 'q' })), fluxo({ id: 'p' })] }))).toMatchObject({ fluxo: { id: 'p' }, gatilho: 'palavra' })
   })
 })
 
