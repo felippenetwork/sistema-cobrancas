@@ -179,7 +179,7 @@ function ModeloSheet({ modelo, onClose, onSalvo }: {
             <p className={LABEL + ' mb-0'}>Mensagens, na ordem em que chegam</p>
             <PassosEditor passos={passos} onChange={setPassos} />
             <p className="mt-2 text-xs text-muted-foreground">
-              <code className="rounded bg-muted px-1">{'{{nome}}'}</code> vira o nome do contato (some da frase se não houver).
+              <code className="rounded bg-muted px-1">{'{{nome}}'}</code> vira o nome do contato (some da frase se não houver) e <code className="rounded bg-muted px-1">{'{{periododia}}'}</code> vira Bom dia, Boa tarde ou Boa noite pela hora em que a mensagem sai.
               Cada contato leva cerca de <span className="tabular-nums">{segundos}</span> s entre digitação e envios.
             </p>
           </section>

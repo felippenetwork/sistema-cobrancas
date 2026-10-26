@@ -94,14 +94,30 @@ export function interpretarLista(texto: string): { contatos: ContatoLista[]; inv
 // ── Texto da mensagem ─────────────────────────────────────────────────────────
 
 /**
+ * Saudação pela hora em São Paulo (pedido do Felippe, 2026-10-26): 05:00–11:59 "Bom dia",
+ * 12:00–17:59 "Boa tarde", 18:00–04:59 "Boa noite".
+ */
+export function periodoDoDia(agora: Date = new Date()): string {
+  const hora = Number(agora.toLocaleString('en-GB', { timeZone: 'America/Sao_Paulo', hour: '2-digit', hour12: false })) % 24
+  if (hora >= 5 && hora < 12) return 'Bom dia'
+  if (hora >= 12 && hora < 18) return 'Boa tarde'
+  return 'Boa noite'
+}
+
+/**
  * Texto do contato de posição `indice`: alterna entre a mensagem e as variações (rodízio, para
  * não repetir o mesmo texto em sequência) e troca {{nome}} pelo nome do contato — some com ele
- * (e com o espaço que sobrar antes da pontuação) quando o contato não tem nome.
+ * (e com o espaço que sobrar antes da pontuação) quando o contato não tem nome. {{periododia}}
+ * vira a saudação da hora do ENVIO; maiúscula no começo da frase, minúscula no meio
+ * ("Bom dia, Maria!" / "Oi Maria, bom dia!").
  */
-export function montarTexto(mensagem: string, variacoes: string[], indice: number, nome: string | null): string {
+export function montarTexto(mensagem: string, variacoes: string[], indice: number, nome: string | null, agora: Date = new Date()): string {
   const textos = [mensagem, ...variacoes].filter(t => t.trim())
   const base = textos.length ? textos[Math.abs(indice) % textos.length] : ''
+  const saudacao = periodoDoDia(agora)
   return base
+    .replace(/(^|[.!?\n]\s*)?\{\{\s*periododia\s*\}\}/gi, (_, inicio: string | undefined, pos: number) =>
+      inicio !== undefined || pos === 0 ? `${inicio ?? ''}${saudacao}` : saudacao.toLowerCase())
     .replace(/\{\{\s*nome\s*\}\}/gi, nome?.trim() || '')
     .replace(/[ \t]+([,.!?])/g, '$1')
     .replace(/[ \t]{2,}/g, ' ')

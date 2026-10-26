@@ -435,7 +435,7 @@ export function FluxoEditor({ fluxoId, inicial }: { fluxoId: string | null; inic
               <div>
                 <h2 className="text-sm font-semibold text-foreground">Mensagem de boas-vindas</h2>
                 <p className={AJUDA}>
-                  É a primeira coisa que a pessoa recebe. <code className="rounded bg-muted px-1">{'{{nome}}'}</code> vira o nome dela no WhatsApp.
+                  É a primeira coisa que a pessoa recebe. <code className="rounded bg-muted px-1">{'{{nome}}'}</code> vira o nome dela no WhatsApp e <code className="rounded bg-muted px-1">{'{{periododia}}'}</code> vira Bom dia, Boa tarde ou Boa noite.
                   Dá para mandar mais de uma mensagem, com foto, vídeo, áudio ou documento.
                 </p>
               </div>

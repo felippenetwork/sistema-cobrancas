@@ -105,7 +105,7 @@ function CampoMidia({ passo, onChange }: {
       {erro && <p role="alert" className="text-xs text-destructive">{erro}</p>}
       {passo.tipo !== 'audio' && (
         <input value={passo.legenda} onChange={e => onChange({ legenda: e.target.value })} maxLength={1024}
-          placeholder="Legenda (opcional) — aceita {{nome}}" aria-label="Legenda" className={INPUT} />
+          placeholder="Legenda (opcional) — aceita {{nome}} e {{periododia}}" aria-label="Legenda" className={INPUT} />
       )}
     </div>
   )
@@ -144,7 +144,7 @@ export function PassosEditor({ passos, onChange }: { passos: PassoEditavel[]; on
             {p.tipo === 'texto' ? (
               <>
                 <textarea value={p.texto} onChange={e => atualizar(i, { texto: e.target.value })} rows={3} maxLength={4000}
-                  aria-label={`Texto da mensagem ${i + 1}`} placeholder="Oi {{nome}}, tudo bem? …" className={INPUT + ' resize-y'} />
+                  aria-label={`Texto da mensagem ${i + 1}`} placeholder="{{periododia}}, {{nome}}! Tudo bem? …" className={INPUT + ' resize-y'} />
                 {p.variacoes.map((v, k) => (
                   <div key={k} className="flex gap-2">
                     <textarea value={v} rows={2} maxLength={4000} aria-label={`Variação ${k + 1} da mensagem ${i + 1}`}
