@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Send, Plus, XCircle, CheckCircle, Clock, AlertCircle, Users, Loader2, Pause, Play, SkipForward, TrendingUp } from 'lucide-react'
+import { Send, Plus, XCircle, CheckCircle, Clock, AlertCircle, Users, Loader2, Pause, Play, SkipForward, TrendingUp, FileBarChart } from 'lucide-react'
 import {
   criarCampanhaAction, adicionarDestinatariosAction, enviarCampanhaAction,
   cancelarCampanhaAction, pausarCampanhaAction, retomarCampanhaAction,
@@ -10,6 +10,7 @@ import {
 import { dataSP, quotaDoDia } from '@/lib/disparo/progressivo'
 import { ProgressivoForm } from './progressivo-form'
 import { AcoesEditor } from './acoes-editor'
+import { RelatorioPainel } from './relatorio-painel'
 import { acoesLegadas, descreverAcao, lerAcoes, type Acao } from '@/lib/disparo/acoes'
 import { ModeloEscolha, type ModeloDisparo as Modelo } from './modelo-escolha'
 import { FluxoEscolha, type FluxoDisparo } from './fluxo-escolha'
@@ -402,6 +403,7 @@ export function DisparosClient({
 }) {
   const [modalNovo, setModalNovo] = useState(false)
   const [ocupado, setOcupado]     = useState<string | null>(null)
+  const [relatorio, setRelatorio] = useState<{ id: string; nome: string } | null>(null)
   const [erro, setErro]           = useState<string | null>(null)
 
   async function executar(id: string, acao: (id: string) => Promise<{ error: string | null }>, confirmar?: string) {
@@ -534,6 +536,16 @@ export function DisparosClient({
 
                     {/* Ações */}
                     <div className="flex shrink-0 gap-2">
+                      {(c.status === 'concluida' || c.status === 'cancelada') && (
+                        <button
+                          onClick={() => setRelatorio({ id: c.id, nome: c.nome })}
+                          aria-label={`Relatório de ${c.nome}`}
+                          className="flex items-center gap-1 rounded-xl border border-border px-3 py-2 text-xs text-foreground transition hover:border-primary"
+                        >
+                          <FileBarChart className="h-3.5 w-3.5" />
+                          <span>Relatório</span>
+                        </button>
+                      )}
                       {c.status === 'enviando' && (
                         <button
                           onClick={() => executar(c.id, pausarCampanhaAction)}
@@ -589,6 +601,8 @@ export function DisparosClient({
           </div>
         )}
       </div>
+
+      {relatorio && <RelatorioPainel campanha={relatorio} onFechar={() => setRelatorio(null)} />}
     </>
   )
 }

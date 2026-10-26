@@ -15,7 +15,7 @@ vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }))
 vi.mock('@/lib/conta', () => ({ getConta: async () => ({ supabase: mocks.db.atual, contaId: CONTA, userId: 'u1' }) }))
 vi.mock('@/lib/supabase/admin', () => ({ createAdminClient: () => mocks.db.atual }))
 
-import { criarCampanhaAction, criarProgressivoAction } from '@/app/(app)/disparos/_actions'
+import { criarCampanhaAction, criarProgressivoAction, relatorioCampanhaAction } from '@/app/(app)/disparos/_actions'
 import { atualizarModeloAction, criarModeloAction, excluirModeloAction } from '@/app/(app)/wa-templates/_actions'
 
 const base = {
@@ -157,5 +157,29 @@ describe('modelos (/wa-templates)', () => {
     db.linhas('campanhas_wa').push({ id: 'c2', conta_id: CONTA, modelo_id: MODELO, passos: [texto], status: 'enviando' })
     expect((await excluirModeloAction(MODELO)).error).toBeNull()
     expect(db.linhas('modelos_wa').some(m => m.id === MODELO)).toBe(false)
+  })
+})
+
+describe('relatório do disparo', () => {
+  const CAMP = '66666666-6666-4666-8666-666666666666'
+  const CAMP_OUTRA = '77777777-7777-4777-8777-777777777777'
+  beforeEach(() => {
+    db.linhas('campanhas_wa').push({ id: CAMP, conta_id: CONTA, nome: 'D' }, { id: CAMP_OUTRA, conta_id: OUTRA, nome: 'X' })
+    db.linhas('campanha_destinatarios').push(
+      { campanha_id: CAMP, conta_id: CONTA, ordem: 1, nome: 'B', celular: '5521999990002', status: 'falhou', enviado_em: null, erro: 'sem WhatsApp', aviso: null },
+      { campanha_id: CAMP, conta_id: CONTA, ordem: 0, nome: 'A', celular: '5521999990001', status: 'enviado', enviado_em: '2026-10-26T13:00:00Z', erro: null, aviso: 'x' },
+      { campanha_id: CAMP_OUTRA, conta_id: OUTRA, ordem: 0, nome: 'Z', celular: '5521999990009', status: 'enviado', enviado_em: null, erro: null, aviso: null },
+    )
+  })
+
+  it('traz contato por contato, na ordem da lista', async () => {
+    const r = await relatorioCampanhaAction(CAMP)
+    expect(r.error).toBeNull()
+    expect(r.linhas?.map(l => [l.nome, l.status])).toEqual([['A', 'enviado'], ['B', 'falhou']])
+  })
+
+  it('disparo de OUTRA conta: "não encontrado", sem nenhum contato', async () => {
+    const r = await relatorioCampanhaAction(CAMP_OUTRA)
+    expect(r).toEqual({ error: 'Disparo não encontrado.' })
   })
 })

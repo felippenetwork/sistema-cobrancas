@@ -8,6 +8,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { interpretarLista, minutosDoDia } from '@/lib/disparo/progressivo'
 import { BUCKET_MIDIA, TAMANHO_MAX_MIDIA, TIPOS_MIDIA, pastaDaConta, passosDoModelo, type Passo, type TipoMidia } from '@/lib/disparo/passos'
 import { lerAcoes, schemaAcoes, type Acao } from '@/lib/disparo/acoes'
+import type { LinhaRelatorio } from '@/lib/disparo/relatorio'
 import { extrairContatos, paraLinhas, resumirGrupos, type PreferenciaNome, type ResumoGrupo } from '@/lib/disparo/extracao'
 import { listGroups, listLabels, listSavedContacts, UazapiRateLimitError, type UazapiEtiqueta } from '@/lib/uazapi'
 
@@ -528,6 +529,40 @@ export async function prepararUploadMidiaAction(input: { tipo: TipoMidia; mime: 
       return { error: 'Não foi possível preparar o envio do arquivo. Tente de novo.' }
     }
     return { error: null, caminho, token: data.token }
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'Erro desconhecido.' }
+  }
+}
+// ── Relatório do disparo ──────────────────────────────────────────────────────
+
+/** Contato por contato do disparo (até 10.000), na ordem da lista. Disparo de outra conta: "não encontrado". */
+export async function relatorioCampanhaAction(campanhaId: string): Promise<{ error: string | null; linhas?: LinhaRelatorio[] }> {
+  if (!z.string().uuid().safeParse(campanhaId).success) return { error: 'Disparo inválido.' }
+  try {
+    const { supabase, contaId } = await getConta()
+    const { data: campanha, error: campErr } = await supabase
+      .from('campanhas_wa').select('id').eq('id', campanhaId).eq('conta_id', contaId).maybeSingle()
+    if (campErr) {
+      console.error('[disparos] leitura do disparo para relatório falhou', { contaId, campanhaId, campErr })
+      return { error: 'Não foi possível montar o relatório. Tente de novo.' }
+    }
+    if (!campanha) return { error: 'Disparo não encontrado.' }
+
+    const { data, error } = await supabase
+      .from('campanha_destinatarios')
+      .select('nome, celular, status, enviado_em, erro, aviso, ordem')
+      .eq('campanha_id', campanhaId)
+      .eq('conta_id', contaId)
+      .order('ordem', { ascending: true })
+      .range(0, 9999)
+    if (error) {
+      console.error('[disparos] leitura do relatório falhou', { contaId, campanhaId, error })
+      return { error: 'Não foi possível montar o relatório. Tente de novo.' }
+    }
+    return {
+      error: null,
+      linhas: (data ?? []).map(d => ({ nome: d.nome, celular: d.celular, status: d.status, enviado_em: d.enviado_em, erro: d.erro, aviso: d.aviso })),
+    }
   } catch (e) {
     return { error: e instanceof Error ? e.message : 'Erro desconhecido.' }
   }
