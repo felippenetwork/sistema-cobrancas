@@ -28,11 +28,13 @@ export async function criarCampanhaAction(
     if (!nome) return { error: 'Informe o nome da campanha.' }
     const seq = await sequenciaDoModelo(supabase, contaId, modeloId)
     if ('erro' in seq) return { error: seq.erro }
+    const fluxo = await fluxoDaConta(supabase, contaId, (formData.get('fluxo_id') as string) || null)
+    if (typeof fluxo === 'object' && fluxo !== null) return { error: fluxo.erro }
 
     const { data, error } = await supabase
       .from('campanhas_wa')
       .insert({
-        conta_id: contaId, nome, modelo_id: modeloId, status: 'rascunho', passos: seq.passos,
+        conta_id: contaId, nome, modelo_id: modeloId, status: 'rascunho', passos: seq.passos, fluxo_id: fluxo,
         registrar_enviados:  formData.get('registrar_enviados') === 'on',
         excluir_ja_enviados: formData.get('excluir_ja_enviados') === 'on',
         ...etiquetasDoForm(formData),
@@ -128,6 +130,18 @@ async function sequenciaDoModelo(supabase: Supabase, contaId: string, modeloId: 
     return { erro: 'Arquivo de mídia inválido no modelo. Envie o arquivo de novo no modelo.' }
   }
   return { passos }
+}
+
+/** Fluxo do chatbot escolhido para quem responder (opcional): tem de ser desta conta. */
+async function fluxoDaConta(supabase: Supabase, contaId: string, fluxoId: string | null): Promise<string | null | { erro: string }> {
+  if (!fluxoId) return null
+  if (!z.string().uuid().safeParse(fluxoId).success) return { erro: 'Fluxo do chatbot inválido.' }
+  const { data, error } = await supabase.from('bot_fluxos').select('id').eq('id', fluxoId).eq('conta_id', contaId).maybeSingle()
+  if (error) {
+    console.error('[disparos] leitura do fluxo falhou', { contaId, fluxoId, error })
+    return { erro: 'Não foi possível ler o fluxo do chatbot. Tente de novo.' }
+  }
+  return data ? data.id : { erro: 'Fluxo do chatbot não encontrado.' }
 }
 
 async function whatsappConectado(supabase: Supabase, contaId: string): Promise<boolean> {
@@ -249,6 +263,7 @@ const etiqueta = z.object({ id: z.string().min(1).max(100), nome: z.string().max
 const schemaProgressivo = z.object({
   nome:        z.string().trim().min(1, 'Informe o nome do disparo.').max(80),
   modeloId:    z.string(),
+  fluxoId:     z.string().nullable().default(null),
   etiquetaAdicionar: etiqueta,
   etiquetaRemover:   etiqueta,
   lista:       z.string().max(400_000),
@@ -277,6 +292,8 @@ export async function criarProgressivoAction(input: NovoProgressivo): Promise<{ 
     const { supabase, contaId } = await getConta()
     const seq = await sequenciaDoModelo(supabase, contaId, d.modeloId)
     if ('erro' in seq) return { error: seq.erro }
+    const fluxo = await fluxoDaConta(supabase, contaId, d.fluxoId)
+    if (typeof fluxo === 'object' && fluxo !== null) return { error: fluxo.erro }
     if (!(await whatsappConectado(supabase, contaId))) {
       return { error: 'WhatsApp não está conectado. Conecte em Conexão WA antes de iniciar.' }
     }
@@ -290,6 +307,7 @@ export async function criarProgressivoAction(input: NovoProgressivo): Promise<{ 
         status: 'rascunho',
         modelo_id: d.modeloId,
         passos: seq.passos,
+        fluxo_id: fluxo,
         etiqueta_adicionar:      d.etiquetaAdicionar?.id ?? null,
         etiqueta_adicionar_nome: d.etiquetaAdicionar?.nome ?? null,
         etiqueta_remover:        d.etiquetaRemover?.id ?? null,

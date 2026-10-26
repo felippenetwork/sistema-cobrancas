@@ -8,6 +8,7 @@ import { contatosDeVcf, linhasDeTabela, tabelaDeCsv, type ResultadoArquivo } fro
 import { ImportarGrupo } from './importar-grupo'
 import { EtiquetasCampo, type EtiquetaEscolhida } from './etiquetas-campo'
 import { ModeloEscolha, type ModeloDisparo } from './modelo-escolha'
+import { FluxoEscolha, type FluxoDisparo } from './fluxo-escolha'
 
 const INPUT = 'w-full rounded-xl border border-border bg-input px-3 py-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20'
 const LABEL = 'mb-1.5 block text-xs font-medium uppercase tracking-wide text-muted-foreground'
@@ -37,13 +38,15 @@ function Interruptor({ id, checked, onChange, titulo, descricao }: {
   )
 }
 
-export function ProgressivoForm({ modelos, onConcluido, onVoltar }: {
+export function ProgressivoForm({ modelos, fluxos, onConcluido, onVoltar }: {
   modelos: ModeloDisparo[]
+  fluxos: FluxoDisparo[]
   onConcluido: (pulados: number) => void
   onVoltar: () => void
 }) {
   const [nome, setNome]               = useState('')
   const [modeloId, setModeloId]       = useState(modelos.length === 1 ? modelos[0].id : '')
+  const [fluxoId, setFluxoId]         = useState('')
   const [lista, setLista]             = useState('')
   const [importando, setImportando]   = useState(false)
   const [resumoImport, setResumoImp]  = useState<string | null>(null)
@@ -116,7 +119,7 @@ export function ProgressivoForm({ modelos, onConcluido, onVoltar }: {
     if (!modeloId) { setErro('Escolha o modelo com as mensagens do disparo.'); return }
     setSalvando(true)
     const r = await criarProgressivoAction({
-      nome, modeloId, lista, janelaInicio, janelaFim, inicio, maximo,
+      nome, modeloId, fluxoId: fluxoId || null, lista, janelaInicio, janelaFim, inicio, maximo,
       etiquetaAdicionar: etqAdicionar, etiquetaRemover: etqRemover,
       registrarEnviados: registrar, excluirJaEnviados: excluir,
     })
@@ -213,6 +216,7 @@ export function ProgressivoForm({ modelos, onConcluido, onVoltar }: {
 
       {/* Etiquetas e registro */}
       <section className="space-y-2">
+        <FluxoEscolha id="prog-fluxo" fluxos={fluxos} valor={fluxoId} onChange={setFluxoId} />
         <EtiquetasCampo adicionar={etqAdicionar} remover={etqRemover} onAdicionar={setEtqAdd} onRemover={setEtqRem} />
         <Interruptor id="prog-reg" checked={registrar} onChange={setRegistrar}
           titulo="Registrar quem receber"

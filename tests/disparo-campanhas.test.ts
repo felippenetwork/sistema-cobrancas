@@ -274,6 +274,23 @@ describe('registro de quem já recebeu', () => {
     expect(campanha(db).total_pulados).toBe(1)
   })
 
+  it('quem mandou SAIR para o robô é pulado sempre (mesmo sem as opções de registro e sem o 9 no número)', async () => {
+    const db = cenario({ campanha: { prog_dia: 1, prog_planejado_em: '2026-10-23' }, destinatarios: umAgendado() })
+    db.linhas('bot_conversas').push({ id: 'b1', conta_id: CONTA, celular: '552199990001', status: 'descadastrado' })
+    vi.setSystemTime(new Date('2026-10-23T13:00:00Z'))
+    await rodar(db)
+    expect(mocks.sendText).not.toHaveBeenCalled()
+    expect(db.linhas('campanha_destinatarios')[0]).toMatchObject({ status: 'pulado', erro: 'Pediu para não receber mensagens' })
+  })
+
+  it('SAIR de OUTRA conta não pula ninguém aqui', async () => {
+    const db = cenario({ campanha: { prog_dia: 1, prog_planejado_em: '2026-10-23' }, destinatarios: umAgendado() })
+    db.linhas('bot_conversas').push({ id: 'b1', conta_id: 'outra-conta', celular: '5521999990001', status: 'descadastrado' })
+    vi.setSystemTime(new Date('2026-10-23T13:00:00Z'))
+    await rodar(db)
+    expect(mocks.sendText).toHaveBeenCalledTimes(1)
+  })
+
   it('registro de OUTRA conta não faz pular ninguém aqui', async () => {
     const db = cenario({
       campanha: { excluir_ja_enviados: true, prog_dia: 1, prog_planejado_em: '2026-10-23' },

@@ -1,4 +1,4 @@
-// Espelho do schema em supabase/migrations/*, mantido À MÃO (última sincronização: migration 0040).
+// Espelho do schema em supabase/migrations/*, mantido À MÃO (última sincronização: migration 0041).
 // Toda migration que cria/altera tabela ou coluna atualiza este arquivo na MESMA tarefa — tabela ou
 // coluna faltando aqui vira `as any` no código (foi assim que cobrancas_pix e mensagens_rapidas
 // ficaram sem tipo). Para regenerar do banco real (precisa de SUPABASE_ACCESS_TOKEN):
@@ -23,6 +23,7 @@ type ModeloCategoria   = 'UTILITY' | 'MARKETING' | 'AUTHENTICATION'
 type ModeloStatus      = 'rascunho' | 'em_analise' | 'aprovado' | 'rejeitado'
 type CampanhaStatus    = 'rascunho' | 'agendada' | 'enviando' | 'pausada' | 'concluida' | 'cancelada'
 type CampanhaTipo      = 'normal' | 'progressivo'
+export type BotConversaStatus = 'ativa' | 'humano' | 'encerrada' | 'descadastrado'
 type DestinatarioStatus = 'pendente' | 'enviado' | 'falhou' | 'lido' | 'pulado'
 
 export type Database = {
@@ -258,6 +259,7 @@ export type Database = {
           ultima_conexao: string | null
           updated_at: string
           uazapi_instance_token: string | null
+          webhook_segredo: string | null
         }
         Insert: {
           comando?: string | null
@@ -274,6 +276,7 @@ export type Database = {
           ultima_conexao?: string | null
           updated_at?: string
           uazapi_instance_token?: string | null
+          webhook_segredo?: string | null
         }
         Update: {
           comando?: string | null
@@ -290,6 +293,7 @@ export type Database = {
           ultima_conexao?: string | null
           updated_at?: string
           uazapi_instance_token?: string | null
+          webhook_segredo?: string | null
         }
         Relationships: [{ foreignKeyName: 'conexoes_conta_id_fkey'; columns: ['conta_id']; isOneToOne: true; referencedRelation: 'contas'; referencedColumns: ['id'] }]
       }
@@ -685,6 +689,7 @@ export type Database = {
           etiqueta_adicionar_nome: string | null
           etiqueta_remover: string | null
           etiqueta_remover_nome: string | null
+          fluxo_id: string | null
         }
         Insert: {
           id?: string
@@ -716,6 +721,7 @@ export type Database = {
           etiqueta_adicionar_nome?: string | null
           etiqueta_remover?: string | null
           etiqueta_remover_nome?: string | null
+          fluxo_id?: string | null
         }
         Update: {
           id?: string
@@ -747,6 +753,7 @@ export type Database = {
           etiqueta_adicionar_nome?: string | null
           etiqueta_remover?: string | null
           etiqueta_remover_nome?: string | null
+          fluxo_id?: string | null
         }
         Relationships: [
           { foreignKeyName: 'campanhas_wa_conta_id_fkey'; columns: ['conta_id']; isOneToOne: false; referencedRelation: 'contas'; referencedColumns: ['id'] },
@@ -838,6 +845,149 @@ export type Database = {
         Relationships: [
           { foreignKeyName: 'contatos_disparados_conta_id_fkey'; columns: ['conta_id']; isOneToOne: false; referencedRelation: 'contas'; referencedColumns: ['id'] },
           { foreignKeyName: 'contatos_disparados_campanha_id_fkey'; columns: ['campanha_id']; isOneToOne: false; referencedRelation: 'campanhas_wa'; referencedColumns: ['id'] },
+        ]
+      }
+      bot_fluxos: {
+        Row: {
+          id: string
+          conta_id: string
+          nome: string
+          ativo: boolean
+          etapas: Json
+          gatilho_palavras: string[]
+          gatilho_etiquetas: string[]
+          gatilho_etiquetas_nomes: string[]
+          excluir_etiquetas: string[]
+          excluir_etiquetas_nomes: string[]
+          palavras_humano: string[]
+          msg_nao_entendi: string
+          msg_humano: string
+          aviso_numero: string | null
+          criado_em: string
+          atualizado_em: string
+        }
+        Insert: {
+          id?: string
+          conta_id: string
+          nome: string
+          ativo?: boolean
+          etapas?: Json
+          gatilho_palavras?: string[]
+          gatilho_etiquetas?: string[]
+          gatilho_etiquetas_nomes?: string[]
+          excluir_etiquetas?: string[]
+          excluir_etiquetas_nomes?: string[]
+          palavras_humano?: string[]
+          msg_nao_entendi?: string
+          msg_humano?: string
+          aviso_numero?: string | null
+          criado_em?: string
+          atualizado_em?: string
+        }
+        Update: {
+          id?: string
+          conta_id?: string
+          nome?: string
+          ativo?: boolean
+          etapas?: Json
+          gatilho_palavras?: string[]
+          gatilho_etiquetas?: string[]
+          gatilho_etiquetas_nomes?: string[]
+          excluir_etiquetas?: string[]
+          excluir_etiquetas_nomes?: string[]
+          palavras_humano?: string[]
+          msg_nao_entendi?: string
+          msg_humano?: string
+          aviso_numero?: string | null
+          criado_em?: string
+          atualizado_em?: string
+        }
+        Relationships: [
+          { foreignKeyName: 'bot_fluxos_conta_id_fkey'; columns: ['conta_id']; isOneToOne: false; referencedRelation: 'contas'; referencedColumns: ['id'] },
+        ]
+      }
+      bot_conversas: {
+        Row: {
+          id: string
+          conta_id: string
+          celular: string
+          nome: string | null
+          fluxo_id: string | null
+          etapa_id: string | null
+          variaveis: Json
+          status: BotConversaStatus
+          nao_entendi: number
+          ocupado_ate: string | null
+          versao: number
+          iniciado_em: string
+          atualizado_em: string
+        }
+        Insert: {
+          id?: string
+          conta_id: string
+          celular: string
+          nome?: string | null
+          fluxo_id?: string | null
+          etapa_id?: string | null
+          variaveis?: Json
+          status?: BotConversaStatus
+          nao_entendi?: number
+          ocupado_ate?: string | null
+          versao?: number
+          iniciado_em?: string
+          atualizado_em?: string
+        }
+        Update: {
+          id?: string
+          conta_id?: string
+          celular?: string
+          nome?: string | null
+          fluxo_id?: string | null
+          etapa_id?: string | null
+          variaveis?: Json
+          status?: BotConversaStatus
+          nao_entendi?: number
+          ocupado_ate?: string | null
+          versao?: number
+          iniciado_em?: string
+          atualizado_em?: string
+        }
+        Relationships: [
+          { foreignKeyName: 'bot_conversas_conta_id_fkey'; columns: ['conta_id']; isOneToOne: false; referencedRelation: 'contas'; referencedColumns: ['id'] },
+          { foreignKeyName: 'bot_conversas_fluxo_id_fkey'; columns: ['fluxo_id']; isOneToOne: false; referencedRelation: 'bot_fluxos'; referencedColumns: ['id'] },
+        ]
+      }
+      bot_mensagens: {
+        Row: {
+          id: string
+          conta_id: string
+          conversa_id: string
+          direcao: 'recebida' | 'enviada' | 'evento'
+          texto: string
+          wa_id: string | null
+          criado_em: string
+        }
+        Insert: {
+          id?: string
+          conta_id: string
+          conversa_id: string
+          direcao: 'recebida' | 'enviada' | 'evento'
+          texto: string
+          wa_id?: string | null
+          criado_em?: string
+        }
+        Update: {
+          id?: string
+          conta_id?: string
+          conversa_id?: string
+          direcao?: 'recebida' | 'enviada' | 'evento'
+          texto?: string
+          wa_id?: string | null
+          criado_em?: string
+        }
+        Relationships: [
+          { foreignKeyName: 'bot_mensagens_conta_id_fkey'; columns: ['conta_id']; isOneToOne: false; referencedRelation: 'contas'; referencedColumns: ['id'] },
+          { foreignKeyName: 'bot_mensagens_conversa_id_fkey'; columns: ['conversa_id']; isOneToOne: false; referencedRelation: 'bot_conversas'; referencedColumns: ['id'] },
         ]
       }
     }

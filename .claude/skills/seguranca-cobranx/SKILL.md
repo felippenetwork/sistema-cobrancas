@@ -107,7 +107,7 @@ Já houve incidente de credencial exposta em projeto anterior. Regras permanente
 ## 8. Webhooks (Mercado Pago, uazapi)
 
 - Validar assinatura/segredo compartilhado antes de processar; inválido → 401 sem side effects. **Segredo não configurado no servidor também é recusa** (fail closed) — nunca `if (secret) { validar }` que aceita tudo quando a env some.
-- Estado atual: Mercado Pago da assinatura (HMAC obrigatório) e webhook de conexão uazapi (`UAZAPI_WEBHOOK_SECRET` obrigatório). O webhook de mensagens recebidas (`/api/webhooks/whatsapp`) saiu com o multi-atendimento em 2026-10-23. **Webhook novo nasce assim desde o primeiro commit, nunca "depois eu valido".**
+- Estado atual: Mercado Pago da assinatura (HMAC obrigatório) e webhook de conexão uazapi (`UAZAPI_WEBHOOK_SECRET` obrigatório). O webhook de mensagens do chatbot (`app/api/webhooks/chatbot`, 2026-10-26) usa segredo POR CONTA (`conexoes.webhook_segredo`, comparado com `timingSafeEqual`) e confere o `token` da instância no payload contra o da conta — um segredo vazado não abre as outras contas; os dois têm teste de mutação em `tests/chatbot-webhook.test.ts`. **Webhook novo nasce assim desde o primeiro commit, nunca "depois eu valido".**
 - Webhooks de PIX (`/api/webhooks/efibank`, `/api/webhooks/mercadopago-pix`) (EfiBank e Mercado Pago do cliente final — removidos em 2026-10-23, migration 0037).
 - **Rotas `/api/cron/*` autenticam com `cronAutorizado(req)` (`lib/cron-auth.ts`), sempre.** Sem `CRON_SECRET` no servidor a resposta é 401 — `=== \`Bearer ${process.env.CRON_SECRET}\`` aceita "Bearer undefined" e `if (secret && ...)` deixa a rota aberta (foi assim que um cron antigo, já removido, ficou sem autenticação). Cron novo usa o helper e ganha os 4 testes de `tests/cron-autenticacao.test.ts`.
 - Idempotência por ID de evento em todo webhook que dá baixa ou libera acesso.
@@ -119,7 +119,7 @@ Já houve incidente de credencial exposta em projeto anterior. Regras permanente
 
 - Token da instância (`uazapi_instance_token`) por conta, nunca exposto ao navegador. **Achado aberto (SEG-A5): esse token está gravado em texto claro na tabela `conexoes`** — criptografar em repouso é o correto ao tocar essa coluna, não uma melhoria opcional.
 - Cliente desconectou/churn → desconectar a instância na uazapi.
-- Webhook de conexão (`app/api/webhook/uazapi`) exige o segredo compartilhado (`UAZAPI_WEBHOOK_SECRET`, `?secret=` na URL) — sem isso, qualquer um forjaria desconexão ou QR falso.
+- Webhook de conexão (`app/api/webhook/uazapi`) exige o segredo compartilhado (`UAZAPI_WEBHOOK_SECRET`, `?secret=` na URL) — sem isso, qualquer um forjaria desconexão ou QR falso. **Achado (2026-10-26): essa rota não é registrada na uazapi por nenhum código e `UAZAPI_WEBHOOK_SECRET` não existe na Vercel — ela responde 500 sempre (morta na prática).** O status de conexão vem do cron (`sincronizarConexoes`). Remover ou religar é decisão do dono.
 
 ## 10. Endurecimento do app e da hospedagem (Vercel)
 

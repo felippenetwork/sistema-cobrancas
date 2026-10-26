@@ -286,3 +286,36 @@ export async function setChatLabel(instanceToken: string, number: string, acao: 
   })
   if (!res.ok) throw await erroUazapi(res, 'setChatLabel')
 }
+
+// ── Chatbot ───────────────────────────────────────────────────────────────────
+
+/**
+ * Aponta o webhook de mensagens da instância para o sistema. Formato `{ url, enabled }` (sem
+ * filtro de eventos) confirmado em produção no ERP-Rifas: a uazapi manda os eventos "messages".
+ */
+export async function setWebhook(instanceToken: string, url: string): Promise<void> {
+  const res = await fetch(`${UAZAPI_URL}/webhook`, {
+    method:  'POST',
+    headers: { token: instanceToken, 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ url, enabled: true }),
+    signal:  AbortSignal.timeout(15_000),
+  })
+  if (!res.ok) throw await erroUazapi(res, 'setWebhook')
+}
+
+/**
+ * Etiquetas (WhatsApp Business) da conversa com o número, no formato "<número>:<labelid>".
+ * /chat/find filtrando por wa_chatid devolve só esse chat (confirmado, 2026-10-26). Sem conversa = [].
+ */
+export async function labelsDoChat(instanceToken: string, number: string): Promise<string[]> {
+  const res = await fetch(`${UAZAPI_URL}/chat/find`, {
+    method:  'POST',
+    headers: { token: instanceToken, 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ wa_chatid: `${formatPhoneNumber(number)}@s.whatsapp.net`, limit: 1 }),
+    signal:  AbortSignal.timeout(10_000),
+  })
+  if (!res.ok) throw await erroUazapi(res, 'labelsDoChat')
+  const data = await res.json() as { chats?: { wa_label?: unknown }[] }
+  const rotulos = data.chats?.[0]?.wa_label
+  return Array.isArray(rotulos) ? rotulos.map(String) : []
+}

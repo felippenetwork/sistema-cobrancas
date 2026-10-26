@@ -16,8 +16,10 @@
 // antes de mandar; 429 da uazapi devolve o contato para 'pendente' e para a conta neste tick;
 // depois que a mensagem saiu, nada a devolve para 'pendente'.
 import { createAdminClient } from '@/lib/supabase/admin'
-import { sendMedia, sendPresence, sendText, setChatLabel, UazapiRateLimitError } from '@/lib/uazapi'
-import { BUCKET_MIDIA, TIPOS_MIDIA, duracaoSequenciaMs, textoDoPasso, type Passo } from './passos'
+import { sendPresence, sendText, setChatLabel, UazapiRateLimitError } from '@/lib/uazapi'
+import { celularVariantes } from '@/lib/utils/celular'
+import { duracaoSequenciaMs, type Passo } from './passos'
+import { enviosDosPassos, ErroTransitorio, type Envio } from './envio-passos'
 import {
   DIGITACAO_PROGRESSIVO_MS,
   dataSP,
@@ -307,6 +309,23 @@ async function enviarDestinatario(
   }
   if (atual?.status !== 'enviando') return 'campanha_parada'
 
+  // Mandou SAIR para o robô (/chatbot): não recebe mais disparo nenhum, com ou sem as opções
+  // de registro. O WhatsApp pode mandar o número com ou sem o 9 — confere as duas formas.
+  const { data: saiu, error: saiuErr } = await supabase
+    .from('bot_conversas').select('id').eq('conta_id', contaId).eq('status', 'descadastrado')
+    .in('celular', celularVariantes(dest.celular)).limit(1)
+  if (saiuErr) {
+    console.error(`${log} checagem de descadastro falhou`, { contaId, destId: dest.id, saiuErr })
+    return 'parar'
+  }
+  if (saiu?.length) {
+    const { data: pulou } = await supabase.from('campanha_destinatarios')
+      .update({ status: 'pulado', erro: 'Pediu para não receber mensagens' })
+      .eq('id', dest.id).eq('conta_id', contaId).eq('status', 'pendente').select('id').maybeSingle()
+    if (pulou) await atualizarTotais(supabase, contaId, c.id)
+    return 'pulado'
+  }
+
   // Recebeu de outro disparo depois que esta campanha começou: pula, sem contar como falha.
   if (c.excluir_ja_enviados) {
     const { data: ja, error } = await supabase
@@ -406,36 +425,13 @@ async function enviarDestinatario(
   return pararDepois ? 'parar' : 'enviado'
 }
 
-/** Falha que não é recusa da mensagem (ex.: não conseguiu gerar o link da mídia). */
-class ErroTransitorio extends Error {}
-
-type Envio = { digitacaoMs: number; presenca: 'composing' | 'recording'; enviar: () => Promise<void> }
-
 function montarEnvios(supabase: Supabase, token: string, c: Campanha, dest: Destinatario, digitacaoMs: number): Envio[] {
-  const indice = dest.ordem ?? 0
   const passos = Array.isArray(c.passos) && c.passos.length ? c.passos : null
-
   if (!passos) {
     const texto = textoDaCampanha(c, dest)
     return [{ digitacaoMs, presenca: 'composing', enviar: () => sendText(token, dest.celular, texto) }]
   }
-
-  return passos.map((p): Envio => {
-    if (p.tipo === 'texto') {
-      const texto = textoDoPasso(p, indice, dest.nome)
-      return { digitacaoMs: p.digitacao_seg * 1000, presenca: 'composing', enviar: () => sendText(token, dest.celular, texto) }
-    }
-    return {
-      digitacaoMs: p.digitacao_seg * 1000,
-      presenca: p.tipo === 'audio' ? 'recording' : 'composing',
-      enviar: async () => {
-        const { data, error } = await supabase.storage.from(BUCKET_MIDIA).createSignedUrl(p.caminho, 60 * 60)
-        if (error || !data?.signedUrl) throw new ErroTransitorio(`link da mídia: ${error?.message ?? 'sem URL'}`)
-        const legenda = p.legenda ? montarTexto(p.legenda, [], indice, dest.nome) : null
-        await sendMedia(token, dest.celular, TIPOS_MIDIA[p.tipo].uazapi, data.signedUrl, { legenda, nomeArquivo: p.nome_arquivo })
-      },
-    }
-  })
+  return enviosDosPassos(supabase, token, dest.celular, passos, { indice: dest.ordem ?? 0, nome: dest.nome })
 }
 async function atualizarTotais(supabase: Supabase, contaId: string, campanhaId: string): Promise<void> {
   const contar = (status: 'enviado' | 'falhou' | 'pulado') =>

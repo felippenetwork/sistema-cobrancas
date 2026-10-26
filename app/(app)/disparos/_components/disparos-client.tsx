@@ -10,6 +10,7 @@ import { quotaDoDia } from '@/lib/disparo/progressivo'
 import { ProgressivoForm } from './progressivo-form'
 import { EtiquetasCampo, type EtiquetaEscolhida } from './etiquetas-campo'
 import { ModeloEscolha, type ModeloDisparo as Modelo } from './modelo-escolha'
+import { FluxoEscolha, type FluxoDisparo } from './fluxo-escolha'
 
 type Cliente = { id: string; nome: string | null; sobrenome: string | null; celular: string }
 
@@ -82,10 +83,12 @@ function OpcaoRegistro({ name, defaultChecked, titulo, descricao }: {
 function ModalNovaCampanha({
   modelos,
   clientes,
+  fluxos,
   onFechar,
 }: {
   modelos: Modelo[]
   clientes: Cliente[]
+  fluxos: FluxoDisparo[]
   onFechar: () => void
 }) {
   const [step, setStep]                 = useState<'tipo' | 1 | 2 | 'progressivo'>('tipo')
@@ -100,6 +103,7 @@ function ModalNovaCampanha({
   const [etqAdicionar, setEtqAdd]       = useState<EtiquetaEscolhida>(null)
   const [etqRemover, setEtqRem]         = useState<EtiquetaEscolhida>(null)
   const [modeloId, setModeloId]         = useState(modelos.length === 1 ? modelos[0].id : '')
+  const [fluxoId, setFluxoId]           = useState('')
 
   const clientesFiltrados = clientes.filter(c => {
     const nome = [c.nome, c.sobrenome].filter(Boolean).join(' ').toLowerCase()
@@ -207,6 +211,7 @@ function ModalNovaCampanha({
         ) : step === 'progressivo' ? (
           <ProgressivoForm
             modelos={modelos}
+            fluxos={fluxos}
             onVoltar={() => setStep('tipo')}
             onConcluido={n => { setPulados(n); setEnviada(true) }}
           />
@@ -230,6 +235,7 @@ function ModalNovaCampanha({
               <ModeloEscolha id="camp-modelo" name="modelo_id" modelos={modelos} valor={modeloId} onChange={setModeloId} />
             </div>
             <div className="space-y-2">
+              <FluxoEscolha id="camp-fluxo" name="fluxo_id" fluxos={fluxos} valor={fluxoId} onChange={setFluxoId} />
               <EtiquetasCampo nomeCampo adicionar={etqAdicionar} remover={etqRemover} onAdicionar={setEtqAdd} onRemover={setEtqRem} />
               <OpcaoRegistro name="registrar_enviados" defaultChecked titulo="Registrar quem receber"
                 descricao="Guarda cada número que recebeu, para os próximos disparos poderem pular." />
@@ -325,10 +331,12 @@ export function DisparosClient({
   campanhas,
   modelos,
   clientes,
+  fluxos,
 }: {
   campanhas: Campanha[]
   modelos: Modelo[]
   clientes: Cliente[]
+  fluxos: FluxoDisparo[]
 }) {
   const [modalNovo, setModalNovo] = useState(false)
   const [ocupado, setOcupado]     = useState<string | null>(null)
@@ -349,6 +357,7 @@ export function DisparosClient({
         <ModalNovaCampanha
           modelos={modelos}
           clientes={clientes}
+          fluxos={fluxos}
           onFechar={() => setModalNovo(false)}
         />
       )}

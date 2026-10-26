@@ -21,7 +21,7 @@ export default async function DisparosPage() {
   if (!conta) redirect('/login')
   const contaId = conta.id
 
-  const [{ data: campanhas }, { data: modelos }, { data: clientes }] = await Promise.all([
+  const [{ data: campanhas }, { data: modelos }, { data: clientes }, { data: fluxos }] = await Promise.all([
     supabase
       .from('campanhas_wa')
       .select(`
@@ -46,6 +46,11 @@ export default async function DisparosPage() {
       .is('deleted_at', null)
       .order('nome')
       .limit(500),
+    supabase
+      .from('bot_fluxos')
+      .select('id, nome, ativo')
+      .eq('conta_id', contaId)
+      .order('nome'),
   ])
 
   return (
@@ -57,6 +62,7 @@ export default async function DisparosPage() {
         return passos ? [{ id: m.id, nome: m.nome, passos }] : []
       })}
       clientes={clientes ?? []}
+      fluxos={fluxos ?? []}
     />
   )
 }

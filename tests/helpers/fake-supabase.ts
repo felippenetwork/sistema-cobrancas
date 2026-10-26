@@ -6,7 +6,7 @@
 type Linha = Record<string, any>
 type Operacao = 'select' | 'update' | 'insert' | 'upsert' | 'delete'
 type Filtro =
-  | { tipo: 'eq' | 'neq' | 'lte' | 'lt' | 'gt' | 'is'; col: string; val: unknown }
+  | { tipo: 'eq' | 'neq' | 'lte' | 'lt' | 'gt' | 'gte' | 'is'; col: string; val: unknown }
   | { tipo: 'in'; col: string; val: unknown[] }
   | { tipo: 'not-is'; col: string; val: unknown }
 
@@ -35,6 +35,8 @@ export class FakeDb {
   /** Funções RPC: cada teste registra a implementação (em JS) da função SQL que quer simular. */
   rpcs: Record<string, (args: any) => Promise<ResultadoRpc> | ResultadoRpc> = {}
   readonly chamadasRpc: { nome: string; args: any }[] = []
+  /** Índices únicos por tabela (colunas): INSERT que repete os valores devolve erro 23505, como o Postgres. */
+  unicos: Record<string, string[][]> = {}
   private seq = 0
 
   constructor(tabelas: Record<string, Linha[]> = {}) {
@@ -105,6 +107,7 @@ export class FakeDb {
           case 'lte':    return v != null && (v as any) <= (f.val as any)
           case 'lt':     return v != null && (v as any) < (f.val as any)
           case 'gt':     return v != null && (v as any) > (f.val as any)
+          case 'gte':    return v != null && (v as any) >= (f.val as any)
           case 'is':     return f.val === null ? v == null : v === f.val
           case 'in':     return f.val.includes(v)
           case 'not-is': return f.val === null ? v != null : v !== f.val
@@ -113,6 +116,10 @@ export class FakeDb {
 
       let resultado: Linha[]
       if (consulta.operacao === 'insert') {
+        const repete = (this.unicos[tabela] ?? []).some(cols => inserir.some(nova =>
+          cols.every(c => nova[c] != null) &&
+          this.linhas(tabela).some(l => cols.every(c => l[c] === nova[c]))))
+        if (repete) return { data: null, error: { message: 'duplicate key value violates unique constraint', code: '23505' } }
         resultado = inserir.map(l => ({ id: `fake-${++this.seq}`, ...l }))
         this.linhas(tabela).push(...resultado)
       } else if (consulta.operacao === 'upsert') {
@@ -166,6 +173,7 @@ export class FakeDb {
       lte(col: string, val: unknown) { consulta.filtros.push({ tipo: 'lte', col, val }); return api },
       lt(col: string, val: unknown) { consulta.filtros.push({ tipo: 'lt', col, val }); return api },
       gt(col: string, val: unknown) { consulta.filtros.push({ tipo: 'gt', col, val }); return api },
+      gte(col: string, val: unknown) { consulta.filtros.push({ tipo: 'gte', col, val }); return api },
       upsert(linhas: Linha | Linha[], opts?: { onConflict?: string }) {
         consulta.operacao = 'upsert'
         inserir = Array.isArray(linhas) ? linhas : [linhas]

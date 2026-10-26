@@ -18,9 +18,11 @@ import {
   deleteInstanceByName,
   connectInstance,
   getAllInstances,
+  setWebhook,
   UazapiRateLimitError,
   type InstanceInfo,
 } from '@/lib/uazapi'
+import { urlDoWebhook } from '@/lib/chatbot/url'
 
 type AdminClient = ReturnType<typeof createAdminClient>
 
@@ -111,6 +113,14 @@ export async function conectarAction() {
       uazapi_instance_token: token, rate_limitado: false },
     { onConflict: 'conta_id' },
   )
+
+  // Robô já ligado (/chatbot): a instância nova precisa apontar o webhook de mensagens de novo.
+  // Melhor esforço — se falhar, o botão "Ligar recebimento" em /chatbot refaz.
+  const { data: cx } = await admin.from('conexoes').select('webhook_segredo').eq('conta_id', contaId).maybeSingle()
+  const webhookUrl = cx?.webhook_segredo ? urlDoWebhook(contaId, cx.webhook_segredo) : null
+  if (webhookUrl) {
+    await setWebhook(token, webhookUrl).catch(err => console.error('[conexao] registrar webhook do robô falhou', { contaId, err }))
+  }
 
   const info = await connectInstance(token)
   await aplicarInfo(admin, contaId, info)
