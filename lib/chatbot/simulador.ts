@@ -3,6 +3,7 @@
 // só troca o envio pela uazapi por texto na tela. Puro, testado em tests/chatbot-simulador.test.ts.
 import { TIPOS_MIDIA, textoDoPasso, type Passo } from '@/lib/disparo/passos'
 import { montarTexto } from '@/lib/disparo/progressivo'
+import { descreverAcao } from '@/lib/disparo/acoes'
 import { aplicarVariaveis, decidir, planejar, type EstadoConversa, type FluxoAtivo } from './fluxo'
 
 export type MensagemSimulada = { de: 'robo' | 'pessoa' | 'aviso'; texto: string }
@@ -25,7 +26,10 @@ function aplicarDecisao(fluxo: FluxoAtivo, conversa: EstadoConversa | null, deci
     return { mensagens: [{ de: 'aviso', texto: motivo }], conversa }
   }
   const plano = planejar(decisao, { etapa_id: conversa?.etapa_id ?? null, variaveis: conversa?.variaveis ?? {} })
-  const mensagens: MensagemSimulada[] = plano.envios.flatMap(e => e.passos.map(p => ({ de: 'robo' as const, texto: textoDe(p, nome, plano.variaveis) })))
+  const mensagens: MensagemSimulada[] = plano.envios.flatMap(e => [
+    ...e.passos.map(p => ({ de: 'robo' as const, texto: textoDe(p, nome, plano.variaveis) })),
+    ...(e.acoes.length ? [{ de: 'aviso' as const, texto: `Depois: ${e.acoes.map(descreverAcao).join(' → ')}` }] : []),
+  ])
   if (plano.avisarDono) {
     mensagens.push({ de: 'aviso', texto: fluxo.aviso_numero ? `Você receberia um aviso no WhatsApp +${fluxo.aviso_numero}.` : 'O robô pausa para esta pessoa (sem aviso: nenhum número para avisar).' })
   }

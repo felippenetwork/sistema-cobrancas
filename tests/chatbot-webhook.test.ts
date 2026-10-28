@@ -6,13 +6,14 @@ import { FakeDb } from './helpers/fake-supabase'
 
 const mocks = vi.hoisted(() => ({
   db: { atual: null as unknown },
-  sendText: vi.fn(), sendPresence: vi.fn(), sendMedia: vi.fn(), labelsDoChat: vi.fn(),
+  sendText: vi.fn(), sendPresence: vi.fn(), sendMedia: vi.fn(), labelsDoChat: vi.fn(), setChatLabel: vi.fn(), archiveChat: vi.fn(),
   ordem: [] as string[],
 }))
 
 vi.mock('@/lib/supabase/admin', () => ({ createAdminClient: () => mocks.db.atual }))
 vi.mock('@/lib/uazapi', () => ({
   sendText: mocks.sendText, sendPresence: mocks.sendPresence, sendMedia: mocks.sendMedia, labelsDoChat: mocks.labelsDoChat,
+  setChatLabel: mocks.setChatLabel, archiveChat: mocks.archiveChat,
   UazapiRateLimitError: class extends Error {},
 }))
 
@@ -82,6 +83,8 @@ beforeEach(() => {
   mocks.sendText.mockReset().mockImplementation(async () => { mocks.ordem.push('enviou') })
   mocks.sendPresence.mockReset().mockImplementation(async (_t: string, _n: string, ms: number) => { mocks.ordem.push(`digitando ${ms}`) })
   mocks.labelsDoChat.mockReset().mockResolvedValue([])
+  mocks.setChatLabel.mockReset().mockImplementation(async () => { mocks.ordem.push('etiqueta') })
+  mocks.archiveChat.mockReset().mockImplementation(async () => { mocks.ordem.push('arquivou') })
   vi.spyOn(console, 'error').mockImplementation(() => {})
   vi.spyOn(console, 'warn').mockImplementation(() => {})
   cenario()
@@ -260,6 +263,17 @@ describe('conversa com o robô', () => {
     cenario({ fluxo: { gatilho_palavras: [], boas_vindas: true, boas_vindas_clientes: false } })
     db.linhas('clientes').push({ id: 'cl2', conta_id: '22222222-2222-4222-8222-222222222222', celular: CLIENTE, deleted_at: null })
     expect((await chamar(payload('oi'))).body.resultado).toBe('iniciar')
+  })
+
+  it('ações da etapa rodam depois das mensagens dela; a que falha vira evento no histórico', async () => {
+    const etapas = ETAPAS.map(e => (e.id === 'boas' ? { ...e, acoes: [{ tipo: 'etiqueta_por', id: '7', nome: 'Lead' }, { tipo: 'arquivar' }] } : e))
+    cenario({ fluxo: { etapas } })
+    mocks.archiveChat.mockRejectedValueOnce(new Error('sem permissão'))
+    await chamar(payload('menu'))
+    expect(mocks.ordem).toEqual(['digitando 20000', 'enviou', 'etiqueta'])
+    expect(mocks.setChatLabel).toHaveBeenCalledWith(TOKEN, CLIENTE, 'adicionar', '7')
+    expect(db.linhas('bot_mensagens').some(m => m.direcao === 'evento' && String(m.texto).includes('arquiva'))).toBe(true)
+    expect(conversaDe()).toMatchObject({ status: 'ativa', etapa_id: 'boas' })
   })
 
   it('fluxo de OUTRA conta nunca responde aqui', async () => {

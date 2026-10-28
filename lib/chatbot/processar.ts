@@ -15,6 +15,7 @@ import { celularVariantes } from '@/lib/utils/celular'
 import { primeiroNome } from '@/lib/disparo/extracao'
 import { duracaoSequenciaMs, TIPOS_MIDIA, type Passo } from '@/lib/disparo/passos'
 import { enviosDosPassos } from '@/lib/disparo/envio-passos'
+import { executarAcoes } from '@/lib/disparo/executar-acoes'
 import {
   EXPIRA_CONVERSA_MS, PALAVRAS_SAIR,
   decidir, ehUmaDas, planejar, precisaDeEtiquetas, precisaSaberSeECliente, schemaEtapas, textoAvisoHumano,
@@ -141,8 +142,9 @@ async function lerConversa(supabase: Supabase, contaId: string, celular: string)
 
 const resumoPasso = (p: Passo) => (p.tipo === 'texto' ? p.texto : `[${TIPOS_MIDIA[p.tipo].rotulo}${p.nome_arquivo ? `: ${p.nome_arquivo}` : ''}]`)
 
-/** Manda uma sequência com o "digitando…" de cada mensagem. false = parou no meio (já logado). */
-async function enviarPassos(supabase: Supabase, conta: ContaWebhook, conversa: Conversa, celular: string, passos: Passo[], variaveis: Record<string, string>): Promise<boolean> {
+/** Manda uma sequência. ok false = parou no meio (já logado); ultima = id da última mensagem que saiu. */
+async function enviarPassos(supabase: Supabase, conta: ContaWebhook, conversa: Conversa, celular: string, passos: Passo[], variaveis: Record<string, string>): Promise<{ ok: boolean; ultima: string | null }> {
+  let ultima: string | null = null
   const nome = primeiroNome(conversa.nome)
   const envios = enviosDosPassos(supabase, conta.token, celular, passos, {
     indice: Math.floor(Math.random() * 1000), nome, variaveis: { nome: nome ?? '', ...variaveis },
@@ -153,15 +155,15 @@ async function enviarPassos(supabase: Supabase, conta: ContaWebhook, conversa: C
         await sendPresence(conta.token, celular, e.digitacaoMs, e.presenca)
         await sleep(e.digitacaoMs)
       }
-      await e.enviar()
+      ultima = (await e.enviar()) ?? ultima
       await registrar(supabase, conta.contaId, conversa.id, 'enviada', resumoPasso(passos[i]))
     } catch (err) {
       console.error(`${log} envio falhou`, { contaId: conta.contaId, conversaId: conversa.id, err })
       await registrar(supabase, conta.contaId, conversa.id, 'evento', `Falha ao enviar: ${err instanceof Error ? err.message : String(err)}`)
-      return false
+      return { ok: false, ultima }
     }
   }
-  return true
+  return { ok: true, ultima }
 }
 
 async function avisarDono(conta: ContaWebhook, fluxo: FluxoAtivo, conversa: Conversa, celular: string, variaveis: Record<string, string>, motivo: string) {
@@ -292,8 +294,14 @@ async function aplicar(
       console.error(`${log} sem tempo para enviar nesta execução`, { contaId, conversaId: c.id, etapa: envio.etapaId })
       break
     }
-    if (!(await enviarPassos(supabase, conta, c, celular, envio.passos, plano.variaveis))) { parouEm = envio.etapaId; break }
+    const r = await enviarPassos(supabase, conta, c, celular, envio.passos, plano.variaveis)
+    if (!r.ok) { parouEm = envio.etapaId; break }
     completas++
+    // Ações da etapa (etiquetas, arquivar…): melhor esforço — a que falhar vira evento no histórico.
+    if (envio.acoes.length) {
+      const avisos = await executarAcoes(conta.token, celular, envio.acoes, { nome: primeiroNome(c.nome), indice: 0, ultimaMensagem: r.ultima })
+      for (const aviso of avisos) await registrar(supabase, contaId, c.id, 'evento', aviso)
+    }
   }
 
   if (!plano.salvarAntes) {

@@ -37,6 +37,11 @@ Todos vieram de bugs reais encontrados na auditoria de 2026-09-19 — cada um te
 7. **Erro no claim não vira laço quente:** se o UPDATE do claim falha, `break` (o próximo tick tenta de novo) — nunca `continue`.
 8. **Pendência de decisão:** não existe "reaper" de `processando` antigo. Precisa de uma coluna com o horário do claim (migration em tabela core) e de decidir o risco de reenvio; sem ela, um processo morto no meio do envio deixa a notificação presa. Ver `docs/auditoria-2026-09-19.md`.
 
+## Ações depois do envio (2026-10-26)
+
+- Lista ORDENADA (`lib/disparo/acoes.ts`, até 15) que roda na conversa do contato logo depois que a mensagem sai: pôr/tirar etiqueta, tirar todas, arquivar/desarquivar, fixar/desafixar conversa, fixar a mensagem enviada (1/7/30 dias), silenciar/tirar silêncio, marcar lida/não lida, salvar na agenda, nota interna. Existe em `modelos_wa.acoes` (padrão do modelo), `campanhas_wa.acoes` (cópia editável do disparo) e em cada etapa do chatbot (`bot_fluxos.etapas[].acoes`). Execução única: `lib/disparo/executar-acoes.ts`.
+- Endpoints e campos conferidos no contrato OpenAPI oficial (`https://docs.uazapi.com/openapi-bundled.json`) — consultar ali antes de inventar rota. `/chat/mute`, `/chat/read` e `/chat/notes/edit` pedem o JID; os demais, o número. "Tirar todas" lê as etiquetas (`labelsDoChat`) e tira uma a uma, em vez de `labelids: []`.
+- Cada ação é melhor esforço: falha vira `aviso` no contato (disparo) ou evento no histórico (chatbot), a próxima continua, o envio nunca é desfeito. Bloquear e apagar conversa ficaram de fora de propósito (destrutivos a cada envio).
 ## Modelo de conexão
 
 - **1 conta (tenant) = 1 instância uazapi = 1 número.** Nunca compartilhar instância entre contas.

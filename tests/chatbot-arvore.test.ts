@@ -8,7 +8,7 @@ import type { Passo } from '@/lib/disparo/passos'
 
 const t = (texto: string, seg = 5): Passo => ({ tipo: 'texto', texto, variacoes: [], digitacao_seg: seg })
 const no = (id: string, texto: string, extra: Partial<No<Passo>> = {}): No<Passo> => ({
-  id, passos: [t(texto)], depois: 'fim', opcoes: [], mostrarOpcoes: true, guardarComo: '', aposPergunta: continuacaoFim(), ...extra,
+  id, passos: [t(texto)], depois: 'fim', opcoes: [], mostrarOpcoes: true, guardarComo: '', aposPergunta: continuacaoFim(), acoes: [], ...extra,
 })
 
 const ARVORE = no('raiz', 'Oi {{nome}}! Escolha:', {
@@ -51,6 +51,30 @@ describe('árvore → etapas', () => {
     const { raiz, perdeu } = etapasParaArvore(etapas)
     expect(perdeu).toBe(false)
     expect(raiz).toEqual(ARVORE)
+  })
+})
+
+describe('ações depois de cada mensagem', () => {
+  const comAcoes = no('raiz', 'Oi!', {
+    depois: 'menu', acoes: [{ tipo: 'etiqueta_por', id: '7', nome: 'Lead' }],
+    opcoes: [{ rotulo: 'Sim', cont: { acao: 'responder', resposta: no('sim', 'Ótimo', { acoes: [{ tipo: 'arquivar' }] }) } }],
+  })
+
+  it('cada etapa leva as próprias ações e volta igual para a árvore', () => {
+    const etapas = arvoreParaEtapas(comAcoes, op)
+    expect(etapas.map(e => [e.id, e.acoes])).toEqual([['raiz', [{ tipo: 'etiqueta_por', id: '7', nome: 'Lead' }]], ['sim', [{ tipo: 'arquivar' }]]])
+    expect(schemaEtapas.safeParse(etapas).success).toBe(true)
+    expect(etapasParaArvore(etapas).raiz).toEqual(comAcoes)
+  })
+
+  it('no simulador aparece o que o robô faz depois da mensagem', () => {
+    const fluxo: FluxoAtivo = {
+      id: 'f', nome: 'T', etapas: arvoreParaEtapas(comAcoes, op), gatilho_palavras: ['menu'], gatilho_etiquetas: [], excluir_etiquetas: [],
+      palavras_humano: [], msg_nao_entendi: 'x', msg_humano: 'y', aviso_numero: null, boas_vindas: false, boas_vindas_clientes: false,
+    }
+    const s = responderSimulacao(fluxo, iniciarSimulacao(fluxo, 'Ana').conversa, '1', 'Ana')
+    expect(iniciarSimulacao(fluxo, 'Ana').mensagens.at(-1)).toEqual({ de: 'aviso', texto: 'Depois: põe a etiqueta "Lead"' })
+    expect(s.mensagens.map(m => m.texto)).toContain('Depois: arquiva')
   })
 })
 

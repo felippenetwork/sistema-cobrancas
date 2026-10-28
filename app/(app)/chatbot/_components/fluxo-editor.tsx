@@ -16,6 +16,7 @@ import { arvoreParaEtapas, continuacaoFim, etapasParaArvore, mapearArvore, type 
 import { listarEtiquetasAction } from '../../disparos/_actions'
 import { PassosEditor, novoPasso, paraEditavel, paraEnvio, type PassoEditavel } from '../../disparos/_components/passos-editor'
 import { salvarFluxoAction } from '../_actions'
+import { AcoesEditor, acaoIncompleta } from '../../disparos/_components/acoes-editor'
 import { Simulador } from './simulador'
 
 type EtiquetaSel = { id: string; nome: string }
@@ -47,14 +48,14 @@ function textoInicial(texto: string): PassoEditavel {
 }
 
 function novoNo(texto = ''): NoTela {
-  return { id: novoId(), passos: [{ ...textoInicial(texto), digitacao_seg: 8 }], depois: 'fim', opcoes: [], mostrarOpcoes: true, guardarComo: '', aposPergunta: continuacaoFim() }
+  return { id: novoId(), passos: [{ ...textoInicial(texto), digitacao_seg: 8 }], depois: 'fim', opcoes: [], mostrarOpcoes: true, guardarComo: '', aposPergunta: continuacaoFim(), acoes: [] }
 }
 
 /** Automação nova já vem com um exemplo pronto para trocar os textos. */
 function exemplo(): NoTela {
   return {
     id: novoId(), passos: [textoInicial('Oi {{nome}}! Tudo bem? Como posso ajudar?')], depois: 'menu', mostrarOpcoes: true, guardarComo: '',
-    aposPergunta: continuacaoFim(),
+    aposPergunta: continuacaoFim(), acoes: [],
     opcoes: [
       { rotulo: 'Quero saber mais', cont: { acao: 'responder', resposta: novoNo('Que bom! Vou te explicar como funciona…') } },
       { rotulo: 'Falar com atendente', cont: { acao: 'atendente', resposta: null } },
@@ -232,6 +233,8 @@ function NoEditor({ no, onChange, nivel, raiz = false, semRespostas = false }: {
   return (
     <div className="space-y-4">
       <PassosEditor passos={no.passos} onChange={p => onChange({ ...no, passos: p })} variaveis={variaveis} />
+      <AcoesEditor acoes={no.acoes} onChange={a => onChange({ ...no, acoes: a })}
+        ajuda="O que fazer na conversa logo depois que esta mensagem sai, nesta ordem (ex.: pôr uma etiqueta, arquivar)." />
       <div className="space-y-2">
         <p className={LABEL}>Depois dessa mensagem</p>
         <Escolha rotulo="Depois dessa mensagem" valor={no.depois} opcoes={raiz ? DEPOIS.filter(d => d.valor !== 'inicio') : DEPOIS} onChange={mudarDepois} />
@@ -301,6 +304,7 @@ export function FluxoEditor({ fluxoId, inicial }: { fluxoId: string | null; inic
     setErro(null); setSalvo(false)
     if (!nome.trim()) { setPasso(0); setErro('Dê um nome para a automação.'); return }
     if (etapas.some(e => e.passos.some(p => p.tipo !== 'texto' && !p.caminho))) { setErro('Uma mensagem com arquivo ainda está sem o arquivo.'); return }
+    if (etapas.some(e => e.acoes.some(acaoIncompleta))) { setErro('Uma ação depois do envio está incompleta (escolha a etiqueta ou escreva a nota).'); return }
     setSalvando(true)
     const r = await salvarFluxoAction(fluxoId, {
       nome, ativo, etapas: etapasSalvar,

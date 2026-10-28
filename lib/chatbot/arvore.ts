@@ -3,6 +3,7 @@
 // lendo a lista de etapas (lib/chatbot/fluxo.ts); aqui ficam as duas conversões. Puro, testado em
 // tests/chatbot-arvore.test.ts.
 import type { Etapa, RespostaEtapa } from './fluxo'
+import type { Acao as AcaoDepois } from '@/lib/disparo/acoes'
 
 /** O que acontece depois de uma opção (ou da resposta a uma pergunta). */
 export type Acao = 'responder' | 'atendente' | 'inicio' | 'fim'
@@ -19,6 +20,8 @@ export type No<P> = {
   mostrarOpcoes: boolean
   guardarComo: string
   aposPergunta: Continuacao<P>
+  /** O que fazer na conversa depois que esta mensagem sai (etiquetas, arquivar…). */
+  acoes: AcaoDepois[]
 }
 
 /** Etapa criada só para "chamar o atendente" a partir de uma opção (não aparece na árvore). */
@@ -26,7 +29,7 @@ export const PREFIXO_ATENDENTE = 'at_'
 
 export const continuacaoFim = <P>(): Continuacao<P> => ({ acao: 'fim', resposta: null })
 
-type EtapaDe<P> = { id: string; nome: string; passos: P[]; resposta: RespostaEtapa }
+type EtapaDe<P> = { id: string; nome: string; passos: P[]; resposta: RespostaEtapa; acoes: AcaoDepois[] }
 
 /**
  * Árvore → etapas do robô. A primeira etapa é sempre a raiz (boas-vindas). "Chamar atendente"
@@ -41,14 +44,14 @@ export function arvoreParaEtapas<P>(raiz: No<P>, op: { nome: (no: No<P>) => stri
     if (c.acao === 'inicio') return raiz.id
     if (c.acao === 'atendente') {
       const id = `${PREFIXO_ATENDENTE}${deId}_${atendentes++}`.slice(0, 40)
-      etapas.push({ id, nome: 'Chamar atendente', passos: op.passosAtendente(), resposta: { tipo: 'humano' } })
+      etapas.push({ id, nome: 'Chamar atendente', passos: op.passosAtendente(), resposta: { tipo: 'humano' }, acoes: [] })
       return id
     }
     return c.resposta ? visitar(c.resposta) : null
   }
 
   const visitar = (no: No<P>): string => {
-    const etapa: EtapaDe<P> = { id: no.id, nome: op.nome(no).slice(0, 60) || 'Mensagem', passos: no.passos, resposta: { tipo: 'fim' } }
+    const etapa: EtapaDe<P> = { id: no.id, nome: op.nome(no).slice(0, 60) || 'Mensagem', passos: no.passos, resposta: { tipo: 'fim' }, acoes: no.acoes }
     etapas.push(etapa) // antes dos filhos: a raiz fica em primeiro e a ordem segue a conversa
     etapa.resposta =
       no.depois === 'menu' ? { tipo: 'menu', mostrar_opcoes: no.mostrarOpcoes, opcoes: no.opcoes.map(o => ({ rotulo: o.rotulo, proxima: destino(o.cont, no.id) })) }
@@ -88,6 +91,7 @@ export function etapasParaArvore<P>(etapas: (Omit<Etapa, 'passos'> & { passos: P
   const no = (inicial: (typeof etapas)[number]): No<P> => {
     usadas.add(inicial.id)
     let passos = [...inicial.passos]
+    let acoes = [...(inicial.acoes ?? [])]
     let r = inicial.resposta
     // "Seguir" para uma etapa que ninguém mais usa: junta na mesma mensagem.
     while (r.tipo === 'seguir' && r.proxima && r.proxima !== raizEtapa.id) {
@@ -95,10 +99,11 @@ export function etapasParaArvore<P>(etapas: (Omit<Etapa, 'passos'> & { passos: P
       if (!prox || usadas.has(prox.id)) { if (prox) perdeu = true; r = { tipo: 'fim' }; break }
       usadas.add(prox.id)
       passos = [...passos, ...prox.passos]
+      acoes = [...acoes, ...(prox.acoes ?? [])]
       r = prox.resposta
     }
     const base: No<P> = {
-      id: inicial.id, passos, depois: 'fim', opcoes: [], mostrarOpcoes: true, guardarComo: '', aposPergunta: continuacaoFim(),
+      id: inicial.id, passos, depois: 'fim', opcoes: [], mostrarOpcoes: true, guardarComo: '', aposPergunta: continuacaoFim(), acoes,
     }
     if (r.tipo === 'menu') return { ...base, depois: 'menu', mostrarOpcoes: r.mostrar_opcoes, opcoes: r.opcoes.map(o => ({ rotulo: o.rotulo, cont: cont(o.proxima) })) }
     if (r.tipo === 'texto') return { ...base, depois: 'pergunta', guardarComo: r.variavel, aposPergunta: cont(r.proxima) }
