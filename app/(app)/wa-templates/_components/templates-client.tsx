@@ -1,11 +1,11 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { FileText, Image as ImageIcon, Loader2, Mic, Pencil, Plus, Trash2, Type, Video, X } from 'lucide-react'
+import { FileText, Image as ImageIcon, ListChecks, Loader2, Mic, Pencil, Plus, Trash2, Type, Video, X } from 'lucide-react'
 import { criarModeloAction, atualizarModeloAction, excluirModeloAction } from '../_actions'
 import { TIPOS_MIDIA, type Passo } from '@/lib/disparo/passos'
-import { PassosEditor, novoPasso, paraEditavel, paraEnvio, type PassoEditavel } from '../../disparos/_components/passos-editor'
-import { AcoesEditor, acaoIncompleta } from '../../disparos/_components/acoes-editor'
+import { PassosEditor, midiaSemArquivo, novoPasso, paraEditavel, paraEnvio, passoDeAcao, type PassoEditavel } from '../../disparos/_components/passos-editor'
+import { acaoIncompleta } from '../../disparos/_components/acoes-editor'
 import { descreverAcao, type Acao } from '@/lib/disparo/acoes'
 
 type Modelo = { id: string; nome: string; passos: Passo[]; criado_em: string; acoes: Acao[] }
@@ -19,6 +19,7 @@ const ICONE: Record<Passo['tipo'], React.ReactNode> = {
   video:     <Video className="h-3 w-3" />,
   audio:     <Mic className="h-3 w-3" />,
   documento: <FileText className="h-3 w-3" />,
+  acao:      <ListChecks className="h-3 w-3" />,
 }
 
 export function TemplatesClient({ modelos: modelosIniciais }: { modelos: Modelo[] }) {
@@ -91,7 +92,7 @@ export function TemplatesClient({ modelos: modelosIniciais }: { modelos: Modelo[
                 <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
                   {m.passos.map((p, i) => (
                     <span key={i} className="flex items-center gap-1 rounded-full border border-border px-2 py-0.5">
-                      {ICONE[p.tipo]} {p.tipo === 'texto' ? 'Texto' : TIPOS_MIDIA[p.tipo].rotulo}
+                      {ICONE[p.tipo]} {p.tipo === 'texto' ? 'Texto' : p.tipo === 'acao' ? descreverAcao(p.acao) : TIPOS_MIDIA[p.tipo].rotulo}
                     </span>
                   ))}
                   <span className="tabular-nums">· {segundos} s de digitação</span>
@@ -141,29 +142,33 @@ function ModeloSheet({ modelo, onClose, onSalvo }: {
   onSalvo: (m: Modelo) => void
 }) {
   const [nome, setNome]         = useState(modelo?.nome ?? '')
-  const [passos, setPassos]     = useState<PassoEditavel[]>(() => (modelo?.passos.length ? paraEditavel(modelo.passos) : [novoPasso('texto', 0)]))
-  const [acoes, setAcoes]       = useState<Acao[]>(modelo?.acoes ?? [])
+  // Ações do quadro antigo "Depois de enviar" viram caixinhas no fim (ao salvar, ficam só na sequência).
+  const [passos, setPassos]     = useState<PassoEditavel[]>(() => [
+    ...(modelo?.passos.length ? paraEditavel(modelo.passos) : [novoPasso('texto', 0)]),
+    ...(modelo?.acoes ?? []).map(passoDeAcao),
+  ])
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro]         = useState<string | null>(null)
 
   async function salvar(e: React.FormEvent) {
     e.preventDefault()
     setErro(null)
-    if (passos.some(p => p.tipo !== 'texto' && !p.caminho)) { setErro('Uma mensagem de mídia ainda está sem arquivo.'); return }
-    if (acoes.some(acaoIncompleta)) { setErro('Uma ação depois do envio está incompleta (escolha a etiqueta ou escreva a nota).'); return }
+    if (passos.some(midiaSemArquivo)) { setErro('Uma mensagem de mídia ainda está sem arquivo.'); return }
+    if (passos.some(p => p.tipo === 'acao' && acaoIncompleta(p.acao))) { setErro('Uma ação está incompleta (escolha a etiqueta ou escreva a nota).'); return }
     setSalvando(true)
-    const entrada = { nome, passos: paraEnvio(passos), acoes }
+    const entrada = { nome, passos: paraEnvio(passos), acoes: [] as Acao[] }
     const r = modelo ? await atualizarModeloAction(modelo.id, entrada) : await criarModeloAction(entrada)
     setSalvando(false)
     if (r.error || !r.id) { setErro(r.error ?? 'Não foi possível salvar o modelo.'); return }
     onSalvo({
       id: r.id, nome: nome.trim(), criado_em: modelo?.criado_em ?? new Date().toISOString(),
       passos: entrada.passos.map(p => (p.tipo === 'texto' ? { ...p, variacoes: p.variacoes.filter(Boolean) } : p)) as Passo[],
-      acoes,
+      acoes: [],
     })
   }
 
   const segundos = passos.reduce((s, p) => s + p.digitacao_seg, 0)
+  const temAcao = passos.some(p => p.tipo === 'acao')
 
   return (
     <>
@@ -189,10 +194,9 @@ function ModeloSheet({ modelo, onClose, onSalvo }: {
             <p className="mt-2 text-xs text-muted-foreground">
               <code className="rounded bg-muted px-1">{'{{nome}}'}</code> vira o nome do contato (some da frase se não houver) e <code className="rounded bg-muted px-1">{'{{periododia}}'}</code> vira Bom dia, Boa tarde ou Boa noite pela hora em que a mensagem sai, escrito de um jeito diferente para cada pessoa (Bom diaa, Boom dia…).
               Cada contato leva cerca de <span className="tabular-nums">{segundos}</span> s entre digitação e envios.
+              {!temAcao && ' Com + Ação você coloca, entre as mensagens, pôr ou tirar etiqueta, arquivar, fixar e outras.'}
             </p>
           </section>
-          <AcoesEditor acoes={acoes} onChange={setAcoes}
-            ajuda="O que fazer na conversa de cada contato depois que as mensagens saem, nesta ordem. Vem preenchido em todo disparo com este modelo (lá dá para mudar)." />
           {erro && <p role="alert" className="rounded-xl bg-destructive/10 px-3 py-2 text-xs text-destructive">{erro}</p>}
         </div>
 

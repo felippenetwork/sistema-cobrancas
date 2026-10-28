@@ -454,6 +454,29 @@ describe('ações depois do envio (lista ordenada)', () => {
     expect(mocks.setChatLabel).not.toHaveBeenCalled()
   })
 
+  it('ação NO MEIO da sequência roda na ordem das caixinhas (vídeo → tirar etiqueta → texto → pôr etiqueta)', async () => {
+    const passos = [
+      { tipo: 'video', caminho: `contas/${CONTA}/v.mp4`, nome_arquivo: 'v.mp4', legenda: null, digitacao_seg: 5 },
+      { tipo: 'acao', acao: { tipo: 'etiqueta_tirar', id: '3', nome: 'Aguardando' }, digitacao_seg: 0 },
+      { tipo: 'texto', texto: 'Oi {{nome}}', variacoes: [], digitacao_seg: 8 },
+      { tipo: 'acao', acao: { tipo: 'etiqueta_por', id: '9', nome: 'DVG' }, digitacao_seg: 0 },
+    ]
+    await rodar(comAcoes([], { passos }))
+    expect(mocks.ordem).toEqual(['digitando', 'midia', 'etiqueta remover 3', 'digitando', 'enviou', 'etiqueta adicionar 9'])
+  })
+
+  it('ação que falha no meio vira aviso e as mensagens seguintes saem', async () => {
+    mocks.archiveChat.mockRejectedValue(new Error('sem permissão'))
+    const passos = [
+      { tipo: 'acao', acao: { tipo: 'arquivar' }, digitacao_seg: 0 },
+      { tipo: 'texto', texto: 'Oi', variacoes: [], digitacao_seg: 5 },
+    ]
+    const db = comAcoes([], { passos })
+    await rodar(db)
+    expect(mocks.sendText).toHaveBeenCalledTimes(1)
+    expect(db.linhas('campanha_destinatarios')[0]).toMatchObject({ status: 'enviado', aviso: expect.stringContaining('arquiva') })
+  })
+
   it('nota usa {{nome}} do contato', async () => {
     await rodar(comAcoes([{ tipo: 'nota', texto: 'Recebeu campanha, {{nome}}' }]))
     expect(mocks.editNotes).toHaveBeenCalledWith('tok', '5521999990001', 'Recebeu campanha, Maria')

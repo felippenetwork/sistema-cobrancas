@@ -375,9 +375,11 @@ async function enviarDestinatario(
         await sendPresence(token, dest.celular, e.digitacaoMs, e.presenca)
         await sleep(e.digitacaoMs)
       }
-      ultimaMensagem = (await e.enviar()) ?? ultimaMensagem
-      feitos++
+      ultimaMensagem = (await e.enviar(ultimaMensagem)) ?? ultimaMensagem
+      if (!e.melhorEsforco) feitos++
     } catch (err) {
+      // Ação no meio da sequência (etiqueta, arquivar…): vira aviso e a sequência continua.
+      if (e.melhorEsforco) { avisos.push(err instanceof Error ? err.message : String(err)); continue }
       if (feitos === 0) {
         // Nada saiu ainda: rate limit ou falha passageira (ex.: link da mídia) devolvem o
         // contato para 'pendente'; recusa da uazapi vira 'falhou'.
@@ -395,7 +397,7 @@ async function enviarDestinatario(
         return 'falhou'
       }
       // Parte da sequência já saiu: NUNCA volta para 'pendente' (reenviaria o começo).
-      avisos.push(`Enviou ${feitos} de ${envios.length} mensagens: ${err instanceof Error ? err.message : String(err)}`)
+      avisos.push(`Enviou ${feitos} de ${envios.filter(x => !x.melhorEsforco).length} mensagens: ${err instanceof Error ? err.message : String(err)}`)
       pararDepois = err instanceof UazapiRateLimitError
       break
     }

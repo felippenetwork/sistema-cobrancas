@@ -1,9 +1,9 @@
 'use client'
 
 import Link from 'next/link'
-import { FileText, Image as ImageIcon, Mic, Type, Video } from 'lucide-react'
+import { FileText, Image as ImageIcon, ListChecks, Mic, Type, Video } from 'lucide-react'
 import { TIPOS_MIDIA, type Passo } from '@/lib/disparo/passos'
-import type { Acao } from '@/lib/disparo/acoes'
+import { descreverAcao, type Acao } from '@/lib/disparo/acoes'
 
 export type ModeloDisparo = { id: string; nome: string; passos: Passo[]; acoes: Acao[] }
 
@@ -13,6 +13,7 @@ const ICONE: Record<Passo['tipo'], React.ReactNode> = {
   video:     <Video className="h-3.5 w-3.5" />,
   audio:     <Mic className="h-3.5 w-3.5" />,
   documento: <FileText className="h-3.5 w-3.5" />,
+  acao:      <ListChecks className="h-3.5 w-3.5" />,
 }
 
 const SELECT = 'w-full rounded-xl border border-border bg-input px-3 py-2.5 text-sm text-foreground outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20'
@@ -51,14 +52,18 @@ export function ModeloEscolha({ id, modelos, valor, onChange, name }: {
         <ol className="space-y-1.5 rounded-xl border border-border bg-muted/30 px-3 py-3" aria-label={`Mensagens do modelo ${escolhido.nome}`}>
           {escolhido.passos.map((p, i) => (
             <li key={i} className="text-xs">
-              <p className="text-[11px] text-muted-foreground tabular-nums">
-                {p.tipo === 'audio' ? 'Gravando áudio' : 'Digitando'}… {p.digitacao_seg} s
-              </p>
+              {p.tipo !== 'acao' && (
+                <p className="text-[11px] text-muted-foreground tabular-nums">
+                  {p.tipo === 'audio' ? 'Gravando áudio' : 'Digitando'}… {p.digitacao_seg} s
+                </p>
+              )}
               <div className="mt-0.5 flex items-start gap-2 text-foreground">
                 <span className="mt-0.5 shrink-0 text-muted-foreground">{ICONE[p.tipo]}</span>
                 <span className="min-w-0 flex-1">
                   {p.tipo === 'texto' ? (
                     <span className="line-clamp-3 whitespace-pre-line">{p.texto}</span>
+                  ) : p.tipo === 'acao' ? (
+                    <span className="block text-muted-foreground">Ação: {descreverAcao(p.acao)}</span>
                   ) : (
                     <span className="block truncate">
                       {TIPOS_MIDIA[p.tipo].rotulo}{p.nome_arquivo ? `: ${p.nome_arquivo}` : ''}

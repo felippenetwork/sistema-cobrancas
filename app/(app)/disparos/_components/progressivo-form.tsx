@@ -6,8 +6,6 @@ import { criarProgressivoAction } from '../_actions'
 import { interpretarLista, quotaDoDia } from '@/lib/disparo/progressivo'
 import { contatosDeVcf, linhasDeTabela, tabelaDeCsv, type ResultadoArquivo } from '@/lib/disparo/arquivo-contatos'
 import { ImportarGrupo } from './importar-grupo'
-import { AcoesEditor, acaoIncompleta } from './acoes-editor'
-import type { Acao } from '@/lib/disparo/acoes'
 import { ModeloEscolha, type ModeloDisparo } from './modelo-escolha'
 import { FluxoEscolha, type FluxoDisparo } from './fluxo-escolha'
 
@@ -46,10 +44,7 @@ export function ProgressivoForm({ modelos, fluxos, onConcluido, onVoltar }: {
   onVoltar: () => void
 }) {
   const [nome, setNome]               = useState('')
-  const [modeloId, setModeloIdBruto]  = useState(modelos.length === 1 ? modelos[0].id : '')
-  const [acoes, setAcoes]             = useState<Acao[]>(modelos.length === 1 ? modelos[0].acoes : [])
-  // Escolher o modelo traz as ações dele (dá para mudar aqui).
-  const setModeloId = (id: string) => { setModeloIdBruto(id); setAcoes(modelos.find(m => m.id === id)?.acoes ?? []) }
+  const [modeloId, setModeloId]       = useState(modelos.length === 1 ? modelos[0].id : '')
   const [fluxoId, setFluxoId]         = useState('')
   const [lista, setLista]             = useState('')
   const [importando, setImportando]   = useState(false)
@@ -119,11 +114,9 @@ export function ProgressivoForm({ modelos, fluxos, onConcluido, onVoltar }: {
     e.preventDefault()
     setErro(null)
     if (!modeloId) { setErro('Escolha o modelo com as mensagens do disparo.'); return }
-    if (acoes.some(acaoIncompleta)) { setErro('Uma ação depois do envio está incompleta (escolha a etiqueta ou escreva a nota).'); return }
     setSalvando(true)
     const r = await criarProgressivoAction({
       nome, modeloId, fluxoId: fluxoId || null, lista, janelaInicio, janelaFim, inicio, maximo,
-      acoes,
       registrarEnviados: registrar, excluirJaEnviados: excluir,
     })
     setSalvando(false)
@@ -220,7 +213,6 @@ export function ProgressivoForm({ modelos, fluxos, onConcluido, onVoltar }: {
       {/* Etiquetas e registro */}
       <section className="space-y-2">
         <FluxoEscolha id="prog-fluxo" fluxos={fluxos} valor={fluxoId} onChange={setFluxoId} />
-        <AcoesEditor acoes={acoes} onChange={setAcoes} ajuda="O que fazer na conversa de cada contato depois que as mensagens saem, nesta ordem. Vem do modelo; mudar aqui vale só para este disparo." />
         <Interruptor id="prog-reg" checked={registrar} onChange={setRegistrar}
           titulo="Registrar quem receber"
           descricao="Guarda cada número que recebeu, para os próximos disparos poderem pular." />

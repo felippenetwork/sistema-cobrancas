@@ -11,7 +11,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { setWebhook, UazapiRateLimitError } from '@/lib/uazapi'
 import { schemaEtapas } from '@/lib/chatbot/fluxo'
 import { urlDoWebhook } from '@/lib/chatbot/url'
-import { pastaDaConta } from '@/lib/disparo/passos'
+import { ehMidia, pastaDaConta } from '@/lib/disparo/passos'
 import { normalizarCelular } from '@/lib/disparo/progressivo'
 
 type Result = { error: string | null; id?: string }
@@ -42,7 +42,7 @@ function colunasDoFluxo(input: FluxoEntrada, contaId: string) {
   const parsed = schemaFluxo.safeParse(input)
   if (!parsed.success) return { erro: parsed.error.issues[0]?.message ?? 'Dados inválidos.' }
   const d = parsed.data
-  if (d.etapas.some(e => e.passos.some(p => p.tipo !== 'texto' && !p.caminho.startsWith(pastaDaConta(contaId))))) {
+  if (d.etapas.some(e => e.passos.some(p => ehMidia(p) && !p.caminho.startsWith(pastaDaConta(contaId))))) {
     return { erro: 'Arquivo de mídia inválido. Envie o arquivo de novo.' }
   }
   const aviso = d.avisoNumero.trim() ? normalizarCelular(d.avisoNumero) : null

@@ -1,6 +1,7 @@
 // Regras puras do chatbot (lib/chatbot/fluxo.ts): gatilhos, menus, variáveis, "não entendi",
 // humano, SAIR e o caminho entre etapas. Sem banco e sem rede.
 import { describe, expect, it } from 'vitest'
+import { schemaPassos } from '@/lib/disparo/passos'
 import {
   aplicarVariaveis, decidir, ehUmaDas, escolherOpcao, MAX_NAO_ENTENDI, normalizar, passosDaEtapa, percorrer, planejar,
   precisaDeEtiquetas, precisaSaberSeECliente, QUALQUER_MENSAGEM, schemaEtapas, temEtiqueta,
@@ -315,6 +316,23 @@ describe('caminho entre etapas', () => {
     expect(passosDaEtapa(e)).toHaveLength(2)
     const sem: Etapa = { ...etapas[0], resposta: { ...etapas[0].resposta, mostrar_opcoes: false } as Etapa['resposta'] }
     expect(passosDaEtapa(sem)).toBe(sem.passos)
+  })
+})
+
+describe('caixinha de ação no meio da sequência', () => {
+  it('não aceita sequência só de ações; aceita ação entre mensagens', () => {
+    const acao = { tipo: 'acao' as const, acao: { tipo: 'arquivar' as const }, digitacao_seg: 0 as const }
+    expect(schemaPassos.safeParse([acao]).success).toBe(false)
+    expect(schemaPassos.safeParse([...texto('a'), acao, ...texto('b')]).success).toBe(true)
+  })
+
+  it('a lista do menu entra na última MENSAGEM de texto, mesmo com ação depois dela', () => {
+    const acao = { tipo: 'acao' as const, acao: { tipo: 'arquivar' as const }, digitacao_seg: 0 as const }
+    const e: Etapa = { ...etapas[0], passos: [...texto('Oi'), acao] }
+    const r = passosDaEtapa(e)
+    expect(r).toHaveLength(2)
+    expect(r[0]).toMatchObject({ tipo: 'texto', texto: 'Oi\n\n1. Ver planos\n2. Falar com alguém\n3. Nada' })
+    expect(r[1]).toEqual(acao)
   })
 })
 

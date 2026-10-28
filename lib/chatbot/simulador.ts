@@ -11,13 +11,13 @@ export type Simulacao = { mensagens: MensagemSimulada[]; conversa: EstadoConvers
 
 const AGORA = () => new Date()
 
-function textoDe(p: Passo, nome: string, variaveis: Record<string, string>): string {
+function mensagemDe(p: Passo, nome: string, variaveis: Record<string, string>): MensagemSimulada {
   const vars = { nome, ...variaveis }
-  if (p.tipo === 'texto') return aplicarVariaveis(textoDoPasso(p, 0, nome), vars)
+  if (p.tipo === 'texto') return { de: 'robo', texto: aplicarVariaveis(textoDoPasso(p, 0, nome), vars) }
+  if (p.tipo === 'acao') return { de: 'aviso', texto: `Ação: ${descreverAcao(p.acao)}` }
   const legenda = p.legenda ? `\n${aplicarVariaveis(montarTexto(p.legenda, [], 0, nome), vars)}` : ''
-  return `[${TIPOS_MIDIA[p.tipo].rotulo}${p.nome_arquivo ? `: ${p.nome_arquivo}` : ''}]${legenda}`
+  return { de: 'robo', texto: `[${TIPOS_MIDIA[p.tipo].rotulo}${p.nome_arquivo ? `: ${p.nome_arquivo}` : ''}]${legenda}` }
 }
-
 function aplicarDecisao(fluxo: FluxoAtivo, conversa: EstadoConversa | null, decisao: ReturnType<typeof decidir>, nome: string): Simulacao {
   if (decisao.tipo === 'ignorar') {
     const motivo = conversa?.status === 'humano' ? 'O robô está pausado: agora é você quem responde esta pessoa.'
@@ -27,7 +27,7 @@ function aplicarDecisao(fluxo: FluxoAtivo, conversa: EstadoConversa | null, deci
   }
   const plano = planejar(decisao, { etapa_id: conversa?.etapa_id ?? null, variaveis: conversa?.variaveis ?? {} })
   const mensagens: MensagemSimulada[] = plano.envios.flatMap(e => [
-    ...e.passos.map(p => ({ de: 'robo' as const, texto: textoDe(p, nome, plano.variaveis) })),
+    ...e.passos.map(p => mensagemDe(p, nome, plano.variaveis)),
     ...(e.acoes.length ? [{ de: 'aviso' as const, texto: `Depois: ${e.acoes.map(descreverAcao).join(' → ')}` }] : []),
   ])
   if (plano.avisarDono) {

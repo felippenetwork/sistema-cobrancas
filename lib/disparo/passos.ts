@@ -3,6 +3,7 @@
 // campanhas_wa.passos (jsonb); validado aqui, no servidor, antes de gravar.
 import { z } from 'zod'
 import { montarTexto } from './progressivo'
+import { schemaAcao } from './acoes'
 
 export const BUCKET_MIDIA = 'disparo-midia'
 export const TAMANHO_MAX_MIDIA = 16 * 1024 * 1024 // limite do WhatsApp para mídia
@@ -39,12 +40,31 @@ const passoMidia = z.object({
   digitacao_seg: digitacao,
 })
 
-export const schemaPassos = z.array(z.discriminatedUnion('tipo', [passoTexto, passoMidia]))
+/**
+ * Ação na conversa NO MEIO da sequência (pedido do Felippe, 2026-10-28: "organizar igual mídias e
+ * texto") — ex.: vídeo → tirar etiqueta → texto → pôr etiqueta. Não tem "digitando…".
+ */
+const passoAcao = z.object({
+  tipo: z.literal('acao'),
+  acao: schemaAcao,
+  digitacao_seg: z.literal(0).default(0),
+})
+
+/** Ações no meio da sequência, no máximo (além das MAX_PASSOS mensagens). */
+export const MAX_ACOES_NA_SEQUENCIA = 15
+
+export const schemaPassos = z.array(z.discriminatedUnion('tipo', [passoTexto, passoMidia, passoAcao]))
   .min(1, 'Adicione pelo menos uma mensagem.')
-  .max(MAX_PASSOS, `No máximo ${MAX_PASSOS} mensagens por contato.`)
+  .refine(ps => ps.some(p => p.tipo !== 'acao'), { message: 'Adicione pelo menos uma mensagem (texto ou arquivo), não só ações.' })
+  .refine(ps => ps.filter(p => p.tipo !== 'acao').length <= MAX_PASSOS, { message: `No máximo ${MAX_PASSOS} mensagens por contato.` })
+  .refine(ps => ps.filter(p => p.tipo === 'acao').length <= MAX_ACOES_NA_SEQUENCIA, { message: `No máximo ${MAX_ACOES_NA_SEQUENCIA} ações na sequência.` })
 
 export type Passo = z.infer<typeof schemaPassos>[number]
 export type PassoMidia = Extract<Passo, { caminho: string }>
+export type PassoAcao = Extract<Passo, { tipo: 'acao' }>
+
+/** A caixinha é uma mídia (imagem, vídeo, áudio, documento)? */
+export const ehMidia = (p: { tipo: string }): p is PassoMidia => p.tipo in TIPOS_MIDIA
 
 /** Pasta das mídias da conta no bucket — o servidor só aceita caminhos dentro dela. */
 export const pastaDaConta = (contaId: string) => `contas/${contaId}/`
@@ -71,10 +91,10 @@ export function passosDoModelo(modelo: { passos: unknown; corpo: string | null }
 export function resumoDosPassos(passos: Passo[]): string {
   const texto = passos.find(p => p.tipo === 'texto')
   if (texto?.tipo === 'texto') return texto.texto
-  return passos.map(p => `[${p.tipo === 'texto' ? 'Texto' : TIPOS_MIDIA[p.tipo].rotulo}]`).join(' ')
+  return passos.filter(ehMidia).map(p => `[${TIPOS_MIDIA[p.tipo].rotulo}]`).join(' ') || '[Mensagem]'
 }
 
 /** Tempo aproximado (ms) de digitação + envio da sequência para um contato. */
 export function duracaoSequenciaMs(passos: Passo[]): number {
-  return passos.reduce((s, p) => s + p.digitacao_seg * 1000 + 5_000, 0)
+  return passos.reduce((s, p) => s + (p.tipo === 'acao' ? 2_000 : p.digitacao_seg * 1000 + 5_000), 0)
 }

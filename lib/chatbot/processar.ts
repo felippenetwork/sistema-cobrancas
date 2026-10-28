@@ -16,6 +16,7 @@ import { primeiroNome } from '@/lib/disparo/extracao'
 import { duracaoSequenciaMs, TIPOS_MIDIA, type Passo } from '@/lib/disparo/passos'
 import { enviosDosPassos } from '@/lib/disparo/envio-passos'
 import { executarAcoes } from '@/lib/disparo/executar-acoes'
+import { descreverAcao } from '@/lib/disparo/acoes'
 import {
   EXPIRA_CONVERSA_MS, PALAVRAS_SAIR,
   decidir, ehUmaDas, planejar, precisaDeEtiquetas, precisaSaberSeECliente, schemaEtapas, textoAvisoHumano,
@@ -140,7 +141,8 @@ async function lerConversa(supabase: Supabase, contaId: string, celular: string)
 
 // ── Envio ─────────────────────────────────────────────────────────────────────
 
-const resumoPasso = (p: Passo) => (p.tipo === 'texto' ? p.texto : `[${TIPOS_MIDIA[p.tipo].rotulo}${p.nome_arquivo ? `: ${p.nome_arquivo}` : ''}]`)
+const resumoPasso = (p: Passo) => (p.tipo === 'texto' ? p.texto : p.tipo === 'acao' ? `[Ação: ${descreverAcao(p.acao)}]`
+  : `[${TIPOS_MIDIA[p.tipo].rotulo}${p.nome_arquivo ? `: ${p.nome_arquivo}` : ''}]`)
 
 /** Manda uma sequência. ok false = parou no meio (já logado); ultima = id da última mensagem que saiu. */
 async function enviarPassos(supabase: Supabase, conta: ContaWebhook, conversa: Conversa, celular: string, passos: Passo[], variaveis: Record<string, string>): Promise<{ ok: boolean; ultima: string | null }> {
@@ -155,9 +157,11 @@ async function enviarPassos(supabase: Supabase, conta: ContaWebhook, conversa: C
         await sendPresence(conta.token, celular, e.digitacaoMs, e.presenca)
         await sleep(e.digitacaoMs)
       }
-      ultima = (await e.enviar()) ?? ultima
-      await registrar(supabase, conta.contaId, conversa.id, 'enviada', resumoPasso(passos[i]))
+      ultima = (await e.enviar(ultima)) ?? ultima
+      await registrar(supabase, conta.contaId, conversa.id, e.melhorEsforco ? 'evento' : 'enviada', resumoPasso(passos[i]))
     } catch (err) {
+      // Ação no meio da sequência: a falha fica no histórico e a conversa segue.
+      if (e.melhorEsforco) { await registrar(supabase, conta.contaId, conversa.id, 'evento', err instanceof Error ? err.message : String(err)); continue }
       console.error(`${log} envio falhou`, { contaId: conta.contaId, conversaId: conversa.id, err })
       await registrar(supabase, conta.contaId, conversa.id, 'evento', `Falha ao enviar: ${err instanceof Error ? err.message : String(err)}`)
       return { ok: false, ultima }

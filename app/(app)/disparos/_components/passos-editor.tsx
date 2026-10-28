@@ -1,15 +1,18 @@
 'use client'
 
 import { useRef, useState } from 'react'
-import { ArrowDown, ArrowUp, FileText, Image as ImageIcon, Loader2, Mic, Paperclip, Plus, Trash2, Type, Video } from 'lucide-react'
+import { ArrowDown, ArrowUp, FileText, Image as ImageIcon, ListChecks, Loader2, Mic, Paperclip, Plus, Trash2, Type, Video } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { BUCKET_MIDIA, MAX_PASSOS, MAX_VARIACOES, TAMANHO_MAX_MIDIA, TIPOS_MIDIA, digitacaoPadrao, type Passo, type TipoMidia } from '@/lib/disparo/passos'
+import { BUCKET_MIDIA, MAX_ACOES_NA_SEQUENCIA, MAX_PASSOS, MAX_VARIACOES, TAMANHO_MAX_MIDIA, TIPOS_MIDIA, digitacaoPadrao, type Passo, type TipoMidia } from '@/lib/disparo/passos'
+import { TIPOS_ACAO, type Acao, type TipoAcao } from '@/lib/disparo/acoes'
 import { prepararUploadMidiaAction } from '../_actions'
+import { AcaoCampos, novaAcao, useEtiquetas } from './acoes-editor'
 
-/** Passo em edição na tela (mídia pode estar sem arquivo ainda). */
+/** Passo em edição na tela (mídia pode estar sem arquivo ainda; ação pode estar sem etiqueta). */
 export type PassoEditavel =
   | { chave: string; tipo: 'texto'; texto: string; variacoes: string[]; digitacao_seg: number }
   | { chave: string; tipo: TipoMidia; caminho: string | null; nome_arquivo: string | null; tamanho: number | null; legenda: string; digitacao_seg: number }
+  | { chave: string; tipo: 'acao'; acao: Acao; digitacao_seg: 0 }
 
 const INPUT = 'w-full rounded-xl border border-border bg-input px-3 py-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20'
 
@@ -19,22 +22,27 @@ const ICONE: Record<PassoEditavel['tipo'], React.ReactNode> = {
   video:     <Video className="h-3.5 w-3.5" />,
   audio:     <Mic className="h-3.5 w-3.5" />,
   documento: <FileText className="h-3.5 w-3.5" />,
+  acao:      <ListChecks className="h-3.5 w-3.5" />,
 }
 
 let seq = 0
 const novaChave = () => `p${Date.now()}-${seq++}`
 
-export function novoPasso(tipo: PassoEditavel['tipo'], indice: number): PassoEditavel {
+export function novoPasso(tipo: 'texto' | TipoMidia, indice: number): PassoEditavel {
   const digitacao_seg = digitacaoPadrao(indice)
   return tipo === 'texto'
     ? { chave: novaChave(), tipo, texto: '', variacoes: [], digitacao_seg }
     : { chave: novaChave(), tipo, caminho: null, nome_arquivo: null, tamanho: null, legenda: '', digitacao_seg }
 }
 
+/** Caixinha de ação (no meio da sequência). */
+export const passoDeAcao = (acao: Acao): PassoEditavel => ({ chave: novaChave(), tipo: 'acao', acao, digitacao_seg: 0 })
+
 /** Sequência gravada (modelo) → caixinhas editáveis. */
 export function paraEditavel(passos: Passo[]): PassoEditavel[] {
   return passos.map(p => (p.tipo === 'texto'
     ? { chave: novaChave(), tipo: p.tipo, texto: p.texto, variacoes: p.variacoes, digitacao_seg: p.digitacao_seg }
+    : p.tipo === 'acao' ? passoDeAcao(p.acao)
     : { chave: novaChave(), tipo: p.tipo, caminho: p.caminho, nome_arquivo: p.nome_arquivo, tamanho: null, legenda: p.legenda ?? '', digitacao_seg: p.digitacao_seg }))
 }
 
@@ -42,13 +50,18 @@ export function paraEditavel(passos: Passo[]): PassoEditavel[] {
 export function paraEnvio(passos: PassoEditavel[]) {
   return passos.map(p => p.tipo === 'texto'
     ? { tipo: p.tipo, texto: p.texto, variacoes: p.variacoes, digitacao_seg: p.digitacao_seg }
+    : p.tipo === 'acao' ? { tipo: p.tipo, acao: p.acao, digitacao_seg: 0 as const }
     : { tipo: p.tipo, caminho: p.caminho ?? '', nome_arquivo: p.nome_arquivo, legenda: p.legenda.trim() || null, digitacao_seg: p.digitacao_seg })
 }
 
+/** Caixinha de mídia ainda sem o arquivo. */
+export const midiaSemArquivo = (p: PassoEditavel) => p.tipo !== 'texto' && p.tipo !== 'acao' && !p.caminho
 const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1).replace('.', ',')} MB`
 
 /** Tempo de "digitando…"/"gravando…" ANTES da caixinha — editável entre as caixinhas. */
 function Digitacao({ passo, primeiro, onChange }: { passo: PassoEditavel; primeiro: boolean; onChange: (seg: number) => void }) {
+  // Ação não tem "digitando…": só o traço que liga as caixinhas.
+  if (passo.tipo === 'acao') return <div aria-hidden className="ml-4 h-3 border-l border-dashed border-border" />
   const verbo = passo.tipo === 'audio' ? 'Gravando áudio' : 'Digitando'
   return (
     <div className="flex items-center gap-2 py-1 pl-4 text-xs text-muted-foreground">
@@ -180,70 +193,94 @@ export function PassosEditor({ passos, onChange, variaveis = [] }: {
     ;[nova[i], nova[i + d]] = [nova[i + d], nova[i]]
     onChange(nova)
   }
+  const mensagens = passos.filter(p => p.tipo !== 'acao').length
+  const acoes = passos.length - mensagens
+  const { etiquetas, erro: erroEtiquetas } = useEtiquetas(passos.some(p => p.tipo === 'acao' && (p.acao.tipo === 'etiqueta_por' || p.acao.tipo === 'etiqueta_tirar')))
+  // Numeração só das mensagens (a ação não é mensagem): "Mensagem 1", "Ação", "Mensagem 2"…
+  let n = 0
+  const numeros = passos.map(p => (p.tipo === 'acao' ? 0 : ++n))
 
   return (
     <div>
-      {passos.map((p, i) => (
-        <div key={p.chave}>
-          <Digitacao passo={p} primeiro={i === 0} onChange={seg => atualizar(i, { digitacao_seg: seg })} />
-          <div className="space-y-2 rounded-xl border border-border p-3">
-            <div className="flex items-center gap-2">
-              <span className="flex items-center gap-1.5 text-xs font-medium text-foreground">
-                {ICONE[p.tipo]}
-                Mensagem {i + 1} · {p.tipo === 'texto' ? 'Texto' : TIPOS_MIDIA[p.tipo].rotulo}
-              </span>
-              <div className="ml-auto flex">
-                <button type="button" onClick={() => mover(i, -1)} disabled={i === 0} aria-label={`Subir mensagem ${i + 1}`}
-                  className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30"><ArrowUp className="h-3.5 w-3.5" /></button>
-                <button type="button" onClick={() => mover(i, 1)} disabled={i === passos.length - 1} aria-label={`Descer mensagem ${i + 1}`}
-                  className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30"><ArrowDown className="h-3.5 w-3.5" /></button>
-                <button type="button" onClick={() => onChange(passos.filter((_, j) => j !== i))} disabled={passos.length === 1} aria-label={`Remover mensagem ${i + 1}`}
-                  className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-destructive disabled:opacity-30"><Trash2 className="h-3.5 w-3.5" /></button>
+      {passos.map((p, i) => {
+        const rotulo = p.tipo === 'acao'
+          ? `Ação · ${TIPOS_ACAO.find(t => t.tipo === p.acao.tipo)?.rotulo ?? p.acao.tipo}`
+          : `Mensagem ${numeros[i]} · ${p.tipo === 'texto' ? 'Texto' : TIPOS_MIDIA[p.tipo].rotulo}`
+        // Não deixa remover a única mensagem (a sequência precisa de pelo menos uma).
+        const unicaMensagem = p.tipo !== 'acao' && mensagens === 1
+        return (
+          <div key={p.chave}>
+            <Digitacao passo={p} primeiro={i === 0} onChange={seg => atualizar(i, { digitacao_seg: seg })} />
+            <div className={`space-y-2 rounded-xl border p-3 ${p.tipo === 'acao' ? 'border-dashed border-primary/40 bg-primary/5' : 'border-border'}`}>
+              <div className="flex items-center gap-2">
+                <span className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+                  {ICONE[p.tipo]}
+                  {rotulo}
+                </span>
+                <div className="ml-auto flex">
+                  <button type="button" onClick={() => mover(i, -1)} disabled={i === 0} aria-label={`Subir: ${rotulo}`}
+                    className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30"><ArrowUp className="h-3.5 w-3.5" /></button>
+                  <button type="button" onClick={() => mover(i, 1)} disabled={i === passos.length - 1} aria-label={`Descer: ${rotulo}`}
+                    className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30"><ArrowDown className="h-3.5 w-3.5" /></button>
+                  <button type="button" onClick={() => onChange(passos.filter((_, j) => j !== i))} disabled={unicaMensagem} aria-label={`Remover: ${rotulo}`}
+                    className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-destructive disabled:opacity-30"><Trash2 className="h-3.5 w-3.5" /></button>
+                </div>
               </div>
-            </div>
 
-            {p.tipo === 'texto' ? (
-              <>
-                <CampoComVariaveis multilinha rows={3} maxLength={4000} extras={variaveis} valor={p.texto} onChange={v => atualizar(i, { texto: v })}
-                  aria-label={`Texto da mensagem ${i + 1}`} placeholder="{{periododia}}, {{nome}}! Tudo bem? …" />
-                {p.variacoes.map((v, k) => (
-                  <div key={k} className="flex gap-2">
-                    <div className="min-w-0 flex-1">
-                      <CampoComVariaveis multilinha rows={2} maxLength={4000} extras={variaveis} valor={v} aria-label={`Variação ${k + 1} da mensagem ${i + 1}`}
-                        onChange={nv => atualizar(i, { variacoes: p.variacoes.map((x, j) => (j === k ? nv : x)) })}
-                        placeholder={`Variação ${k + 1} — outro jeito de dizer o mesmo`} />
+              {p.tipo === 'acao' ? (
+                <AcaoCampos acao={p.acao} onChange={a => atualizar(i, { acao: a })} etiquetas={etiquetas} erroEtiquetas={erroEtiquetas} />
+              ) : p.tipo === 'texto' ? (
+                <>
+                  <CampoComVariaveis multilinha rows={3} maxLength={4000} extras={variaveis} valor={p.texto} onChange={v => atualizar(i, { texto: v })}
+                    aria-label={`Texto da mensagem ${numeros[i]}`} placeholder="{{periododia}}, {{nome}}! Tudo bem? …" />
+                  {p.variacoes.map((v, k) => (
+                    <div key={k} className="flex gap-2">
+                      <div className="min-w-0 flex-1">
+                        <CampoComVariaveis multilinha rows={2} maxLength={4000} extras={variaveis} valor={v} aria-label={`Variação ${k + 1} da mensagem ${numeros[i]}`}
+                          onChange={nv => atualizar(i, { variacoes: p.variacoes.map((x, j) => (j === k ? nv : x)) })}
+                          placeholder={`Variação ${k + 1} — outro jeito de dizer o mesmo`} />
+                      </div>
+                      <button type="button" onClick={() => atualizar(i, { variacoes: p.variacoes.filter((_, j) => j !== k) })}
+                        aria-label={`Remover variação ${k + 1}`} className="h-10 shrink-0 rounded-lg px-2 text-muted-foreground hover:bg-accent hover:text-foreground">
+                        <Trash2 className="h-4 w-4" />
+                      </button>
                     </div>
-                    <button type="button" onClick={() => atualizar(i, { variacoes: p.variacoes.filter((_, j) => j !== k) })}
-                      aria-label={`Remover variação ${k + 1}`} className="h-10 shrink-0 rounded-lg px-2 text-muted-foreground hover:bg-accent hover:text-foreground">
-                      <Trash2 className="h-4 w-4" />
+                  ))}
+                  {p.variacoes.length < MAX_VARIACOES && (
+                    <button type="button" onClick={() => atualizar(i, { variacoes: [...p.variacoes, ''] })}
+                      className="flex items-center gap-1 text-xs font-medium text-primary hover:underline">
+                      <Plus className="h-3.5 w-3.5" /> Variação (alterna a cada contato){p.variacoes.length > 0 && <span className="text-muted-foreground tabular-nums">&nbsp;· {p.variacoes.length + 1} jeitos de dizer</span>}
                     </button>
-                  </div>
-                ))}
-                {p.variacoes.length < MAX_VARIACOES && (
-                  <button type="button" onClick={() => atualizar(i, { variacoes: [...p.variacoes, ''] })}
-                    className="flex items-center gap-1 text-xs font-medium text-primary hover:underline">
-                    <Plus className="h-3.5 w-3.5" /> Variação (alterna a cada contato){p.variacoes.length > 0 && <span className="text-muted-foreground tabular-nums">&nbsp;· {p.variacoes.length + 1} jeitos de dizer</span>}
-                  </button>
-                )}
-              </>
-            ) : (
-              <CampoMidia passo={p} extras={variaveis} onChange={patch => atualizar(i, patch)} />
-            )}
+                  )}
+                </>
+              ) : (
+                <CampoMidia passo={p} extras={variaveis} onChange={patch => atualizar(i, patch)} />
+              )}
+            </div>
           </div>
-        </div>
-      ))}
+        )
+      })}
 
-      {passos.length < MAX_PASSOS && (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {(['texto', 'imagem', 'video', 'audio', 'documento'] as const).map(tipo => (
-            <button key={tipo} type="button" onClick={() => onChange([...passos, novoPasso(tipo, passos.length)])}
-              className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs text-muted-foreground transition hover:border-primary hover:text-foreground">
-              <Plus className="h-3 w-3" />
-              {tipo === 'texto' ? 'Texto' : TIPOS_MIDIA[tipo].rotulo}
-            </button>
-          ))}
-        </div>
-      )}
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {mensagens < MAX_PASSOS && (['texto', 'imagem', 'video', 'audio', 'documento'] as const).map(tipo => (
+          <button key={tipo} type="button" onClick={() => onChange([...passos, novoPasso(tipo, mensagens)])}
+            className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs text-muted-foreground transition hover:border-primary hover:text-foreground">
+            <Plus className="h-3 w-3" />
+            {tipo === 'texto' ? 'Texto' : TIPOS_MIDIA[tipo].rotulo}
+          </button>
+        ))}
+        {acoes < MAX_ACOES_NA_SEQUENCIA && (
+          <label className="flex items-center gap-1.5 rounded-lg border border-dashed border-primary/50 px-2.5 py-1 text-xs text-muted-foreground transition focus-within:border-primary hover:border-primary hover:text-foreground">
+            <Plus className="h-3 w-3" />
+            <select aria-label="Adicionar ação na conversa" value="" onChange={e => { if (e.target.value) onChange([...passos, passoDeAcao(novaAcao(e.target.value as TipoAcao))]) }}
+              className="bg-transparent py-0.5 text-xs text-muted-foreground outline-none">
+              <option value="">Ação (etiqueta, arquivar…)</option>
+              {TIPOS_ACAO.map(t => <option key={t.tipo} value={t.tipo}>{t.rotulo}</option>)}
+            </select>
+          </label>
+        )}
+      </div>
+      <p className="mt-1.5 text-[11px] text-muted-foreground">A ação entra no fim; use as setas para colocá-la entre as mensagens, na ordem que quiser.</p>
     </div>
   )
 }

@@ -7,7 +7,7 @@
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { getConta } from '@/lib/conta'
-import { pastaDaConta, resumoDosPassos, schemaPassos } from '@/lib/disparo/passos'
+import { ehMidia, pastaDaConta, resumoDosPassos, schemaPassos } from '@/lib/disparo/passos'
 import { schemaAcoes } from '@/lib/disparo/acoes'
 
 type Result = { error: string | null; id?: string }
@@ -25,7 +25,7 @@ function colunasDoModelo(input: ModeloEntrada, contaId: string) {
   const parsed = schemaModelo.safeParse(input)
   if (!parsed.success) return { erro: parsed.error.issues[0]?.message ?? 'Dados inválidos.' }
   const passos = parsed.data.passos.map(p => (p.tipo === 'texto' ? { ...p, variacoes: p.variacoes.filter(Boolean) } : p))
-  if (passos.some(p => p.tipo !== 'texto' && !p.caminho.startsWith(pastaDaConta(contaId)))) {
+  if (passos.some(p => ehMidia(p) && !p.caminho.startsWith(pastaDaConta(contaId)))) {
     return { erro: 'Arquivo de mídia inválido. Envie o arquivo de novo.' }
   }
   return { colunas: { nome: parsed.data.nome, passos, corpo: resumoDosPassos(passos), acoes: parsed.data.acoes } }

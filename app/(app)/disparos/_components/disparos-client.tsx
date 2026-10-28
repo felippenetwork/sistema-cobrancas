@@ -9,9 +9,8 @@ import {
 } from '../_actions'
 import { dataSP, quotaDoDia } from '@/lib/disparo/progressivo'
 import { ProgressivoForm } from './progressivo-form'
-import { AcoesEditor } from './acoes-editor'
 import { RelatorioPainel } from './relatorio-painel'
-import { acoesLegadas, descreverAcao, lerAcoes, type Acao } from '@/lib/disparo/acoes'
+import { acoesLegadas, descreverAcao, lerAcoes } from '@/lib/disparo/acoes'
 import { ModeloEscolha, type ModeloDisparo as Modelo } from './modelo-escolha'
 import { FluxoEscolha, type FluxoDisparo } from './fluxo-escolha'
 
@@ -104,9 +103,7 @@ function ModalNovaCampanha({
   const [enviando, setEnviando]         = useState(false)
   const [enviada, setEnviada]           = useState(false)
   const [pulados, setPulados]           = useState(0)
-  const [acoes, setAcoes]               = useState<Acao[]>(modelos.length === 1 ? modelos[0].acoes : [])
-  const [modeloId, setModeloIdBruto]    = useState(modelos.length === 1 ? modelos[0].id : '')
-  const setModeloId = (id: string) => { setModeloIdBruto(id); setAcoes(modelos.find(m => m.id === id)?.acoes ?? []) }
+  const [modeloId, setModeloId]         = useState(modelos.length === 1 ? modelos[0].id : '')
   const [fluxoId, setFluxoId]           = useState('')
 
   const clientesFiltrados = clientes.filter(c => {
@@ -240,7 +237,6 @@ function ModalNovaCampanha({
             </div>
             <div className="space-y-2">
               <FluxoEscolha id="camp-fluxo" name="fluxo_id" fluxos={fluxos} valor={fluxoId} onChange={setFluxoId} />
-              <AcoesEditor name="acoes" acoes={acoes} onChange={setAcoes} ajuda="O que fazer na conversa de cada cliente depois que as mensagens saem, nesta ordem. Vem do modelo; mudar aqui vale só para este disparo." />
               <OpcaoRegistro name="registrar_enviados" defaultChecked titulo="Registrar quem receber"
                 descricao="Guarda cada número que recebeu, para os próximos disparos poderem pular." />
               <OpcaoRegistro name="excluir_ja_enviados" titulo="Não enviar para quem já recebeu"

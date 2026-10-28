@@ -61,7 +61,12 @@ describe('0039: sequência de mensagens, etiquetas e bucket de mídia', () => {
     const tentar = (passos: string) => inserirCampanha(contaA, ', passos', `, '${passos}'::jsonb`).then(() => 'aceitou', () => 'recusou')
     expect(await tentar('[]')).toBe('recusou')
     expect(await tentar('{"tipo":"texto"}')).toBe('recusou')
-    expect(await tentar(JSON.stringify(Array(11).fill({ tipo: 'texto' })))).toBe('recusou')
+    expect(await tentar(JSON.stringify(Array(31).fill({ tipo: 'texto' })))).toBe('recusou')
+  })
+
+  it('0044: aceita até 30 caixinhas (mensagens + ações)', async () => {
+    const r = await inserirCampanha(contaA, ', passos', `, '${JSON.stringify(Array(25).fill({ tipo: 'texto' }))}'::jsonb`)
+    expect(r.rows).toHaveLength(1)
   })
 
   it('progressivo sem mensagem e sem passos continua recusado', async () => {
@@ -89,7 +94,7 @@ describe('0040: modelo com sequência de mensagens', () => {
     const tentar = (p: string) => inserirModelo(p).then(() => 'aceitou', () => 'recusou')
     expect(await tentar('[]')).toBe('recusou')
     expect(await tentar('{"tipo":"texto"}')).toBe('recusou')
-    expect(await tentar(JSON.stringify(Array(11).fill({ tipo: 'texto' })))).toBe('recusou')
+    expect(await tentar(JSON.stringify(Array(31).fill({ tipo: 'texto' })))).toBe('recusou')
   })
 
   it('excluir o modelo não é barrado pelos disparos que o usaram: eles ficam sem o vínculo', async () => {

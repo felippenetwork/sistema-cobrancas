@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto'
 import { getConta } from '@/lib/conta'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { interpretarLista, minutosDoDia } from '@/lib/disparo/progressivo'
-import { BUCKET_MIDIA, TAMANHO_MAX_MIDIA, TIPOS_MIDIA, pastaDaConta, passosDoModelo, type Passo, type TipoMidia } from '@/lib/disparo/passos'
+import { BUCKET_MIDIA, TAMANHO_MAX_MIDIA, TIPOS_MIDIA, ehMidia, pastaDaConta, passosDoModelo, type Passo, type TipoMidia } from '@/lib/disparo/passos'
 import { lerAcoes, schemaAcoes, type Acao } from '@/lib/disparo/acoes'
 import type { LinhaRelatorio } from '@/lib/disparo/relatorio'
 import { extrairContatos, paraLinhas, resumirGrupos, type PreferenciaNome, type ResumoGrupo } from '@/lib/disparo/extracao'
@@ -130,7 +130,7 @@ async function sequenciaDoModelo(supabase: Supabase, contaId: string, modeloId: 
   const passos = passosDoModelo(data)
   if (!passos) return { erro: 'Este modelo está sem mensagem. Edite o modelo antes de disparar.' }
   // Mídia só da pasta desta conta: nunca aceitar caminho de arquivo de outra conta.
-  if (passos.some(p => p.tipo !== 'texto' && !p.caminho.startsWith(pastaDaConta(contaId)))) {
+  if (passos.some(p => ehMidia(p) && !p.caminho.startsWith(pastaDaConta(contaId)))) {
     return { erro: 'Arquivo de mídia inválido no modelo. Envie o arquivo de novo no modelo.' }
   }
   return {

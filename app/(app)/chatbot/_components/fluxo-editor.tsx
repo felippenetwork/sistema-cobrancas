@@ -14,9 +14,9 @@ import type { Etapa } from '@/lib/chatbot/fluxo'
 import { MAX_OPCOES, QUALQUER_MENSAGEM } from '@/lib/chatbot/fluxo'
 import { arvoreParaEtapas, continuacaoFim, etapasParaArvore, mapearArvore, type Acao, type Continuacao, type Depois, type No } from '@/lib/chatbot/arvore'
 import { listarEtiquetasAction } from '../../disparos/_actions'
-import { PassosEditor, novoPasso, paraEditavel, paraEnvio, type PassoEditavel } from '../../disparos/_components/passos-editor'
+import { PassosEditor, midiaSemArquivo, novoPasso, paraEditavel, paraEnvio, passoDeAcao, type PassoEditavel } from '../../disparos/_components/passos-editor'
 import { salvarFluxoAction } from '../_actions'
-import { AcoesEditor, acaoIncompleta } from '../../disparos/_components/acoes-editor'
+import { acaoIncompleta } from '../../disparos/_components/acoes-editor'
 import { Simulador } from './simulador'
 
 type EtiquetaSel = { id: string; nome: string }
@@ -43,12 +43,22 @@ const PASSOS_ASSISTENTE = [
 let seq = 0
 const novoId = () => `e${Date.now().toString(36)}${(seq++).toString(36)}`
 
-function textoInicial(texto: string): PassoEditavel {
-  return { ...novoPasso('texto', 0), texto } as PassoEditavel
+function textoInicial(texto: string, digitacao_seg = 20): PassoEditavel {
+  const base = novoPasso('texto', 0) as Extract<PassoEditavel, { tipo: 'texto' }>
+  return { ...base, texto, digitacao_seg }
+}
+
+/** Ações do quadro antigo "Depois de enviar" de cada mensagem viram caixinhas no fim dela. */
+function acoesNasCaixinhas(no: NoTela): NoTela {
+  const c = (x: Continuacao<PassoEditavel>) => ({ ...x, resposta: x.resposta ? acoesNasCaixinhas(x.resposta) : null })
+  return {
+    ...no, passos: [...no.passos, ...no.acoes.map(passoDeAcao)], acoes: [],
+    opcoes: no.opcoes.map(o => ({ ...o, cont: c(o.cont) })), aposPergunta: c(no.aposPergunta),
+  }
 }
 
 function novoNo(texto = ''): NoTela {
-  return { id: novoId(), passos: [{ ...textoInicial(texto), digitacao_seg: 8 }], depois: 'fim', opcoes: [], mostrarOpcoes: true, guardarComo: '', aposPergunta: continuacaoFim(), acoes: [] }
+  return { id: novoId(), passos: [textoInicial(texto, 8)], depois: 'fim', opcoes: [], mostrarOpcoes: true, guardarComo: '', aposPergunta: continuacaoFim(), acoes: [] }
 }
 
 /** Automação nova já vem com um exemplo pronto para trocar os textos. */
@@ -64,7 +74,7 @@ function exemplo(): NoTela {
 }
 
 const nomeDoNo = (n: NoTela) => {
-  const p = n.passos[0]
+  const p = n.passos.find(x => x.tipo !== 'acao')
   if (!p) return 'Mensagem'
   return p.tipo === 'texto' ? (p.texto.trim().split('\n')[0] || 'Mensagem').slice(0, 50) : p.nome_arquivo ?? 'Mídia'
 }
@@ -233,8 +243,6 @@ function NoEditor({ no, onChange, nivel, raiz = false, semRespostas = false }: {
   return (
     <div className="space-y-4">
       <PassosEditor passos={no.passos} onChange={p => onChange({ ...no, passos: p })} variaveis={variaveis} />
-      <AcoesEditor acoes={no.acoes} onChange={a => onChange({ ...no, acoes: a })}
-        ajuda="O que fazer na conversa logo depois que esta mensagem sai, nesta ordem (ex.: pôr uma etiqueta, arquivar)." />
       <div className="space-y-2">
         <p className={LABEL}>Depois dessa mensagem</p>
         <Escolha rotulo="Depois dessa mensagem" valor={no.depois} opcoes={raiz ? DEPOIS.filter(d => d.valor !== 'inicio') : DEPOIS} onChange={mudarDepois} />
@@ -253,7 +261,7 @@ export function FluxoEditor({ fluxoId, inicial }: { fluxoId: string | null; inic
   const [{ raizInicial, perdeu }] = useState(() => {
     if (!inicial?.etapas.length) return { raizInicial: exemplo(), perdeu: false }
     const r = etapasParaArvore(inicial.etapas)
-    return { raizInicial: r.raiz ? mapearArvore(r.raiz, paraEditavel) : exemplo(), perdeu: r.perdeu }
+    return { raizInicial: r.raiz ? acoesNasCaixinhas(mapearArvore(r.raiz, paraEditavel)) : exemplo(), perdeu: r.perdeu }
   })
   const [passo, setPasso]               = useState(0)
   const [nome, setNome]                 = useState(inicial?.nome ?? '')
@@ -289,7 +297,7 @@ export function FluxoEditor({ fluxoId, inicial }: { fluxoId: string | null; inic
 
   const etapas = arvoreParaEtapas(raiz, {
     nome: nomeDoNo,
-    passosAtendente: () => [{ ...textoInicial(msgHumano), digitacao_seg: 3 }],
+    passosAtendente: () => [textoInicial(msgHumano, 3)],
   })
   const etapasSalvar = etapas.map(e => ({ ...e, passos: paraEnvio(e.passos) }))
   const fluxoSimulado = {
@@ -303,8 +311,8 @@ export function FluxoEditor({ fluxoId, inicial }: { fluxoId: string | null; inic
   async function salvar() {
     setErro(null); setSalvo(false)
     if (!nome.trim()) { setPasso(0); setErro('Dê um nome para a automação.'); return }
-    if (etapas.some(e => e.passos.some(p => p.tipo !== 'texto' && !p.caminho))) { setErro('Uma mensagem com arquivo ainda está sem o arquivo.'); return }
-    if (etapas.some(e => e.acoes.some(acaoIncompleta))) { setErro('Uma ação depois do envio está incompleta (escolha a etiqueta ou escreva a nota).'); return }
+    if (etapas.some(e => e.passos.some(midiaSemArquivo))) { setErro('Uma mensagem com arquivo ainda está sem o arquivo.'); return }
+    if (etapas.some(e => e.passos.some(p => p.tipo === 'acao' && acaoIncompleta(p.acao)))) { setErro('Uma ação está incompleta (escolha a etiqueta ou escreva a nota).'); return }
     setSalvando(true)
     const r = await salvarFluxoAction(fluxoId, {
       nome, ativo, etapas: etapasSalvar,

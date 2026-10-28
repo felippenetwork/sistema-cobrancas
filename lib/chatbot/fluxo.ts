@@ -154,12 +154,15 @@ export function passosDaEtapa(etapa: Etapa): Passo[] {
   const r = etapa.resposta
   if (r.tipo !== 'menu' || !r.mostrar_opcoes) return etapa.passos
   const menu = textoDoMenu(r.opcoes)
-  const ultimo = etapa.passos[etapa.passos.length - 1]
+  // A lista vai na última MENSAGEM (ações no fim da sequência não contam).
+  let k = etapa.passos.length - 1
+  while (k > 0 && etapa.passos[k].tipo === 'acao') k--
+  const ultimo = etapa.passos[k]
+  const junta = (t: string) => `${t}\n\n${menu}`
   if (ultimo.tipo === 'texto') {
-    const junta = (t: string) => `${t}\n\n${menu}`
-    return [...etapa.passos.slice(0, -1), { ...ultimo, texto: junta(ultimo.texto), variacoes: ultimo.variacoes.map(junta) }]
+    return etapa.passos.map((p, j) => (j === k ? { ...ultimo, texto: junta(ultimo.texto), variacoes: ultimo.variacoes.map(junta) } : p))
   }
-  return [...etapa.passos, { tipo: 'texto', texto: menu, variacoes: [], digitacao_seg: 3 }]
+  return [...etapa.passos.slice(0, k + 1), { tipo: 'texto', texto: menu, variacoes: [], digitacao_seg: 3 }, ...etapa.passos.slice(k + 1)]
 }
 
 // ── Etiquetas ─────────────────────────────────────────────────────────────────
