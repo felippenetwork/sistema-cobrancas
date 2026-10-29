@@ -1,4 +1,4 @@
-// Espelho do schema em supabase/migrations/*, mantido À MÃO (última sincronização: migration 0043).
+// Espelho do schema em supabase/migrations/*, mantido À MÃO (última sincronização: migration 0045).
 // Toda migration que cria/altera tabela ou coluna atualiza este arquivo na MESMA tarefa — tabela ou
 // coluna faltando aqui vira `as any` no código (foi assim que cobrancas_pix e mensagens_rapidas
 // ficaram sem tipo). Para regenerar do banco real (precisa de SUPABASE_ACCESS_TOKEN):
@@ -1003,6 +1003,54 @@ export type Database = {
         Relationships: [
           { foreignKeyName: 'bot_mensagens_conta_id_fkey'; columns: ['conta_id']; isOneToOne: false; referencedRelation: 'contas'; referencedColumns: ['id'] },
           { foreignKeyName: 'bot_mensagens_conversa_id_fkey'; columns: ['conversa_id']; isOneToOne: false; referencedRelation: 'bot_conversas'; referencedColumns: ['id'] },
+        ]
+      }
+      envios_agendados: {
+        Row: {
+          id: string
+          conta_id: string
+          cliente_id: string | null
+          celular: string
+          nome: string | null
+          passos: Json
+          agendado_para: string
+          status: 'pendente' | 'enviado' | 'falhou' | 'cancelado'
+          erro: string | null
+          aviso: string | null
+          enviado_em: string | null
+          criado_em: string
+        }
+        Insert: {
+          id?: string
+          conta_id: string
+          cliente_id?: string | null
+          celular: string
+          nome?: string | null
+          passos: Json
+          agendado_para: string
+          status?: 'pendente' | 'enviado' | 'falhou' | 'cancelado'
+          erro?: string | null
+          aviso?: string | null
+          enviado_em?: string | null
+          criado_em?: string
+        }
+        Update: {
+          id?: string
+          conta_id?: string
+          cliente_id?: string | null
+          celular?: string
+          nome?: string | null
+          passos?: Json
+          agendado_para?: string
+          status?: 'pendente' | 'enviado' | 'falhou' | 'cancelado'
+          erro?: string | null
+          aviso?: string | null
+          enviado_em?: string | null
+          criado_em?: string
+        }
+        Relationships: [
+          { foreignKeyName: 'envios_agendados_conta_id_fkey'; columns: ['conta_id']; isOneToOne: false; referencedRelation: 'contas'; referencedColumns: ['id'] },
+          { foreignKeyName: 'envios_agendados_cliente_id_fkey'; columns: ['cliente_id']; isOneToOne: false; referencedRelation: 'clientes'; referencedColumns: ['id'] },
         ]
       }
     }

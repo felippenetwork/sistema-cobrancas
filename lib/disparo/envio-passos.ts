@@ -4,7 +4,7 @@
 // Caixinha de AÇÃO (etiqueta, arquivar…) no meio da sequência roda como um envio sem digitação,
 // marcado `melhorEsforco`: se falhar, quem chama registra o aviso e segue para a próxima.
 import { createAdminClient } from '@/lib/supabase/admin'
-import { sendMedia, sendText } from '@/lib/uazapi'
+import { sendMedia, sendPresence, sendText } from '@/lib/uazapi'
 import { aplicarVariaveis } from '@/lib/chatbot/fluxo'
 import { BUCKET_MIDIA, TIPOS_MIDIA, textoDoPasso, type Passo } from './passos'
 import { montarTexto } from './progressivo'
@@ -25,6 +25,37 @@ export type Envio = {
   /** Ação na conversa: falha vira aviso e a sequência continua (nunca desfaz o que já saiu). */
   melhorEsforco?: boolean
   enviar: (ultimaMensagem: string | null) => Promise<string | null>
+}
+
+export type ResultadoSequencia = {
+  /** Mensagens (não ações) que saíram. */
+  feitos: number
+  total: number
+  /** Ações que falharam no meio (a sequência seguiu). */
+  avisos: string[]
+  ultimaMensagem: string | null
+  /** Mensagem que falhou e interrompeu a sequência (o que vem depois dela não saiu). */
+  falha: { erro: unknown } | null
+}
+
+/** Envia na ordem, com o "digitando…" de cada um; para na primeira MENSAGEM que falhar. */
+export async function enviarSequencia(token: string, celular: string, envios: Envio[]): Promise<ResultadoSequencia> {
+  const r: ResultadoSequencia = { feitos: 0, total: envios.filter(e => !e.melhorEsforco).length, avisos: [], ultimaMensagem: null, falha: null }
+  for (const e of envios) {
+    try {
+      if (e.digitacaoMs > 0) {
+        await sendPresence(token, celular, e.digitacaoMs, e.presenca)
+        await new Promise<void>(resolve => setTimeout(resolve, e.digitacaoMs))
+      }
+      r.ultimaMensagem = (await e.enviar(r.ultimaMensagem)) ?? r.ultimaMensagem
+      if (!e.melhorEsforco) r.feitos++
+    } catch (err) {
+      if (e.melhorEsforco) { r.avisos.push(err instanceof Error ? err.message : String(err)); continue }
+      r.falha = { erro: err }
+      break
+    }
+  }
+  return r
 }
 
 export function enviosDosPassos(

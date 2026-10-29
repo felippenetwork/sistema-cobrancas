@@ -1,111 +1,140 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
-import { createAdminClient } from '@/lib/supabase/admin'
+// Agendamentos: envio para UMA pessoa numa data e hora (envios_agendados, lib/disparo/agendados.ts).
+// Cliente cadastrado ou número digitado; a mensagem é a mesma sequência de caixinhas dos modelos.
+// Os agendamentos antigos (notificacoes_enviadas tipo 'agendada') continuam saindo pelo cron e só
+// podem ser cancelados aqui.
+
 import { revalidatePath } from 'next/cache'
+import { z } from 'zod'
+import { getConta } from '@/lib/conta'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { ehMidia, pastaDaConta, schemaPassos } from '@/lib/disparo/passos'
+import { instanteSP, normalizarCelular } from '@/lib/disparo/progressivo'
 
-export type ActionState = { error: string | null; success?: boolean }
+type Result = { error: string | null; id?: string }
 
-async function getConta() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Não autenticado.')
-  const { data: conta } = await supabase
-    .from('contas').select('id').eq('owner_user_id', user.id).single()
-  if (!conta) throw new Error('Conta não encontrada.')
-  return { supabase, contaId: conta.id as string, userId: user.id }
-}
+const MAX_ANTECEDENCIA_MS = 366 * 24 * 60 * 60_000
 
-export async function criarAgendamentoAction(
-  _prev: ActionState,
-  formData: FormData,
-): Promise<ActionState> {
+const schemaAgendamento = z.object({
+  destino: z.discriminatedUnion('tipo', [
+    z.object({ tipo: z.literal('cliente'), clienteId: z.string().uuid('Escolha um cliente.') }),
+    z.object({
+      tipo: z.literal('numero'),
+      celular: z.string().max(40),
+      nome: z.string().trim().max(80, 'Nome muito longo (máximo 80 caracteres).'),
+    }),
+  ]),
+  passos: schemaPassos,
+  data: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data inválida.'),
+  hora: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Horário inválido.'),
+})
+
+export type AgendamentoEntrada = z.input<typeof schemaAgendamento>
+
+export async function criarEnvioAgendadoAction(input: AgendamentoEntrada): Promise<Result> {
+  const parsed = schemaAgendamento.safeParse(input)
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? 'Dados inválidos.' }
+  const d = parsed.data
+
+  const agendadoPara = instanteSP(d.data, d.hora)
+  if (isNaN(agendadoPara.getTime())) return { error: 'Data ou horário inválido.' }
+  if (agendadoPara.getTime() <= Date.now()) return { error: 'Escolha um horário que ainda não passou.' }
+  if (agendadoPara.getTime() - Date.now() > MAX_ANTECEDENCIA_MS) return { error: 'Agende para no máximo um ano à frente.' }
+
   try {
     const { supabase, contaId } = await getConta()
 
-    const clienteId = (formData.get('cliente_id') as string)?.trim()
-    const mensagem  = (formData.get('mensagem')   as string)?.trim()
-    const data      = (formData.get('data')        as string)?.trim()
-    const hora      = (formData.get('hora')        as string)?.trim()
-    const assunto   = (formData.get('assunto')     as string)?.trim() || null
-    const canais    = formData.getAll('canais') as string[]
-
-    if (!clienteId)              return { error: 'Selecione um cliente.' }
-    if (!mensagem)               return { error: 'A mensagem não pode estar vazia.' }
-    if (mensagem.length > 4000)  return { error: 'Mensagem muito longa (máximo 4000 caracteres).' }
-    if (!data || !hora)          return { error: 'Data e hora são obrigatórias.' }
-    if (!canais.length)          return { error: 'Selecione pelo menos um canal.' }
-
-    const agendadoPara = new Date(`${data}T${hora}:00-03:00`)
-    if (isNaN(agendadoPara.getTime())) return { error: 'Data ou hora inválida.' }
-    if (agendadoPara <= new Date())    return { error: 'O agendamento deve ser para um horário futuro.' }
-
-    const querWhatsApp = canais.includes('whatsapp')
-    const querEmail    = canais.includes('email')
-
-    if (querEmail && !assunto) return { error: 'O assunto é obrigatório para envio por e-mail.' }
-
-    // Validar cliente e canais
-    const { data: cliente } = await supabase
-      .from('clientes')
-      .select('id, celular, email, deleted_at')
-      .eq('id', clienteId)
-      .eq('conta_id', contaId)
-      .maybeSingle()
-
-    if (!cliente || cliente.deleted_at) return { error: 'Cliente não encontrado.' }
-    if (querWhatsApp && !cliente.celular)
-      return { error: 'Este cliente não tem celular cadastrado para envio por WhatsApp.' }
-    if (querEmail && !cliente.email)
-      return { error: 'Este cliente não tem e-mail cadastrado para envio por e-mail.' }
-
-    const base = {
-      conta_id:       contaId,
-      cliente_id:     clienteId,
-      parcela_id:     null,
-      cobranca_id:    null,
-      tipo:           'agendada' as const,
-      status:         'fila' as const,
-      mensagem_final: mensagem,
-      agendado_para:  agendadoPara.toISOString(),
+    // Mídia só da pasta desta conta: nunca aceitar caminho de arquivo de outra conta.
+    const passos = d.passos.map(p => (p.tipo === 'texto' ? { ...p, variacoes: p.variacoes.filter(Boolean) } : p))
+    if (passos.some(p => ehMidia(p) && !p.caminho.startsWith(pastaDaConta(contaId)))) {
+      return { error: 'Arquivo de mídia inválido. Envie o arquivo de novo.' }
     }
 
-    const inserts = []
-    if (querWhatsApp) inserts.push({ ...base, canal: 'whatsapp' as const })
-    if (querEmail)    inserts.push({ ...base, canal: 'email' as const, assunto })
+    let destino: { cliente_id: string | null; celular: string; nome: string | null }
+    if (d.destino.tipo === 'cliente') {
+      const { data: cliente, error } = await supabase
+        .from('clientes').select('id, nome, celular, deleted_at')
+        .eq('id', d.destino.clienteId).eq('conta_id', contaId).maybeSingle()
+      if (error) {
+        console.error('[agendamentos] leitura do cliente falhou', { contaId, error })
+        return { error: 'Não foi possível ler o cliente. Tente de novo.' }
+      }
+      if (!cliente || cliente.deleted_at) return { error: 'Cliente não encontrado.' }
+      const celular = cliente.celular ? normalizarCelular(cliente.celular) : null
+      if (!celular) return { error: 'Este cliente não tem um celular válido cadastrado. Digite o número.' }
+      destino = { cliente_id: cliente.id, celular, nome: cliente.nome?.trim() || null }
+    } else {
+      const celular = normalizarCelular(d.destino.celular)
+      if (!celular) return { error: 'Número de WhatsApp inválido. Use DDD + número, por exemplo 21 99999-0000.' }
+      destino = { cliente_id: null, celular, nome: d.destino.nome || null }
+    }
 
-    const { error } = await supabase.from('notificacoes_enviadas').insert(inserts)
-    if (error) return { error: error.message }
+    const { data, error } = await supabase
+      .from('envios_agendados')
+      .insert({ conta_id: contaId, ...destino, passos, agendado_para: agendadoPara.toISOString() })
+      .select('id')
+      .single()
+    if (error) {
+      console.error('[agendamentos] criar falhou', { contaId, error })
+      return { error: 'Não foi possível agendar. Tente de novo.' }
+    }
 
-  } catch (e: unknown) {
+    revalidatePath('/agendamentos')
+    return { error: null, id: data.id }
+  } catch (e) {
     return { error: e instanceof Error ? e.message : 'Erro desconhecido.' }
   }
-
-  revalidatePath('/agendamentos')
-  return { error: null, success: true }
 }
 
-export async function cancelarAgendamentoAction(formData: FormData) {
-  // UPDATE não tem policy RLS — usa service role escopado por conta_id
-  const supabaseUser = await createClient()
-  const { data: { user } } = await supabaseUser.auth.getUser()
-  if (!user) return
+/** Cancela um envio que ainda não saiu. De outra conta, ou já enviado: "não pode mais". */
+export async function cancelarEnvioAgendadoAction(id: string): Promise<Result> {
+  if (!z.string().uuid().safeParse(id).success) return { error: 'Agendamento inválido.' }
+  try {
+    const { supabase, contaId } = await getConta()
+    const { data, error } = await supabase
+      .from('envios_agendados')
+      .update({ status: 'cancelado' })
+      .eq('id', id)
+      .eq('conta_id', contaId)
+      .eq('status', 'pendente')
+      .select('id')
+      .maybeSingle()
+    if (error) {
+      console.error('[agendamentos] cancelar falhou', { contaId, id, error })
+      return { error: 'Não foi possível cancelar. Tente de novo.' }
+    }
+    if (!data) return { error: 'Este envio já saiu ou foi cancelado.' }
+    revalidatePath('/agendamentos')
+    return { error: null }
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'Erro desconhecido.' }
+  }
+}
 
-  const { data: conta } = await supabaseUser
-    .from('contas').select('id').eq('owner_user_id', user.id).single()
-  if (!conta) return
-
-  const id      = formData.get('id') as string
-  const contaId = conta.id
-
-  const admin = createAdminClient()
-  await admin
-    .from('notificacoes_enviadas')
-    .update({ status: 'cancelado' })
-    .eq('id', id)
-    .eq('conta_id', contaId)   // isolamento multi-tenant
-    .eq('tipo', 'agendada')
-    .eq('status', 'fila')
-
-  revalidatePath('/agendamentos')
+/** Agendamento antigo (mensagem avulsa em notificacoes_enviadas): só cancelar. */
+export async function cancelarAgendamentoAntigoAction(id: string): Promise<Result> {
+  if (!z.string().uuid().safeParse(id).success) return { error: 'Agendamento inválido.' }
+  try {
+    const { contaId } = await getConta()
+    // notificacoes_enviadas não tem policy de UPDATE: service role, escopado por conta_id.
+    const { data, error } = await createAdminClient()
+      .from('notificacoes_enviadas')
+      .update({ status: 'cancelado' })
+      .eq('id', id)
+      .eq('conta_id', contaId)
+      .eq('tipo', 'agendada')
+      .eq('status', 'fila')
+      .select('id')
+      .maybeSingle()
+    if (error) {
+      console.error('[agendamentos] cancelar antigo falhou', { contaId, id, error })
+      return { error: 'Não foi possível cancelar. Tente de novo.' }
+    }
+    if (!data) return { error: 'Este envio já saiu ou foi cancelado.' }
+    revalidatePath('/agendamentos')
+    return { error: null }
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'Erro desconhecido.' }
+  }
 }

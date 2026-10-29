@@ -17,12 +17,12 @@
 // antes de mandar; 429 da uazapi devolve o contato para 'pendente' e para a conta neste tick;
 // depois que a mensagem saiu, nada a devolve para 'pendente'.
 import { createAdminClient } from '@/lib/supabase/admin'
-import { sendPresence, sendText, UazapiRateLimitError } from '@/lib/uazapi'
+import { sendText, UazapiRateLimitError } from '@/lib/uazapi'
 import { acoesLegadas, lerAcoes } from './acoes'
 import { executarAcoes } from './executar-acoes'
 import { celularVariantes } from '@/lib/utils/celular'
 import { duracaoSequenciaMs, type Passo } from './passos'
-import { enviosDosPassos, ErroTransitorio, type Envio } from './envio-passos'
+import { enviarSequencia, enviosDosPassos, ErroTransitorio, type Envio } from './envio-passos'
 import {
   DIGITACAO_PROGRESSIVO_MS,
   dataSP,
@@ -363,44 +363,33 @@ async function enviarDestinatario(
   if (!claimed) return 'ocupado'
 
   // Cada envio: "digitando…"/"gravando…" pelo tempo pedido e, então, a mensagem/mídia.
-  const envios = montarEnvios(supabase, token, c, dest, digitacaoMs)
-  let feitos = 0
-  let ultimaMensagem: string | null = null
-  const avisos: string[] = []
+  // Ação no meio da sequência (etiqueta, arquivar…) que falha vira aviso e a sequência continua.
+  const seqEnvio = await enviarSequencia(token, dest.celular, montarEnvios(supabase, token, c, dest, digitacaoMs))
+  const { feitos, ultimaMensagem } = seqEnvio
+  const avisos = [...seqEnvio.avisos]
   let pararDepois = false
 
-  for (const e of envios) {
-    try {
-      if (e.digitacaoMs > 0) {
-        await sendPresence(token, dest.celular, e.digitacaoMs, e.presenca)
-        await sleep(e.digitacaoMs)
+  if (seqEnvio.falha) {
+    const err = seqEnvio.falha.erro
+    if (feitos === 0) {
+      // Nada saiu ainda: rate limit ou falha passageira (ex.: link da mídia) devolvem o
+      // contato para 'pendente'; recusa da uazapi vira 'falhou'.
+      if (err instanceof UazapiRateLimitError || err instanceof ErroTransitorio) {
+        if (err instanceof ErroTransitorio) console.error(`${log} falha passageira antes do envio`, { contaId, destId: dest.id, err })
+        const { error: revErr } = await supabase.from('campanha_destinatarios')
+          .update({ status: 'pendente', enviado_em: null }).eq('id', dest.id).eq('conta_id', contaId)
+        if (revErr) console.error(`${log} não devolveu o contato para pendente — ficou "enviado" sem envio`, { contaId, destId: dest.id, revErr })
+        return 'parar'
       }
-      ultimaMensagem = (await e.enviar(ultimaMensagem)) ?? ultimaMensagem
-      if (!e.melhorEsforco) feitos++
-    } catch (err) {
-      // Ação no meio da sequência (etiqueta, arquivar…): vira aviso e a sequência continua.
-      if (e.melhorEsforco) { avisos.push(err instanceof Error ? err.message : String(err)); continue }
-      if (feitos === 0) {
-        // Nada saiu ainda: rate limit ou falha passageira (ex.: link da mídia) devolvem o
-        // contato para 'pendente'; recusa da uazapi vira 'falhou'.
-        if (err instanceof UazapiRateLimitError || err instanceof ErroTransitorio) {
-          if (err instanceof ErroTransitorio) console.error(`${log} falha passageira antes do envio`, { contaId, destId: dest.id, err })
-          const { error: revErr } = await supabase.from('campanha_destinatarios')
-            .update({ status: 'pendente', enviado_em: null }).eq('id', dest.id).eq('conta_id', contaId)
-          if (revErr) console.error(`${log} não devolveu o contato para pendente — ficou "enviado" sem envio`, { contaId, destId: dest.id, revErr })
-          return 'parar'
-        }
-        const { error: falhaErr } = await supabase.from('campanha_destinatarios')
-          .update({ status: 'falhou', erro: String(err).slice(0, 500) }).eq('id', dest.id).eq('conta_id', contaId)
-        if (falhaErr) console.error(`${log} não marcou o contato como falhou — ficou "enviado" sem envio`, { contaId, destId: dest.id, falhaErr })
-        await atualizarTotais(supabase, contaId, c.id)
-        return 'falhou'
-      }
-      // Parte da sequência já saiu: NUNCA volta para 'pendente' (reenviaria o começo).
-      avisos.push(`Enviou ${feitos} de ${envios.filter(x => !x.melhorEsforco).length} mensagens: ${err instanceof Error ? err.message : String(err)}`)
-      pararDepois = err instanceof UazapiRateLimitError
-      break
+      const { error: falhaErr } = await supabase.from('campanha_destinatarios')
+        .update({ status: 'falhou', erro: String(err).slice(0, 500) }).eq('id', dest.id).eq('conta_id', contaId)
+      if (falhaErr) console.error(`${log} não marcou o contato como falhou — ficou "enviado" sem envio`, { contaId, destId: dest.id, falhaErr })
+      await atualizarTotais(supabase, contaId, c.id)
+      return 'falhou'
     }
+    // Parte da sequência já saiu: NUNCA volta para 'pendente' (reenviaria o começo).
+    avisos.push(`Enviou ${feitos} de ${seqEnvio.total} mensagens: ${err instanceof Error ? err.message : String(err)}`)
+    pararDepois = err instanceof UazapiRateLimitError
   }
 
   // ── Mensagem já saiu: daqui para baixo nada a devolve para 'pendente'.

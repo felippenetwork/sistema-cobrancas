@@ -22,6 +22,7 @@ import { resolverVariaveis, resolverVariaveisLeves, VariaveisIndisponiveisError 
 import { atualizarStatusNotificacao, vereditoLembrete } from '@/lib/whatsapp/status-notificacao'
 import { cronAutorizado } from '@/lib/cron-auth'
 import { processarCampanhas } from '@/lib/disparo/campanhas'
+import { processarAgendados } from '@/lib/disparo/agendados'
 import {
   instName,
   getAllInstances,
@@ -286,7 +287,10 @@ async function processarConta(
   const intMin  = cfg?.intervalo_min_seg ?? 45
   const intMax  = cfg?.intervalo_max_seg ?? 80
 
-  let enviados = 0
+  // Envios agendados para uma pessoa (/agendamentos) primeiro: têm hora marcada.
+  const agendados = await processarAgendados(supabase, contaId, token, cfg, inicioExecucao, budgetMs)
+  let enviados = agendados.enviados
+  if (agendados.pararConta) return enviados
 
   while (Date.now() - inicioExecucao < budgetMs) {
     const agora = new Date().toISOString()
