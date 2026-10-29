@@ -14,7 +14,7 @@ vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }))
 vi.mock('@/lib/conta', () => ({ getConta: async () => ({ supabase: mocks.db.atual, contaId: CONTA, userId: 'u1' }) }))
 vi.mock('@/lib/supabase/admin', () => ({ createAdminClient: () => mocks.db.atual }))
 
-import { cancelarEnvioAgendadoAction, criarEnvioAgendadoAction } from '@/app/(app)/agendamentos/_actions/agendamentos'
+import { atualizarEnvioAgendadoAction, cancelarEnvioAgendadoAction, criarEnvioAgendadoAction } from '@/app/(app)/agendamentos/_actions/agendamentos'
 
 const texto = { tipo: 'texto' as const, texto: '{{periododia}}, {{nome}}! Como combinamos.', variacoes: [], digitacao_seg: 10 }
 const quando = { data: '2026-10-29', hora: '15:30' }
@@ -71,6 +71,49 @@ describe('agendar envio', () => {
   it('sem nome, o nome fica vazio (o {{nome}} some da frase na hora do envio)', async () => {
     await criarEnvioAgendadoAction({ destino: { tipo: 'numero', celular: '21999990001', nome: '' }, passos: [texto], ...quando })
     expect(db.linhas('envios_agendados')[0].nome).toBeNull()
+  })
+})
+
+describe('editar', () => {
+  const ENVIADO = '66666666-6666-4666-8666-666666666666'
+  const DA_OUTRA = '77777777-7777-4777-8777-777777777777'
+  const antes = { celular: '5521999990001', nome: 'Maria', cliente_id: null, passos: [texto], agendado_para: '2026-10-29T18:30:00.000Z', erro: null, aviso: null }
+
+  beforeEach(() => {
+    db = new FakeDb({
+      clientes: [{ id: CLIENTE, conta_id: CONTA, nome: 'João', celular: '5521988887777', deleted_at: null }],
+      envios_agendados: [
+        { id: AG, conta_id: CONTA, status: 'pendente', ...antes },
+        { id: ENVIADO, conta_id: CONTA, status: 'enviado', ...antes },
+        { id: DA_OUTRA, conta_id: OUTRA, status: 'pendente', ...antes },
+      ],
+    })
+    mocks.db.atual = db.cliente()
+  })
+  const linha = (id: string) => db.linhas('envios_agendados').find(l => l.id === id)!
+
+  it('troca dia, hora, mensagem e a pessoa de um envio que ainda não saiu', async () => {
+    const nova = { ...texto, texto: 'Mudou: {{nome}}' }
+    const r = await atualizarEnvioAgendadoAction(AG, { destino: { tipo: 'cliente', clienteId: CLIENTE }, passos: [nova], data: '2026-10-30', hora: '08:15' })
+    expect(r.error).toBeNull()
+    expect(linha(AG)).toMatchObject({
+      status: 'pendente', cliente_id: CLIENTE, celular: '5521988887777', nome: 'João',
+      agendado_para: '2026-10-30T11:15:00.000Z', passos: [nova],
+    })
+  })
+
+  it('envio que já saiu ou de outra conta não muda', async () => {
+    const entrada = { destino: { tipo: 'numero' as const, celular: '21911110000', nome: 'X' }, passos: [texto], data: '2026-10-30', hora: '08:15' }
+    expect((await atualizarEnvioAgendadoAction(ENVIADO, entrada)).error).toMatch(/já saiu/)
+    expect((await atualizarEnvioAgendadoAction(DA_OUTRA, entrada)).error).toMatch(/já saiu/)
+    expect(linha(ENVIADO)).toMatchObject(antes)
+    expect(linha(DA_OUTRA)).toMatchObject(antes)
+  })
+
+  it('as mesmas regras do agendar: horário passado é recusado e nada muda', async () => {
+    const r = await atualizarEnvioAgendadoAction(AG, { destino: { tipo: 'numero', celular: '21999990001', nome: 'Maria' }, passos: [texto], data: '2026-10-29', hora: '09:00' })
+    expect(r.error).toMatch(/ainda não passou/)
+    expect(linha(AG)).toMatchObject(antes)
   })
 })
 

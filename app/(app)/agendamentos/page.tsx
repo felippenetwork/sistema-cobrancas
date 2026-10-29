@@ -18,7 +18,7 @@ export default async function AgendamentosPage() {
     supabase.from('clientes').select('id, nome, sobrenome, celular')
       .eq('conta_id', contaId).is('deleted_at', null).not('celular', 'is', null).order('nome').limit(2000),
     supabase.from('modelos_wa').select('id, nome, corpo, passos').eq('conta_id', contaId).order('nome'),
-    supabase.from('envios_agendados').select('id, celular, nome, passos, agendado_para, status, erro, aviso, enviado_em, clientes(nome, sobrenome)')
+    supabase.from('envios_agendados').select('id, cliente_id, celular, nome, passos, agendado_para, status, erro, aviso, enviado_em, clientes(nome, sobrenome)')
       .eq('conta_id', contaId).order('agendado_para', { ascending: false }).limit(200),
     // Mensagens avulsas da tela antiga (só clientes, só texto) — continuam saindo pelo cron.
     supabase.from('notificacoes_enviadas').select('id, status, mensagem_final, agendado_para, enviado_em, clientes(nome, sobrenome, celular)')
@@ -42,6 +42,10 @@ export default async function AgendamentosPage() {
         id: e.id, antigo: false, celular: e.celular, nome: nomeCompleto(cliente) ?? e.nome,
         resumo: passos.success ? resumoDosPassos(passos.data) : '',
         agendado_para: e.agendado_para, status: e.status, erro: e.erro, aviso: e.aviso, enviado_em: e.enviado_em,
+        // Só o que ainda não saiu pode ser editado.
+        edicao: e.status === 'pendente' && passos.success
+          ? { clienteId: e.cliente_id, celular: e.celular, nome: e.nome, passos: passos.data }
+          : null,
       }
     }),
     ...(antigos.data ?? []).map(a => {
@@ -51,7 +55,7 @@ export default async function AgendamentosPage() {
       return {
         id: a.id, antigo: true, celular: cliente?.celular ?? '', nome: nomeCompleto(cliente),
         resumo: a.mensagem_final ?? '', agendado_para: a.agendado_para as string, status,
-        erro: null, aviso: null, enviado_em: a.enviado_em,
+        erro: null, aviso: null, enviado_em: a.enviado_em, edicao: null,
       }
     }),
   ].sort((a, b) => b.agendado_para.localeCompare(a.agendado_para))

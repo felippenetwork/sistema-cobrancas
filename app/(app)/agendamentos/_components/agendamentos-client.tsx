@@ -2,12 +2,12 @@
 
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
-import { CalendarClock, Loader2, Plus, Search, X } from 'lucide-react'
+import { CalendarClock, Loader2, Pencil, Plus, Search, X } from 'lucide-react'
 import type { Passo } from '@/lib/disparo/passos'
 import { formatarCelular, mascararCelular } from '@/lib/validations/celular'
 import { PassosEditor, midiaSemArquivo, novoPasso, paraEditavel, paraEnvio, type PassoEditavel } from '../../disparos/_components/passos-editor'
 import { acaoIncompleta } from '../../disparos/_components/acoes-editor'
-import { cancelarAgendamentoAntigoAction, cancelarEnvioAgendadoAction, criarEnvioAgendadoAction } from '../_actions/agendamentos'
+import { atualizarEnvioAgendadoAction, cancelarAgendamentoAntigoAction, cancelarEnvioAgendadoAction, criarEnvioAgendadoAction } from '../_actions/agendamentos'
 
 export type LinhaAgendamento = {
   id: string
@@ -21,6 +21,8 @@ export type LinhaAgendamento = {
   erro: string | null
   aviso: string | null
   enviado_em: string | null
+  /** Pendente da tela nova: dados para abrir o formulário de edição. */
+  edicao: { clienteId: string | null; celular: string; nome: string | null; passos: Passo[] } | null
 }
 type Cliente = { id: string; nome: string; celular: string }
 type Modelo = { id: string; nome: string; passos: Passo[] }
@@ -42,7 +44,8 @@ const dataHora = (iso: string) => new Date(iso).toLocaleString('pt-BR', {
 const numeroLegivel = (c: string) => (c ? formatarCelular(c) : '—')
 
 export function AgendamentosClient({ linhas, clientes, modelos }: { linhas: LinhaAgendamento[]; clientes: Cliente[]; modelos: Modelo[] }) {
-  const [novo, setNovo] = useState(false)
+  // null = fechado; 'novo' = agendar; linha = editar aquele envio.
+  const [formulario, setFormulario] = useState<LinhaAgendamento | 'novo' | null>(null)
   const [cancelando, setCancelando] = useState<string | null>(null)
   const [erro, setErro] = useState<string | null>(null)
 
@@ -66,7 +69,7 @@ export function AgendamentosClient({ linhas, clientes, modelos }: { linhas: Linh
             Uma mensagem para uma pessoa, no dia e na hora que você escolher. Serve para cliente cadastrado ou qualquer número.
           </p>
         </div>
-        <button onClick={() => setNovo(true)}
+        <button onClick={() => setFormulario('novo')}
           className="flex shrink-0 items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition hover:opacity-90">
           <Plus className="h-4 w-4" /> Novo agendamento
         </button>
@@ -78,28 +81,32 @@ export function AgendamentosClient({ linhas, clientes, modelos }: { linhas: Linh
         <div className="rounded-2xl border border-dashed border-border p-10 text-center">
           <CalendarClock className="mx-auto h-5 w-5 text-muted-foreground" />
           <p className="mt-3 text-sm text-muted-foreground">Nenhum envio agendado. Quando alguém pedir para você lembrar numa hora certa, agende aqui e a mensagem sai sozinha.</p>
-          <button onClick={() => setNovo(true)}
+          <button onClick={() => setFormulario('novo')}
             className="mt-4 rounded-xl bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition hover:opacity-90">
             Agendar primeiro envio
           </button>
         </div>
       ) : (
         <div className="space-y-8">
-          <Secao titulo="Próximos envios" vazio="Nada agendado daqui para frente." linhas={agendados} onCancelar={cancelar} cancelando={cancelando} />
-          {historico.length > 0 && <Secao titulo="Já passaram" linhas={historico} onCancelar={cancelar} cancelando={cancelando} />}
+          <Secao titulo="Próximos envios" vazio="Nada agendado daqui para frente." linhas={agendados} onCancelar={cancelar} onEditar={setFormulario} cancelando={cancelando} />
+          {historico.length > 0 && <Secao titulo="Já passaram" linhas={historico} onCancelar={cancelar} onEditar={setFormulario} cancelando={cancelando} />}
         </div>
       )}
 
-      {novo && <NovoAgendamento clientes={clientes} modelos={modelos} onFechar={() => setNovo(false)} />}
+      {formulario && (
+        <FormularioAgendamento key={formulario === 'novo' ? 'novo' : formulario.id} clientes={clientes} modelos={modelos}
+          inicial={formulario === 'novo' ? null : formulario} onFechar={() => setFormulario(null)} />
+      )}
     </div>
   )
 }
 
-function Secao({ titulo, vazio, linhas, onCancelar, cancelando }: {
+function Secao({ titulo, vazio, linhas, onCancelar, onEditar, cancelando }: {
   titulo: string
   vazio?: string
   linhas: LinhaAgendamento[]
   onCancelar: (l: LinhaAgendamento) => void
+  onEditar: (l: LinhaAgendamento) => void
   cancelando: string | null
 }) {
   return (
@@ -127,6 +134,13 @@ function Secao({ titulo, vazio, linhas, onCancelar, cancelando }: {
                 <div className="flex shrink-0 items-center gap-3">
                   <span className="text-xs text-muted-foreground tabular-nums">{dataHora(l.enviado_em ?? l.agendado_para)}</span>
                   <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${s.cls}`}>{s.rotulo}</span>
+                  {l.edicao && (
+                    <button onClick={() => onEditar(l)} aria-label={`Editar envio para ${l.nome ?? numeroLegivel(l.celular)}`}
+                      className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-muted-foreground transition hover:bg-accent hover:text-foreground">
+                      <Pencil className="h-3.5 w-3.5" />
+                      Editar
+                    </button>
+                  )}
                   {l.status === 'pendente' && (
                     <button onClick={() => onCancelar(l)} disabled={cancelando === l.id} aria-label={`Cancelar envio para ${l.nome ?? numeroLegivel(l.celular)}`}
                       className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive disabled:opacity-50">
@@ -152,15 +166,33 @@ function sugestaoDeHorario(): { data: string; hora: string } {
   return { data, hora: `${hh}:00` }
 }
 
-function NovoAgendamento({ clientes, modelos, onFechar }: { clientes: Cliente[]; modelos: Modelo[]; onFechar: () => void }) {
-  const [tipo, setTipo] = useState<'cliente' | 'numero'>(clientes.length ? 'cliente' : 'numero')
+/** Dia e hora (São Paulo) de um envio já agendado, no formato dos campos. */
+function horarioDe(iso: string): { data: string; hora: string } {
+  const d = new Date(iso)
+  return {
+    data: d.toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }),
+    hora: d.toLocaleTimeString('en-GB', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false }),
+  }
+}
+
+function FormularioAgendamento({ clientes, modelos, inicial, onFechar }: {
+  clientes: Cliente[]
+  modelos: Modelo[]
+  /** Envio pendente sendo editado; null = agendamento novo. */
+  inicial: LinhaAgendamento | null
+  onFechar: () => void
+}) {
+  const ed = inicial?.edicao ?? null
+  // Cliente que saiu da lista (apagado ou sem celular) abre como número digitado.
+  const clienteInicial = ed?.clienteId && clientes.some(c => c.id === ed.clienteId) ? ed.clienteId : ''
+  const [tipo, setTipo] = useState<'cliente' | 'numero'>(ed ? (clienteInicial ? 'cliente' : 'numero') : clientes.length ? 'cliente' : 'numero')
   const [busca, setBusca] = useState('')
-  const [clienteId, setClienteId] = useState('')
-  const [nome, setNome] = useState('')
-  const [celular, setCelular] = useState('')
-  const [{ data, hora }, setQuando] = useState(sugestaoDeHorario)
+  const [clienteId, setClienteId] = useState(clienteInicial)
+  const [nome, setNome] = useState(ed && !clienteInicial ? ed.nome ?? '' : '')
+  const [celular, setCelular] = useState(ed && !clienteInicial ? mascararCelular(ed.celular) : '')
+  const [{ data, hora }, setQuando] = useState(() => (inicial ? horarioDe(inicial.agendado_para) : sugestaoDeHorario()))
   const [modeloId, setModeloId] = useState('')
-  const [passos, setPassos] = useState<PassoEditavel[]>(() => [novoPasso('texto', 0)])
+  const [passos, setPassos] = useState<PassoEditavel[]>(() => (ed ? paraEditavel(ed.passos) : [novoPasso('texto', 0)]))
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
 
@@ -187,11 +219,12 @@ function NovoAgendamento({ clientes, modelos, onFechar }: { clientes: Cliente[];
     if (passos.some(midiaSemArquivo)) { setErro('Uma mensagem de mídia ainda está sem arquivo.'); return }
     if (passos.some(p => p.tipo === 'acao' && acaoIncompleta(p.acao))) { setErro('Uma ação está incompleta (escolha a etiqueta ou escreva a nota).'); return }
     setSalvando(true)
-    const r = await criarEnvioAgendadoAction({
+    const entrada = {
       destino: tipo === 'cliente' ? { tipo, clienteId } : { tipo, celular, nome },
       passos: paraEnvio(passos),
       data, hora,
-    })
+    }
+    const r = inicial ? await atualizarEnvioAgendadoAction(inicial.id, entrada) : await criarEnvioAgendadoAction(entrada)
     setSalvando(false)
     if (r.error) { setErro(r.error); return }
     onFechar()
@@ -210,7 +243,7 @@ function NovoAgendamento({ clientes, modelos, onFechar }: { clientes: Cliente[];
       <form onSubmit={agendar} role="dialog" aria-modal="true" aria-labelledby="titulo-agendamento"
         className="fixed inset-y-0 right-0 z-50 flex w-full max-w-xl flex-col border-l border-border bg-card shadow-sm">
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
-          <h2 id="titulo-agendamento" className="text-base font-semibold text-foreground">Novo agendamento</h2>
+          <h2 id="titulo-agendamento" className="text-base font-semibold text-foreground">{inicial ? 'Editar agendamento' : 'Novo agendamento'}</h2>
           <button type="button" onClick={onFechar} aria-label="Fechar" className="rounded-md p-1 text-muted-foreground hover:text-foreground">
             <X className="h-5 w-5" />
           </button>
@@ -312,7 +345,7 @@ function NovoAgendamento({ clientes, modelos, onFechar }: { clientes: Cliente[];
           <button type="submit" disabled={salvando}
             className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50">
             {salvando && <Loader2 className="h-4 w-4 animate-spin" />}
-            {salvando ? 'Agendando…' : 'Agendar envio'}
+            {salvando ? 'Salvando…' : inicial ? 'Salvar alterações' : 'Agendar envio'}
           </button>
           <button type="button" onClick={onFechar} className="rounded-xl border border-border px-4 py-2.5 text-sm text-muted-foreground transition hover:text-foreground">
             Cancelar

@@ -9,7 +9,7 @@ import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { getConta } from '@/lib/conta'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { ehMidia, pastaDaConta, schemaPassos } from '@/lib/disparo/passos'
+import { ehMidia, pastaDaConta, schemaPassos, type Passo } from '@/lib/disparo/passos'
 import { instanteSP, normalizarCelular } from '@/lib/disparo/progressivo'
 
 type Result = { error: string | null; id?: string }
@@ -32,47 +32,53 @@ const schemaAgendamento = z.object({
 
 export type AgendamentoEntrada = z.input<typeof schemaAgendamento>
 
-export async function criarEnvioAgendadoAction(input: AgendamentoEntrada): Promise<Result> {
+type Supabase = Awaited<ReturnType<typeof getConta>>['supabase']
+type Colunas = { cliente_id: string | null; celular: string; nome: string | null; passos: Passo[]; agendado_para: string }
+
+/** Valida a entrada e monta as colunas do envio (mesma regra para agendar e para editar). */
+async function colunasDoAgendamento(input: AgendamentoEntrada, supabase: Supabase, contaId: string): Promise<Colunas | { erro: string }> {
   const parsed = schemaAgendamento.safeParse(input)
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? 'Dados inválidos.' }
+  if (!parsed.success) return { erro: parsed.error.issues[0]?.message ?? 'Dados inválidos.' }
   const d = parsed.data
 
   const agendadoPara = instanteSP(d.data, d.hora)
-  if (isNaN(agendadoPara.getTime())) return { error: 'Data ou horário inválido.' }
-  if (agendadoPara.getTime() <= Date.now()) return { error: 'Escolha um horário que ainda não passou.' }
-  if (agendadoPara.getTime() - Date.now() > MAX_ANTECEDENCIA_MS) return { error: 'Agende para no máximo um ano à frente.' }
+  if (isNaN(agendadoPara.getTime())) return { erro: 'Data ou horário inválido.' }
+  if (agendadoPara.getTime() <= Date.now()) return { erro: 'Escolha um horário que ainda não passou.' }
+  if (agendadoPara.getTime() - Date.now() > MAX_ANTECEDENCIA_MS) return { erro: 'Agende para no máximo um ano à frente.' }
 
+  // Mídia só da pasta desta conta: nunca aceitar caminho de arquivo de outra conta.
+  const passos = d.passos.map(p => (p.tipo === 'texto' ? { ...p, variacoes: p.variacoes.filter(Boolean) } : p))
+  if (passos.some(p => ehMidia(p) && !p.caminho.startsWith(pastaDaConta(contaId)))) {
+    return { erro: 'Arquivo de mídia inválido. Envie o arquivo de novo.' }
+  }
+
+  if (d.destino.tipo === 'cliente') {
+    const { data: cliente, error } = await supabase
+      .from('clientes').select('id, nome, celular, deleted_at')
+      .eq('id', d.destino.clienteId).eq('conta_id', contaId).maybeSingle()
+    if (error) {
+      console.error('[agendamentos] leitura do cliente falhou', { contaId, error })
+      return { erro: 'Não foi possível ler o cliente. Tente de novo.' }
+    }
+    if (!cliente || cliente.deleted_at) return { erro: 'Cliente não encontrado.' }
+    const celular = cliente.celular ? normalizarCelular(cliente.celular) : null
+    if (!celular) return { erro: 'Este cliente não tem um celular válido cadastrado. Digite o número.' }
+    return { cliente_id: cliente.id, celular, nome: cliente.nome?.trim() || null, passos, agendado_para: agendadoPara.toISOString() }
+  }
+  const celular = normalizarCelular(d.destino.celular)
+  if (!celular) return { erro: 'Número de WhatsApp inválido. Use DDD + número, por exemplo 21 99999-0000.' }
+  return { cliente_id: null, celular, nome: d.destino.nome || null, passos, agendado_para: agendadoPara.toISOString() }
+}
+
+export async function criarEnvioAgendadoAction(input: AgendamentoEntrada): Promise<Result> {
   try {
     const { supabase, contaId } = await getConta()
-
-    // Mídia só da pasta desta conta: nunca aceitar caminho de arquivo de outra conta.
-    const passos = d.passos.map(p => (p.tipo === 'texto' ? { ...p, variacoes: p.variacoes.filter(Boolean) } : p))
-    if (passos.some(p => ehMidia(p) && !p.caminho.startsWith(pastaDaConta(contaId)))) {
-      return { error: 'Arquivo de mídia inválido. Envie o arquivo de novo.' }
-    }
-
-    let destino: { cliente_id: string | null; celular: string; nome: string | null }
-    if (d.destino.tipo === 'cliente') {
-      const { data: cliente, error } = await supabase
-        .from('clientes').select('id, nome, celular, deleted_at')
-        .eq('id', d.destino.clienteId).eq('conta_id', contaId).maybeSingle()
-      if (error) {
-        console.error('[agendamentos] leitura do cliente falhou', { contaId, error })
-        return { error: 'Não foi possível ler o cliente. Tente de novo.' }
-      }
-      if (!cliente || cliente.deleted_at) return { error: 'Cliente não encontrado.' }
-      const celular = cliente.celular ? normalizarCelular(cliente.celular) : null
-      if (!celular) return { error: 'Este cliente não tem um celular válido cadastrado. Digite o número.' }
-      destino = { cliente_id: cliente.id, celular, nome: cliente.nome?.trim() || null }
-    } else {
-      const celular = normalizarCelular(d.destino.celular)
-      if (!celular) return { error: 'Número de WhatsApp inválido. Use DDD + número, por exemplo 21 99999-0000.' }
-      destino = { cliente_id: null, celular, nome: d.destino.nome || null }
-    }
+    const colunas = await colunasDoAgendamento(input, supabase, contaId)
+    if ('erro' in colunas) return { error: colunas.erro }
 
     const { data, error } = await supabase
       .from('envios_agendados')
-      .insert({ conta_id: contaId, ...destino, passos, agendado_para: agendadoPara.toISOString() })
+      .insert({ conta_id: contaId, ...colunas })
       .select('id')
       .single()
     if (error) {
@@ -82,6 +88,37 @@ export async function criarEnvioAgendadoAction(input: AgendamentoEntrada): Promi
 
     revalidatePath('/agendamentos')
     return { error: null, id: data.id }
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'Erro desconhecido.' }
+  }
+}
+
+/**
+ * Edita pessoa, dia, hora e mensagem de um envio que ainda não saiu. Só grava se continuar
+ * pendente: se o cron levou o envio nesse meio-tempo, responde que já saiu.
+ */
+export async function atualizarEnvioAgendadoAction(id: string, input: AgendamentoEntrada): Promise<Result> {
+  if (!z.string().uuid().safeParse(id).success) return { error: 'Agendamento inválido.' }
+  try {
+    const { supabase, contaId } = await getConta()
+    const colunas = await colunasDoAgendamento(input, supabase, contaId)
+    if ('erro' in colunas) return { error: colunas.erro }
+
+    const { data, error } = await supabase
+      .from('envios_agendados')
+      .update({ ...colunas, erro: null, aviso: null })
+      .eq('id', id)
+      .eq('conta_id', contaId)
+      .eq('status', 'pendente')
+      .select('id')
+      .maybeSingle()
+    if (error) {
+      console.error('[agendamentos] editar falhou', { contaId, id, error })
+      return { error: 'Não foi possível salvar. Tente de novo.' }
+    }
+    if (!data) return { error: 'Este envio já saiu ou foi cancelado, por isso não dá mais para editar.' }
+    revalidatePath('/agendamentos')
+    return { error: null, id }
   } catch (e) {
     return { error: e instanceof Error ? e.message : 'Erro desconhecido.' }
   }
